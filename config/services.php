@@ -34,5 +34,15 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'irn' => [
+    'url_auth'    => env('IRN_URL_AUTH',  'http://powergstservice.microvistatech.com/api/MVEINVAuthenticate/EINVAuthentication'),
+    'url_generate'=> env('IRN_URL_GEN',   'http://powergstservice.microvistatech.com/api/MVEINVAuthenticate/EINVGeneration'),
+    'mv_api_key'  => env('IRN_MV_API_KEY',  'IPSZfNmcQCUNMfx'),
+    'mv_secret'   => env('IRN_MV_SECRET',   'NyWQEq+4YWungcL1hfzGQA=='),
+    'test_gstin'  => env('IRN_TEST_GSTIN',  '24AAAPI3182M002'),
+    'test_user'   => env('IRN_TEST_USER',   'test_24_001'),
+    'test_pass'   => env('IRN_TEST_PASS',   'Trial63$value'),
+    'test_mode'   => env('IRN_TEST_MODE',   true),
+],
 
 ];
