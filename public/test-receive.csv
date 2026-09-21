@@ -1,0 +1,3 @@
+S.No,Invoice Date,Invoice No,Sku Code,Sku Id,Qty,Sale Date,Remarks
+1,15/09/2026,INV-TEST-001,1KA2_MGO_1RS,17303,50,15/09/2026,API receive test
+2,15/09/2026,INV-TEST-001,1KA2_MGO_1RS,17303,30,15/09/2026,API receive test 2nd

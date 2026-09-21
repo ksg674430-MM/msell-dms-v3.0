@@ -204,12 +204,18 @@ class IrnController extends Controller
             $cgstVal += $cgst;
             $sgstVal += $sgst;
         }
+$discount    = (float) ($challan->discount_amt ?? 0);
+$amountFlat  = (float) ($challan->amount ?? 0);
+$amountRound = (float) ($challan->amount_round ?? 0);
 
-        $discount   = (float) ($challan->discount_amt ?? 0);
-        $amountRound = (float) ($challan->amount_round ?? 0);
-        $amountFlat  = (float) ($challan->amount ?? 0);
-        $rndOff      = round($amountRound - $amountFlat, 2);
+// Legacy rows may have amount_round = 0 (pre-rounding-tracking).
+// GST requires RndOffAmt to be in [-99.99, +99.99], so recompute it.
+if ($amountRound == 0 || abs($amountRound - $amountFlat) > 100) {
+    $amountRound = round($amountFlat);
+}
 
+$rndOff = round($amountRound - $amountFlat, 2);
+$rndOff = max(-99.99, min(99.99, $rndOff));
         return [
             'Version'   => '1.01',
             'TranDtls'  => [

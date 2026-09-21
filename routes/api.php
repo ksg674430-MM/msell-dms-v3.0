@@ -12,11 +12,15 @@ use App\Http\Controllers\Api\OpeningStockController;
 use App\Http\Controllers\Api\ChallanController;
 use App\Http\Controllers\Api\ChallanHelperController;
 use App\Http\Controllers\Api\SalesOrderController;
+use App\Http\Controllers\Api\StockImportController;
 
 
 use App\Http\Controllers\Api\DgrClaimController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\IrnController;
+
+
+use App\Http\Controllers\Api\PurchaseOrderController;
 
 
 
@@ -46,8 +50,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);//13
     Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);//14
     Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);//15
+    Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);
+    Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);
 
-    //==========Need to be tested=============//
+    
 
      // Challan helpers (must come before /{id})
     Route::get   ('/challans/next-number',                [ChallanController::class, 'nextNumber']);//16
@@ -73,14 +79,25 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get   ('/invoices',              [InvoiceController::class, 'index']);//28
     Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);//29
 
-    // IRN
+    // IRN this need to be tested too so do not check it yet
     Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);//30
 
-    // DGR claims
+    //========== DGR claims these api's need to be TESTED =================//
     Route::get   ('/dgr-claims',                [DgrClaimController::class, 'index']);//31
     Route::get   ('/dgr-claims/check',          [DgrClaimController::class, 'check']);//32
     Route::get   ('/dgr-claims/details',        [DgrClaimController::class, 'details']);//33
     Route::post  ('/dgr-claims',                [DgrClaimController::class, 'store']);//34
     Route::post  ('/dgr-claims/process',        [DgrClaimController::class, 'process']);//35
     Route::post  ('/dgr-claims/approve',        [DgrClaimController::class, 'approve']);//36
+
+    Route::prefix('purchase-orders')->group(function () {
+    Route::get('/',            [PurchaseOrderController::class, 'index']);
+    Route::get('/form-data',   [PurchaseOrderController::class, 'formData']);
+    Route::post('/',           [PurchaseOrderController::class, 'store']);
+
+    Route::get('/{id}',        [PurchaseOrderController::class, 'show']);
+    Route::put('/{id}',        [PurchaseOrderController::class, 'update']);
+    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);
+});
+
 });    
