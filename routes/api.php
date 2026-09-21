@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\IrnController;
 
 use App\Http\Controllers\Api\PurchaseOrderController;
 
+use App\Http\Controllers\Api\MenuController;
+
 
 
 Route::post('/login', [AuthController::class, 'login']);//1
@@ -29,6 +31,8 @@ Route::post('/login', [AuthController::class, 'login']);//1
 Route::middleware('auth:sanctum')->group(function () {
     // Auth
     Route::get('/me',      [AuthController::class, 'me']);//2
+    //Menu controller
+    Route::get('/menu', [MenuController::class, 'index']);
     Route::post('/logout', [AuthController::class, 'logout']);//3
 
     // Dashboard
