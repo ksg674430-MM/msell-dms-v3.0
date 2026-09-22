@@ -400,6 +400,7 @@ class ChallanController extends Controller
  *   ]
  * }
  */
+
 public function fromOrders(Request $request): JsonResponse
 {
     $request->validate([

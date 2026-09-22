@@ -104,4 +104,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);
 });
 
+
+
 });    

@@ -67,187 +67,257 @@ class IrnController extends Controller
 
     /* ================= helpers ================= */
 
-    private function buildPayload(object $challan, int $companyId): array
-    {
-        $dealerId   = (int) $challan->ch_dealer_id;
-        $retailerId = $challan->ch_retailer_id;
+ private function buildPayload(object $challan, int $companyId): array
+{
+    $dealerId   = (int) $challan->ch_dealer_id;
+    $retailerId = $challan->ch_retailer_id;
 
-        $dealer   = DB::selectOne("SELECT * FROM dealer WHERE id = ? LIMIT 1", [$dealerId]);
-        $retailer = DB::selectOne("SELECT * FROM retailer WHERE id = ? LIMIT 1", [$retailerId]);
+    // ---------- 1. Load parties ----------
+    $dealer   = DB::selectOne("SELECT * FROM dealer   WHERE id = ? LIMIT 1", [$dealerId]);
+    $retailer = DB::selectOne("SELECT * FROM retailer WHERE id = ? LIMIT 1", [$retailerId]);
 
-        if (!$dealer || !$retailer) {
-            return ['error' => 'Dealer or retailer not found.'];
-        }
-
-        $dealerLoc = DB::selectOne(
-            "SELECT l3.state_code, l6.name AS city_name
-               FROM dealer_location_rate_list dlrl
-               JOIN location_7 l7 ON l7.id = dlrl.location_id
-               JOIN location_6 l6 ON l6.id = l7.location_6_id
-               JOIN location_5 l5 ON l5.id = l6.location_5_id
-               JOIN location_4 l4 ON l4.id = l5.location_4_id
-               JOIN location_3 l3 ON l3.id = l4.location_3_id
-              WHERE dlrl.dealer_id = ? AND dlrl.company_id = ?
-              LIMIT 1",
-            [$dealerId, $companyId]
-        );
-
-        $retailerLoc = DB::selectOne(
-            "SELECT l3.state_code, l6.name AS city_name
-               FROM dealer_location_rate_list dlrl
-               JOIN retailer r ON r.location_id = dlrl.location_id
-               JOIN location_7 l7 ON l7.id = dlrl.location_id
-               JOIN location_6 l6 ON l6.id = l7.location_6_id
-               JOIN location_5 l5 ON l5.id = l6.location_5_id
-               JOIN location_4 l4 ON l4.id = l5.location_4_id
-               JOIN location_3 l3 ON l3.id = l4.location_3_id
-              WHERE r.id = ? AND dlrl.company_id = ?
-              LIMIT 1",
-            [$retailerId, $companyId]
-        );
-
-        if (empty($dealerLoc->state_code)) return ['error' => 'Seller state code missing.'];
-        if (empty($retailerLoc->state_code)) return ['error' => 'Buyer state code missing.'];
-
-        $invoiceNo   = $challan->ch_no;
-        $invoiceDate = date('d/m/Y', strtotime($challan->ch_date));
-
-        $seller = [
-            'Gstin' => (string) $dealer->tin_no,
-            'LglNm' => $dealer->name,
-            'TrdNm' => $dealer->name,
-            'Addr1' => $dealer->address,
-            'Addr2' => null,
-            'Loc'   => $dealerLoc->city_name,
-            'Pin'   => (int) $dealer->pin_no,
-            'Stcd'  => $dealerLoc->state_code,
-            'Ph'    => $dealer->landline ?: $dealer->other_numbers ?: '',
-            'Em'    => $dealer->email ?: '',
-        ];
-
-        $buyer = [
-            'Gstin' => (string) ($retailer->tin_no ?? ''),
-            'LglNm' => $retailer->name,
-            'TrdNm' => $retailer->name,
-            'Pos'   => $retailerLoc->state_code,
-            'Addr1' => $retailer->address,
-            'Addr2' => null,
-            'Loc'   => $retailerLoc->city_name,
-            'Pin'   => (int) $retailer->pin_no,
-            'Stcd'  => $retailerLoc->state_code,
-            'Ph'    => $retailer->landline ?: $retailer->other_numbers ?: '',
-            'Em'    => $retailer->email ?: '',
-        ];
-
-        $items = DB::select(
-            "SELECT cod.*, cp.name AS product_name, cp.hsn_code
-               FROM challan_order_details cod
-               JOIN catalog_product cp ON cp.id = cod.product_id
-              WHERE cod.ch_id = ?",
-            [$challan->id]
-        );
-
-        $sameState = $dealerLoc->state_code === $retailerLoc->state_code;
-        $assVal = $igstVal = $cgstVal = $sgstVal = 0.0;
-        $itemList = [];
-
-        foreach ($items as $idx => $it) {
-            $qty      = (float) $it->qty;
-            $rate     = round((float) $it->product_rate, 2);
-            $freeQty  = (float) $it->free_qty;
-            $preDisc  = round($qty * $rate, 2);
-            $disc     = (float) $it->cd_amt + (float) $it->spl_disc_val + (float) $it->cash_amt + (float) $it->dis_amt;
-            $disc     = round($disc, 2);
-            $taxable  = round($preDisc - $disc, 2);
-            $gstRate  = (float) $it->tax;
-            $gstAmt   = round((float) $it->vat_amt, 2);
-
-            if ($sameState) {
-                $cgst = round($gstAmt / 2, 2);
-                $sgst = round($gstAmt / 2, 2);
-                $igst = 0.0;
-            } else {
-                $cgst = 0.0; $sgst = 0.0; $igst = $gstAmt;
-            }
-
-            $lineTotal = round($taxable + $gstAmt, 2);
-
-            $itemList[] = [
-                'SlNo'      => (string) ($idx + 1),
-                'PrdDesc'   => $it->product_name,
-                'IsServc'   => 'N',
-                'HsnCd'     => $it->hsn_code,
-                'Qty'       => $qty,
-                'FreeQty'   => $freeQty,
-                'Unit'      => 'PCS',
-                'UnitPrice' => $rate,
-                'TotAmt'    => $preDisc,
-                'Discount'  => $disc,
-                'PreTaxVal' => 0,
-                'AssAmt'    => $taxable,
-                'GstRt'     => $gstRate,
-                'IgstAmt'   => $igst,
-                'CgstAmt'   => $cgst,
-                'SgstAmt'   => $sgst,
-                'CesRt'     => 0,
-                'CesAmt'    => 0,
-                'CesNonAdvlAmt' => 0,
-                'StateCesRt'    => 0,
-                'StateCesAmt'   => 0,
-                'StateCesNonAdvlAmt' => 0,
-                'OthChrg'   => 0,
-                'TotItemVal'=> $lineTotal,
-            ];
-
-            $assVal  += $taxable;
-            $igstVal += $igst;
-            $cgstVal += $cgst;
-            $sgstVal += $sgst;
-        }
-$discount    = (float) ($challan->discount_amt ?? 0);
-$amountFlat  = (float) ($challan->amount ?? 0);
-$amountRound = (float) ($challan->amount_round ?? 0);
-
-// Legacy rows may have amount_round = 0 (pre-rounding-tracking).
-// GST requires RndOffAmt to be in [-99.99, +99.99], so recompute it.
-if ($amountRound == 0 || abs($amountRound - $amountFlat) > 100) {
-    $amountRound = round($amountFlat);
-}
-
-$rndOff = round($amountRound - $amountFlat, 2);
-$rndOff = max(-99.99, min(99.99, $rndOff));
-        return [
-            'Version'   => '1.01',
-            'TranDtls'  => [
-                'TaxSch'     => 'GST',
-                'SupTyp'     => 'B2B',
-                'IgstOnIntra'=> 'N',
-                'RegRev'     => null,
-                'EcmGstin'   => null,
-            ],
-            'DocDtls'   => [
-                'Typ' => 'INV',
-                'No'  => $invoiceNo,
-                'Dt'  => $invoiceDate,
-            ],
-            'SellerDtls' => $seller,
-            'BuyerDtls'  => $buyer,
-            'ItemList'   => $itemList,
-            'ValDtls'    => [
-                'AssVal'    => round($assVal, 2),
-                'IgstVal'   => round($igstVal, 2),
-                'CgstVal'   => round($cgstVal, 2),
-                'SgstVal'   => round($sgstVal, 2),
-                'CesVal'    => 0,
-                'StCesVal'  => 0,
-                'Discount'  => round($discount, 2),
-                'OthChrg'   => 0,
-                'RndOffAmt' => round($rndOff, 2),
-                'TotInvVal' => round($amountRound, 2),
-            ],
-        ];
+    if (!$dealer) {
+        return ['error' => "Dealer not found: {$dealerId}"];
     }
 
+    // ---------- 2. Seller GSTIN guard (fail fast, no GSP bounce) ----------
+    $sellerGstin = strtoupper(trim((string) ($dealer->tin_no ?? '')));
+
+    if (strlen($sellerGstin) !== 15) {
+        return ['error' => sprintf(
+            "Seller GSTIN invalid for dealer_id=%s: '%s' (len=%d). Fix dealer.tin_no.",
+            $dealerId, $sellerGstin, strlen($sellerGstin)
+        )];
+    }
+    if (!preg_match('/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/', $sellerGstin)) {
+        return ['error' => "Seller GSTIN format invalid: '{$sellerGstin}'"];
+    }
+
+    // ---------- 3. Seller location (state + city) ----------
+    $dealerLoc = DB::selectOne(
+        "SELECT l3.state_code, l6.name AS city_name
+           FROM dealer_location_rate_list dlrl
+           JOIN location_7 l7 ON l7.id = dlrl.location_id
+           JOIN location_6 l6 ON l6.id = l7.location_6_id
+           JOIN location_5 l5 ON l5.id = l6.location_5_id
+           JOIN location_4 l4 ON l4.id = l5.location_4_id
+           JOIN location_3 l3 ON l3.id = l4.location_3_id
+          WHERE dlrl.dealer_id = ? AND dlrl.company_id = ?
+          LIMIT 1",
+        [$dealerId, $companyId]
+    );
+
+    $sellerStateCode = !empty($dealerLoc->state_code)
+        ? str_pad((string) $dealerLoc->state_code, 2, '0', STR_PAD_LEFT)
+        : substr($sellerGstin, 0, 2);       // fall back to GSTIN prefix
+
+    $sellerCity = $dealerLoc->city_name ?? ($dealer->city ?? 'NA');
+
+    // ---------- 4. Buyer GSTIN / URP / B2C handling ----------
+    $buyerGstinRaw = strtoupper(trim((string) ($retailer->tin_no ?? '')));
+
+    $buyerUnregistered = $buyerGstinRaw === ''
+        || $buyerGstinRaw === '0'
+        || $buyerGstinRaw === 'URP'
+        || strlen($buyerGstinRaw) !== 15;
+
+    $buyerGstin = $buyerUnregistered ? 'URP' : $buyerGstinRaw;
+    $supTyp     = $buyerUnregistered ? 'B2C' : 'B2B';
+
+    // ---------- 5. Buyer location (state + city), POS fallback ----------
+    $retailerLoc = DB::selectOne(
+        "SELECT l3.state_code, l6.name AS city_name
+           FROM dealer_location_rate_list dlrl
+           JOIN retailer r ON r.location_id = dlrl.location_id
+           JOIN location_7 l7 ON l7.id = dlrl.location_id
+           JOIN location_6 l6 ON l6.id = l7.location_6_id
+           JOIN location_5 l5 ON l5.id = l6.location_5_id
+           JOIN location_4 l4 ON l4.id = l5.location_4_id
+           JOIN location_3 l3 ON l3.id = l4.location_3_id
+          WHERE r.id = ? AND dlrl.company_id = ?
+          LIMIT 1",
+        [$retailerId, $companyId]
+    );
+
+    // Buyer POS — registered: use their GSTIN prefix, else location, else seller state
+    if (!$buyerUnregistered && ctype_digit(substr($buyerGstin, 0, 2))) {
+        $buyerStateCode = substr($buyerGstin, 0, 2);
+    } elseif (!empty($retailerLoc->state_code)) {
+        $buyerStateCode = str_pad((string) $retailerLoc->state_code, 2, '0', STR_PAD_LEFT);
+    } else {
+        $buyerStateCode = $sellerStateCode;   // B2C fallback → intra-state
+    }
+
+    $buyerCity = $retailerLoc->city_name ?? ($retailer->city ?? $sellerCity);
+
+    // ---------- 6. Invoice header ----------
+    $invoiceNo   = (string) $challan->ch_no;
+    $invoiceDate = date('d/m/Y', strtotime((string) $challan->ch_date));
+
+    // ---------- 7. Load line items ----------
+    $items = DB::select(
+        "SELECT cod.*, cp.name AS product_name, cp.hsn_code
+           FROM challan_order_details cod
+           JOIN catalog_product cp ON cp.id = cod.product_id
+          WHERE cod.ch_id = ?",
+        [$challan->id]
+    );
+
+    if (empty($items)) {
+        return ['error' => "No line items for challan {$challan->id}"];
+    }
+
+    // ---------- 8. Build seller / buyer blocks ----------
+    $seller = [
+        'Gstin' => $sellerGstin,
+        'LglNm' => (string) $dealer->name,
+        'TrdNm' => (string) $dealer->name,
+        'Addr1' => (string) ($dealer->address ?? 'NA'),
+        'Addr2' => null,
+        'Loc'   => (string) $sellerCity,
+        'Pin'   => (int) ($dealer->pin_no ?? 0) ?: 110001,
+        'Stcd'  => $sellerStateCode,
+        'Ph'    => (string) ($dealer->landline ?? $dealer->other_numbers ?? ''),
+        'Em'    => (string) ($dealer->email ?? ''),
+    ];
+
+    $buyer = [
+        'Gstin' => $buyerGstin,                    // 'URP' when unregistered
+        'LglNm' => (string) ($retailer->name ?? 'Cash Sale'),
+        'TrdNm' => (string) ($retailer->name ?? 'Cash Sale'),
+        'Pos'   => $buyerStateCode,
+        'Addr1' => (string) ($retailer->address ?? 'NA'),
+        'Addr2' => null,
+        'Loc'   => (string) $buyerCity,
+        'Pin'   => (int) ($retailer->pin_no ?? 0) ?: $seller['Pin'],
+        'Stcd'  => $buyerStateCode,
+        'Ph'    => (string) ($retailer->landline ?? $retailer->other_numbers ?? ''),
+        'Em'    => (string) ($retailer->email ?? ''),
+    ];
+
+    // ---------- 9. Line-item loop ----------
+    $sameState = ($sellerStateCode === $buyerStateCode);
+
+    $assVal = $igstVal = $cgstVal = $sgstVal = 0.0;
+    $itemList = [];
+
+    foreach ($items as $idx => $it) {
+        $qty      = (float) $it->qty;
+        if ($qty <= 0) continue;
+
+        $rate     = round((float) $it->product_rate, 2);
+        $freeQty  = (float) $it->free_qty;
+        $preDisc  = round($qty * $rate, 2);
+
+        $disc = (float) ($it->cd_amt ?? 0)
+              + (float) ($it->spl_disc_val ?? 0)
+              + (float) ($it->cash_amt ?? 0)
+              + (float) ($it->dis_amt ?? 0);
+        $disc = round($disc, 2);
+
+        $taxable = round($preDisc - $disc, 2);
+        $gstRate = (float) ($it->tax ?? 18);
+        $gstAmt  = round((float) ($it->vat_amt ?? 0), 2);
+
+        if ($sameState) {
+            $cgst = round($gstAmt / 2, 2);
+            $sgst = round($gstAmt / 2, 2);
+            $igst = 0.0;
+        } else {
+            $cgst = 0.0;
+            $sgst = 0.0;
+            $igst = $gstAmt;
+        }
+
+        // HSN guard — GSP rejects empty or non-digit
+        $hsn = trim((string) ($it->hsn_code ?? ''));
+        if ($hsn === '' || !preg_match('/^[0-9]{4,8}$/', $hsn)) {
+            return ['error' => "Invalid HSN '{$hsn}' for product_id={$it->product_id}. Must be 4-8 digits."];
+        }
+
+        $lineTotal = round($taxable + $gstAmt, 2);
+
+        $itemList[] = [
+            'SlNo'               => (string) ($idx + 1),
+            'PrdDesc'            => (string) $it->product_name,
+            'IsServc'            => 'N',
+            'HsnCd'              => $hsn,
+            'Qty'                => $qty,
+            'FreeQty'            => $freeQty,
+            'Unit'               => 'PCS',
+            'UnitPrice'          => $rate,
+            'TotAmt'             => $preDisc,
+            'Discount'           => $disc,
+            'PreTaxVal'          => 0,
+            'AssAmt'             => $taxable,
+            'GstRt'              => $gstRate,
+            'IgstAmt'            => $igst,
+            'CgstAmt'            => $cgst,
+            'SgstAmt'            => $sgst,
+            'CesRt'              => 0,
+            'CesAmt'             => 0,
+            'CesNonAdvlAmt'      => 0,
+            'StateCesRt'         => 0,
+            'StateCesAmt'        => 0,
+            'StateCesNonAdvlAmt' => 0,
+            'OthChrg'            => 0,
+            'TotItemVal'         => $lineTotal,
+        ];
+
+        $assVal  += $taxable;
+        $igstVal += $igst;
+        $cgstVal += $cgst;
+        $sgstVal += $sgst;
+    }
+
+    if (empty($itemList)) {
+        return ['error' => "All line items have qty<=0 for challan {$challan->id}"];
+    }
+
+    // ---------- 10. Round-off / totals ----------
+    $discount    = (float) ($challan->discount_amt ?? 0);
+    $amountFlat  = (float) ($challan->amount ?? 0);
+    $amountRound = (float) ($challan->amount_round ?? 0);
+
+    if ($amountRound == 0 || abs($amountRound - $amountFlat) > 100) {
+        $amountRound = round($amountFlat);
+    }
+
+    $rndOff = round($amountRound - $amountFlat, 2);
+    $rndOff = max(-99.99, min(99.99, $rndOff));
+
+    // ---------- 11. Assemble ----------
+    return [
+        'Version'   => '1.01',
+        'TranDtls'  => [
+            'TaxSch'      => 'GST',
+            'SupTyp'      => $supTyp,       // 'B2C' for unregistered buyer
+            'IgstOnIntra' => 'N',
+            'RegRev'      => null,
+            'EcmGstin'    => null,
+        ],
+        'DocDtls'   => [
+            'Typ' => 'INV',
+            'No'  => $invoiceNo,
+            'Dt'  => $invoiceDate,
+        ],
+        'SellerDtls' => $seller,
+        'BuyerDtls'  => $buyer,
+        'ItemList'   => $itemList,
+        'ValDtls'    => [
+            'AssVal'    => round($assVal, 2),
+            'IgstVal'   => round($igstVal, 2),
+            'CgstVal'   => round($cgstVal, 2),
+            'SgstVal'   => round($sgstVal, 2),
+            'CesVal'    => 0,
+            'StCesVal'  => 0,
+            'Discount'  => round($discount, 2),
+            'OthChrg'   => 0,
+            'RndOffAmt' => round($rndOff, 2),
+            'TotInvVal' => round($amountRound, 2),
+        ],
+    ];
+}
     private function fetchToken(): array
     {
         $cfg = config('services.irn');
