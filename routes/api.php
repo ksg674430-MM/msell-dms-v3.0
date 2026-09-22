@@ -60,11 +60,13 @@ Route::middleware('auth:sanctum')->group(function () {
     
 
      // Challan helpers (must come before /{id})
-    Route::get   ('/challans/next-number',                [ChallanController::class, 'nextNumber']);//16
-    Route::get   ('/challans/form-data',                  [ChallanController::class, 'formData']);//17
-    Route::post  ('/challans/scheme-qty',                 [ChallanHelperController::class, 'schemeQty']);//18
+    Route::get   ('/challans/next-number',                [ChallanController::class, 'nextNumber']);
+    Route::get   ('/challans/form-data',                  [ChallanController::class, 'formData']);
+    Route::post  ('/challans/scheme-qty',                 [ChallanHelperController::class, 'schemeQty']);
     Route::post  ('/challans/scheme-rate',                [ChallanHelperController::class, 'schemeRate']);//19
     Route::get   ('/challans/product-stock/{id}',         [ChallanHelperController::class, 'productStock']);//20
+    Route::put   ('/challans/{id}',        [ChallanController::class, 'update']);
+    Route::post  ('/challans/{id}/cancel', [ChallanController::class, 'cancel']);
 
     // Challan CRUD
     Route::get   ('/challans',                            [ChallanController::class, 'index']);//21
@@ -101,9 +103,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/{id}',        [PurchaseOrderController::class, 'show']);
     Route::put('/{id}',        [PurchaseOrderController::class, 'update']);
-    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);
-});
-
-
+    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);});
 
 });    

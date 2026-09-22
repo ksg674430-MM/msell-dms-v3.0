@@ -177,6 +177,7 @@ try {
      *   ]
      * }
      */
+    
     public function cancel(Request $request): JsonResponse
     {
         $request->validate([

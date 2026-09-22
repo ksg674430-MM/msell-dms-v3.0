@@ -6,11 +6,15 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 class ChallanController extends Controller
 {
-    /* ================== LIST ================== */
-
+    /* =========================================================
+     |  LIST
+     |  GET /api/challans
+     |  Query: from_date, to_date, ch_no, retailer_id, page
+     | ========================================================= */
     public function index(Request $request): JsonResponse
     {
         $user     = $request->user();
@@ -21,15 +25,19 @@ class ChallanController extends Controller
 
         if ($from = $request->input('from_date')) {
             $where[]    = "DATE(co.ch_date) >= ?";
-            $bindings[] = $from;
+            $bindings[] = $this->parseDate($from) ?: $from;
         }
         if ($to = $request->input('to_date')) {
             $where[]    = "DATE(co.ch_date) <= ?";
-            $bindings[] = $to;
+            $bindings[] = $this->parseDate($to) ?: $to;
         }
         if ($chNo = $request->input('ch_no')) {
             $where[]    = "co.ch_no LIKE ?";
             $bindings[] = "%{$chNo}%";
+        }
+        if ($retailerId = $request->input('retailer_id')) {
+            $where[]    = "co.ch_retailer_id = ?";
+            $bindings[] = (int) $retailerId;
         }
 
         $whereSql = implode(' AND ', $where);
@@ -56,8 +64,10 @@ class ChallanController extends Controller
         ]);
     }
 
-    /* ================== SHOW ONE ================== */
-
+    /* =========================================================
+     |  SHOW ONE
+     |  GET /api/challans/{id}
+     | ========================================================= */
     public function show(Request $request, $id): JsonResponse
     {
         $user     = $request->user();
@@ -80,14 +90,16 @@ class ChallanController extends Controller
             ], 404);
         }
 
+        // HSN is stored per line; fall back to catalog_product when blank
         $items = DB::select(
             "SELECT cod.*,
-                    cv.product_name,
-                    cv.itemcode,
-                    cv.qty_per_case,
-                    cv.hsn_code_view AS hsn_code
+                    COALESCE(cp.name, cv.product_name)  AS product_name,
+                    COALESCE(cp.itemcode, cv.itemcode)  AS itemcode,
+                    cp.quantity_per_case,
+                    COALESCE(cod.hsn_code, cp.hsn_code) AS hsn_code_resolved
                FROM challan_order_details cod
-               LEFT JOIN catalog_view cv ON cv.product_id = cod.product_id
+               LEFT JOIN catalog_product cp ON cp.id = cod.product_id
+               LEFT JOIN catalog_view    cv ON cv.product_id = cod.product_id
               WHERE cod.ch_id = ?
               ORDER BY cod.id ASC",
             [$id]
@@ -100,24 +112,30 @@ class ChallanController extends Controller
         ]);
     }
 
-    /* ================== NEXT CH NO ================== */
-
+    /* =========================================================
+     |  NEXT NUMBER
+     |  GET /api/challans/next-number
+     | ========================================================= */
     public function nextNumber(Request $request): JsonResponse
     {
-        $user     = $request->user();
-        $dpId     = (int) $user->getKey();
-        $dealerId = (int) $user->dealer_id;
+        $user      = $request->user();
+        $dpId      = (int) $user->getKey();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) $user->company_id;
 
         return response()->json([
             'status'    => true,
-            'ch_no'     => $this->generateChNo($dpId, $dealerId),
+            'ch_no'     => $this->generateChNo($dpId, $dealerId, $companyId),
             'dpId'      => $dpId,
             'dealer_id' => $dealerId,
+            'company_id'=> $companyId,
         ]);
     }
 
-    /* ================== FORM BOOTSTRAP ================== */
-
+    /* =========================================================
+     |  FORM BOOTSTRAP
+     |  GET /api/challans/form-data
+     | ========================================================= */
     public function formData(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -125,8 +143,9 @@ class ChallanController extends Controller
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) $user->company_id;
         $stateId   = (int) $user->state_id;
+        $roleName  = $this->resolveRoleName($user->role_id);
 
-        // Retailers with beat (location_7)
+        // Retailers (DISTRIBUTOR)
         $retailers = DB::select(
             "SELECT r.id, CONCAT_WS(' ', r.name, '[', l7.name, ']') AS name
                FROM retailer r
@@ -137,50 +156,61 @@ class ChallanController extends Controller
             [$dealerId]
         );
 
-        // Field force users
-        $users = DB::select(
-            "SELECT DISTINCT d.user_id AS id,
-                    CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name,
-                              '[', rl.rolename, ']') AS name
-               FROM dealer_location_rate_list d
-               INNER JOIN person       p  ON p.id  = d.user_id
-               INNER JOIN person_login pl ON pl.person_id = d.user_id
-               INNER JOIN _role        rl ON rl.role_id   = p.role_id
-              WHERE pl.person_status = 1
-                AND d.dealer_id = ?
-              ORDER BY p.first_name",
-            [$dealerId]
-        );
+        // Field force (DISTRIBUTOR only)
+        $users = [];
+        if ($roleName === 'DISTRIBUTOR') {
+            $users = DB::select(
+                "SELECT DISTINCT d.user_id AS id,
+                        CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name,
+                                  '[', rl.rolename, ']') AS name
+                   FROM dealer_location_rate_list d
+                   INNER JOIN person       p  ON p.id  = d.user_id
+                   INNER JOIN person_login pl ON pl.person_id = d.user_id
+                   INNER JOIN _role        rl ON rl.role_id   = p.role_id
+                  WHERE pl.person_status = 1
+                    AND d.dealer_id = ?
+                  ORDER BY p.first_name",
+                [$dealerId]
+            );
+        }
 
-        // Products with stock > 0 for this dealer
+        // Products with available stock
         $products = DB::select(
             "SELECT cp.id,
-                    CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name
+                    CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name,
+                    cp.quantity_per_case,
+                    cp.hsn_code,
+                    COALESCE(SUM(s.qty), 0) AS available_stock
                FROM catalog_product cp
-               INNER JOIN stock s ON s.product_id = cp.id
-              WHERE s.dealer_id = ?
-                AND s.qty > 0
-                AND cp.status = 1
+               LEFT JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ?
+              WHERE cp.status = 1
                 AND cp.company_id = ?
               GROUP BY cp.id
+              HAVING available_stock > 0
               ORDER BY cp.id",
             [$dealerId, $companyId]
         );
 
-        // Session year + state
+        // Session year
         $sessionRow  = DB::selectOne("SELECT * FROM session WHERE action = '1' LIMIT 1");
         $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
-        $stateRow    = DB::selectOne("SELECT * FROM state WHERE stateid = ? LIMIT 1", [$stateId]);
+
+        // State — try `id` first, fall back to `stateid`
+        $stateRow = DB::selectOne("SELECT * FROM state WHERE id = ? LIMIT 1", [$stateId]);
+        if (!$stateRow) {
+            $stateRow = DB::selectOne("SELECT * FROM state WHERE stateid = ? LIMIT 1", [$stateId]);
+        }
 
         return response()->json([
             'status'       => true,
+            'role'         => $roleName,
             'retailers'    => $retailers,
             'users'        => $users,
             'products'     => $products,
             'session'      => $sessionRow,
             'session_year' => $sessionYear,
             'state'        => $stateRow,
-            'next_ch_no'   => $this->generateChNo($dpId, $dealerId),
+            'next_ch_no'   => $this->generateChNo($dpId, $dealerId, $companyId),
             'dealer_id'    => $dealerId,
             'company_id'   => $companyId,
             'state_id'     => $stateId,
@@ -188,8 +218,14 @@ class ChallanController extends Controller
         ]);
     }
 
-    /* ================== SAVE ================== */
-
+    /* =========================================================
+     |  SAVE
+     |  POST /api/challans
+     |
+     |  Accepts both d/m/Y and Y-m-d for ch_date / mfg_date.
+     |  Derived fields (vat_amt, taxable_amt, amount) are
+     |  optional — server computes when missing.
+     | ========================================================= */
     public function store(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -197,106 +233,163 @@ class ChallanController extends Controller
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) $user->company_id;
 
-        $request->validate([
-            'ch_date'                     => ['required', 'date_format:Y-m-d'],
+        $v = Validator::make($request->all(), [
+            'ch_date'                     => ['required', 'string'],
             'retailer_id'                 => ['required', 'integer'],
+            'remark'                      => ['nullable', 'string', 'max:255'],
+            'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
             'items'                       => ['required', 'array', 'min:1'],
             'items.*.product_id'          => ['required', 'integer'],
             'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
-            'items.*.rate'                => ['required', 'numeric'],
-            'items.*.mrp'                 => ['required', 'numeric'],
-            'items.*.vat'                 => ['required', 'numeric'],
-            'items.*.vat_amt'             => ['required', 'numeric'],
-            'items.*.taxable_amt'         => ['required', 'numeric'],
-            'items.*.amount'              => ['required', 'numeric'],
-            'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'items.*.rate'                => ['required', 'numeric', 'min:0'],
+            'items.*.mrp'                 => ['nullable', 'numeric'],
+            'items.*.vat'                 => ['nullable', 'numeric'],
+            'items.*.vat_amt'             => ['nullable', 'numeric'],
+            'items.*.taxable_amt'         => ['nullable', 'numeric'],
+            'items.*.amount'              => ['nullable', 'numeric'],
         ]);
+        if ($v->fails()) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Validation failed.',
+                'errors'  => $v->errors(),
+            ], 422);
+        }
+
+        // Normalize date
+        $chDate = $this->parseDate($request->input('ch_date'));
+        if (!$chDate) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Invalid ch_date. Use dd/mm/yyyy or yyyy-mm-dd.',
+            ], 422);
+        }
+
+        $retailerId = (int) $request->input('retailer_id');
+
+        // Retailer must belong to this dealer
+        $retailerOk = DB::selectOne(
+            "SELECT id FROM retailer WHERE id = ? AND dealer_id = ? LIMIT 1",
+            [$retailerId, $dealerId]
+        );
+        if (!$retailerOk) {
+            return response()->json([
+                'status'  => false,
+                'message' => "Retailer {$retailerId} not found for this dealer.",
+            ], 404);
+        }
 
         $items       = $request->input('items');
         $discountPer = (float) ($request->input('discount_per') ?? 0);
-        $chDate      = $request->input('ch_date');
-        $retailerId  = (int) $request->input('retailer_id');
         $remark      = (string) $request->input('remark', '');
 
+        // Session year
         $sessionYear = DB::selectOne("SELECT sesId FROM session_year ORDER BY sesId DESC LIMIT 1");
         $sesId       = (int) ($sessionYear->sesId ?? 0);
 
-        // Primary key for challan_order — mirrors legacy dealer_id + ymdHis
-        $chId = $dealerId . date('ymdHis');
-        $guard = 0;
-        while (DB::table('challan_order')->where('id', $chId)->exists() && $guard < 20) {
-            usleep(100000);
-            $chId = $dealerId . date('ymdHis');
-            $guard++;
+        // Allocate a unique challan id
+        $chId = null;
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $candidate = $dealerId . date('ymdHis') . random_int(100, 999);
+            $exists = DB::selectOne(
+                "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
+                [$candidate]
+            );
+            if (!$exists) {
+                $chId = $candidate;
+                break;
+            }
+        }
+        if ($chId === null) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Could not allocate a unique challan id.',
+            ], 500);
         }
 
-        $chNo = $this->generateChNo($dpId, $dealerId);
-
-        $totalAmount = 0.0;
-        foreach ($items as $it) {
-            $totalAmount += (float) $it['amount'];
-        }
-        $discountAmt = round($totalAmount * $discountPer / 100, 2);
-        $finalAmount = round($totalAmount - $discountAmt, 2);
+        $chNo = $this->generateChNo($dpId, $dealerId, $companyId);
 
         DB::beginTransaction();
         try {
-            // 1. Header
+            // ── Recompute line totals server-side
+            $normalizedItems = [];
+            $subTotal = 0.0;
+            foreach ($items as $it) {
+                $productId = (int)   $it['product_id'];
+                $qty       = (float) $it['qty'];
+                $rate      = (float) $it['rate'];
+                $mrp       = (float) ($it['mrp']         ?? 0);
+                $freeQty   = (float) ($it['free_qty']    ?? 0);
+                $tax       = (float) ($it['vat']         ?? 18);
+                $cd        = (float) ($it['cd']          ?? 0);
+                $cdType    = (int)   ($it['cd_type']     ?? 1);
+                $disType   = (int)   ($it['dis_type']    ?? 1);
+                $disAmt    = (float) ($it['dis_amt']     ?? 0);
+                $disPct    = (float) ($it['dis_percent'] ?? 0);
+                $splDiscAmt = (float) ($it['spl_disc_amt'] ?? 0);
+                $cashAmt   = (float) ($it['cash_amt']    ?? 0);
+                $batchNo   = (string)($it['batch_no']    ?? '');
+                $mfgDate   = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
+                $orderId   = (string)($it['order_id']    ?? '');
+                $userId    = (int)   ($it['user_id']     ?? 0);
+
+                $gross    = round($qty * $rate, 2);
+                $taxable  = isset($it['taxable_amt']) && $it['taxable_amt'] !== null
+                    ? (float) $it['taxable_amt']
+                    : round($gross - $cd - $disAmt - $splDiscAmt - $cashAmt, 2);
+                $vatAmt   = isset($it['vat_amt']) && $it['vat_amt'] !== null
+                    ? (float) $it['vat_amt']
+                    : round($taxable * $tax / 100, 2);
+                $amount   = isset($it['amount']) && $it['amount'] !== null
+                    ? (float) $it['amount']
+                    : round($taxable + $vatAmt, 2);
+
+                // HSN lookup
+                $hsn = (string) ($it['hsn_code'] ?? '');
+                if ($hsn === '') {
+                    $cp  = DB::selectOne("SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1", [$productId]);
+                    $hsn = (string) ($cp->hsn_code ?? '');
+                }
+
+                $normalizedItems[] = compact(
+                    'productId', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
+                    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
+                    'cd', 'cdType', 'disType', 'disAmt', 'disPct',
+                    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
+                );
+                $subTotal += $amount;
+            }
+
+            $discountAmt = round($subTotal * $discountPer / 100, 2);
+            $finalAmount = round($subTotal - $discountAmt, 2);
+            $amountRound = round($finalAmount);
+
+            // ── Header
             DB::insert(
                 "INSERT INTO challan_order
                     (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id,
-                     ch_date, company_id, sesId, invoice_type, remark,
+                     ch_date, date_added, company_id, sesId,
+                     invoice_type, remark,
                      dispatch_status, payment_status, sync_status,
                      isclaim, istarget_claim,
-                     discount_per, discount_amt, amount, remaining)
+                     discount_per, discount_amt, amount, remaining, amount_round)
                  VALUES
                     (?, ?, ?, ?, ?,
-                     ?, ?, ?, '1', ?,
+                     ?, NOW(), ?, ?,
+                     '1', ?,
                      0, '0', 1,
                      0, 0,
-                     ?, ?, ?, ?)",
+                     ?, ?, ?, ?, ?)",
                 [
                     $chId, $chNo, $dpId, $dealerId, $retailerId,
-                    $chDate, $companyId, $sesId, $remark,
-                    $discountPer, $discountAmt, $finalAmount, $finalAmount,
+                    $chDate, $companyId, $sesId,
+                    $remark,
+                    $discountPer, $discountAmt, $finalAmount, $finalAmount, $amountRound,
                 ]
             );
 
-            // 2. Items
-            foreach ($items as $it) {
-                $productId   = (int)   $it['product_id'];
-                $qty         = (float) $it['qty'];
-                $rate        = (float) $it['rate'];
-                $mrp         = (float) $it['mrp'];
-                $freeQty     = (float) ($it['free_qty']      ?? 0);
-                $tax         = (float) $it['vat'];
-                $vatAmt      = (float) $it['vat_amt'];
-                $taxableAmt  = (float) $it['taxable_amt'];
-                $batchNo     = (string)($it['batch_no']      ?? '');
-                $cd          = (float) ($it['cd']            ?? 0);
-                $cdType      = (int)   ($it['cd_type']       ?? 1);
-                $cdAmt       = (float) ($it['cd_amt']        ?? 0);
-                $disType     = (int)   ($it['dis_type']      ?? 1);
-                $disAmt      = (float) ($it['dis_amt']       ?? 0);
-                $disPercent  = (float) ($it['dis_percent']   ?? 0);
-                $splDiscType = (int)   ($it['spl_disc_type'] ?? 0);
-                $splDiscVal  = (float) ($it['spl_disc_val']  ?? 0);
-                $splDiscAmt  = (float) ($it['spl_disc_amt']  ?? 0);
-                $cashAmt     = (float) ($it['cash_amt']      ?? 0);
-                $mfgDate     = $it['mfg_date'] ?? null;
-                $orderId     = (string)($it['order_id']      ?? '');
-                $userId      = (int)   ($it['user_id']       ?? 0);
-
-                if (empty($mfgDate)) {
-                    $mfgDate = '1970-01-01';
-                }
-
-                $cv = DB::selectOne(
-                    "SELECT hsn_code_view FROM catalog_view WHERE product_id = ? LIMIT 1",
-                    [$productId]
-                );
-                $hsnCode = (string) ($cv->hsn_code_view ?? '');
-
+            // ── Lines
+            foreach ($normalizedItems as $l) {
                 DB::insert(
                     "INSERT INTO challan_order_details
                         (ch_id, product_id, hsn_code, catalog_details_id,
@@ -311,29 +404,29 @@ class ChallanController extends Controller
                          ?, ?, ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?,
-                         ?, ?, ?, ?,
+                         0, 0, ?, ?,
                          ?, ?, ?,
                          ?, ?, '', 1)",
                     [
-                        $chId, $productId, $hsnCode,
-                        $batchNo, $mfgDate, $tax, $vatAmt, $qty, $rate,
-                        $freeQty, $orderId, $userId, $mrp,
-                        $cd, $cdType, $cdAmt,
-                        $splDiscType, $splDiscVal, $splDiscAmt, $cashAmt,
-                        $disType, $disAmt, $disPercent,
-                        $taxableAmt, $taxableAmt,
+                        $chId, $l['productId'], $l['hsn'],
+                        $l['batchNo'], $l['mfgDate'], $l['tax'], $l['vatAmt'],
+                        $l['qty'], $l['rate'], $l['freeQty'],
+                        $l['orderId'], $l['userId'], $l['mrp'],
+                        $l['cd'], $l['cdType'], 0.0,
+                        $l['splDiscAmt'], $l['cashAmt'],
+                        $l['disType'], $l['disAmt'], $l['disPct'],
+                        $l['taxable'], $l['taxable'],
                     ]
                 );
 
-                // 3. Reduce `stock.remaining` FIFO by mfg asc
-                $this->reduceStock($dealerId, $productId, $qty + $freeQty);
+                $this->reduceStock($dealerId, $l['productId'], $l['qty'] + $l['freeQty']);
 
-                // 4. Mark any linked sales order lines as used
-                if ($orderId !== '') {
+                if ($l['orderId'] !== '') {
                     DB::update(
-                        "UPDATE user_sales_order_details SET status = 2
+                        "UPDATE user_sales_order_details
+                            SET status = 2
                           WHERE order_id = ? AND product_id = ?",
-                        [$orderId, $productId]
+                        [$l['orderId'], $l['productId']]
                     );
                 }
             }
@@ -346,8 +439,10 @@ class ChallanController extends Controller
                 'challan_id'   => $chId,
                 'ch_no'        => $chNo,
                 'amount'       => $finalAmount,
+                'amount_round' => $amountRound,
                 'discount_amt' => $discountAmt,
-            ]);
+                'items_count'  => count($normalizedItems),
+            ], 201);
 
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -358,17 +453,509 @@ class ChallanController extends Controller
         }
     }
 
-    /* ================== HELPERS ================== */
+    /* =========================================================
+     |  FROM ORDERS
+     |  POST /api/challans/from-orders
+     |  Builds challans from one or more sales orders.
+     | ========================================================= */
+    public function fromOrders(Request $request): JsonResponse
+    {
+        $v = Validator::make($request->all(), [
+            'ch_date'                     => ['required', 'string'],
+            'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'orders'                      => ['required', 'array', 'min:1'],
+            'orders.*.order_id'           => ['required', 'string'],
+            'orders.*.items'              => ['required', 'array', 'min:1'],
+            'orders.*.items.*.product_id' => ['required', 'integer'],
+            'orders.*.items.*.qty'        => ['required', 'numeric', 'min:0.01'],
+            'orders.*.items.*.rate'       => ['required', 'numeric', 'min:0'],
+        ]);
+        if ($v->fails()) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Validation failed.',
+                'errors'  => $v->errors(),
+            ], 422);
+        }
 
-    private function generateChNo(int $dpId, int $dealerId): string
+        $user      = $request->user();
+        $dpId      = (int) $user->getKey();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) $user->company_id;
+
+        $chDate = $this->parseDate($request->input('ch_date'));
+        if (!$chDate) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Invalid ch_date. Use dd/mm/yyyy or yyyy-mm-dd.',
+            ], 422);
+        }
+
+        $discountPer = (float) $request->input('discount_per', 0);
+
+        $sessionYear = DB::selectOne("SELECT sesId FROM session_year ORDER BY sesId DESC LIMIT 1");
+        $sesId       = (int) ($sessionYear->sesId ?? 0);
+
+        $created = [];
+        $failed  = [];
+
+        foreach ($request->input('orders') as $order) {
+            try {
+                $result = DB::transaction(function () use (
+                    $order, $chDate, $discountPer, $sesId,
+                    $dealerId, $dpId, $companyId
+                ) {
+                    $orderId = $order['order_id'];
+                    $items   = $order['items'];
+
+                    $orderRow = DB::selectOne(
+                        "SELECT * FROM user_sales_order
+                          WHERE order_id = ? AND dealer_id = ?
+                          LIMIT 1",
+                        [$orderId, $dealerId]
+                    );
+                    if (!$orderRow) {
+                        throw new \RuntimeException("Order {$orderId} not found.");
+                    }
+
+                    // Allocate unique challan id
+                    $chId = null;
+                    for ($attempt = 0; $attempt < 5; $attempt++) {
+                        $candidate = $dealerId . date('ymdHis') . random_int(100, 999);
+                        $exists = DB::selectOne(
+                            "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
+                            [$candidate]
+                        );
+                        if (!$exists) { $chId = $candidate; break; }
+                    }
+                    if ($chId === null) {
+                        throw new \RuntimeException('Could not allocate unique challan id.');
+                    }
+
+                    $chNo = $this->generateChNo($dpId, $dealerId, $companyId);
+
+                    $subTotal   = 0.0;
+                    $orderLines = [];
+
+                    foreach ($items as $it) {
+                        $productId = (int)   $it['product_id'];
+                        $qty       = (float) $it['qty'];
+                        $schQty    = (float) ($it['scheme_qty'] ?? $it['free_qty'] ?? 0);
+                        $rate      = (float) $it['rate'];
+                        $mrp       = (float) ($it['mrp']         ?? 0);
+                        $tax       = (float) ($it['vat']         ?? 18);
+                        $taxable   = (float) ($it['taxable_amt'] ?? ($qty * $rate));
+                        $vatAmt    = (float) ($it['vat_amt']     ?? round($taxable * $tax / 100, 2));
+                        $amount    = (float) ($it['amount']      ?? round($taxable + $vatAmt, 2));
+                        $batchNo   = (string)($it['batch_no']    ?? '');
+                        $mfgDate   = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
+
+                        // HSN — critical, otherwise IRN will fail on this challan
+                        $hsn = (string) ($it['hsn_code'] ?? '');
+                        if ($hsn === '') {
+                            $cp  = DB::selectOne(
+                                "SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
+                                [$productId]
+                            );
+                            $hsn = (string) ($cp->hsn_code ?? '');
+                        }
+
+                        $this->reduceStock($dealerId, $productId, $qty + $schQty);
+
+                        DB::update(
+                            "UPDATE user_sales_order_details
+                                SET status = 2
+                              WHERE order_id = ? AND product_id = ?",
+                            [$orderId, $productId]
+                        );
+
+                        $orderLines[] = compact(
+                            'productId', 'qty', 'schQty', 'rate', 'mrp',
+                            'tax', 'vatAmt', 'taxable', 'amount',
+                            'batchNo', 'mfgDate', 'hsn'
+                        );
+                        $subTotal += $amount;
+                    }
+
+                    $discAmt     = round($subTotal * $discountPer / 100, 2);
+                    $finalAmount = round($subTotal - $discAmt, 2);
+                    $amountRound = round($finalAmount);
+
+                    DB::insert(
+                        "INSERT INTO challan_order
+                            (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id, ch_user_id,
+                             ch_date, date_added, company_id, sesId,
+                             invoice_type, book_status,
+                             dispatch_status, sync_status, payment_status,
+                             remark,
+                             discount_per, discount_amt,
+                             amount, remaining, amount_round)
+                         VALUES
+                            (?, ?, ?, ?, ?, ?,
+                             ?, NOW(), ?, ?,
+                             1, 0,
+                             0, 1, '0',
+                             ?,
+                             ?, ?,
+                             ?, ?, ?)",
+                        [
+                            $chId, $chNo, $dpId, $dealerId,
+                            $orderRow->retailer_id, $orderRow->user_id,
+                            $chDate, $companyId, $sesId,
+                            $orderRow->remarks ?? '',
+                            $discountPer, $discAmt,
+                            $finalAmount, $finalAmount, $amountRound,
+                        ]
+                    );
+
+                    foreach ($orderLines as $l) {
+                        DB::insert(
+                            "INSERT INTO challan_order_details
+                                (ch_id, product_id, hsn_code, supply_status, catalog_details_id,
+                                 batch_no, tax, vat_amt, qty, product_rate, free_qty,
+                                 order_id, user_id, mrp,
+                                 dis_type, dis_amt, dis_percent,
+                                 taxable_amt, remain_amount, mfg_date, sync_status)
+                             VALUES
+                                (?, ?, ?, 0, 0,
+                                 ?, ?, ?, ?, ?, ?,
+                                 ?, ?, ?,
+                                 1, 0, 0,
+                                 ?, ?, ?, 1)",
+                            [
+                                $chId, $l['productId'], $l['hsn'],
+                                $l['batchNo'], $l['tax'], $l['vatAmt'],
+                                $l['qty'], $l['rate'], $l['schQty'],
+                                $orderId, $orderRow->user_id, $l['mrp'],
+                                $l['taxable'], $l['taxable'], $l['mfgDate'],
+                            ]
+                        );
+                    }
+
+                    DB::update(
+                        "UPDATE user_sales_order SET order_status = '1' WHERE order_id = ?",
+                        [$orderId]
+                    );
+
+                    return [
+                        'order_id' => $orderId,
+                        'ch_id'    => $chId,
+                        'ch_no'    => $chNo,
+                        'amount'   => $finalAmount,
+                    ];
+                });
+
+                $created[] = $result;
+
+            } catch (\Throwable $e) {
+                $failed[] = [
+                    'order_id' => $order['order_id'] ?? '?',
+                    'reason'   => $e->getMessage(),
+                ];
+            }
+        }
+
+        return response()->json([
+            'status'   => count($failed) === 0,
+            'message'  => sprintf('%d challan(s) created, %d failed.', count($created), count($failed)),
+            'challans' => $created,
+            'failed'   => $failed,
+        ], count($failed) > 0 && count($created) === 0 ? 500 : 200);
+    }
+
+    /* =========================================================
+ |  EDIT
+ |  PUT /api/challans/{id}
+ |
+ |  Replaces all lines. Adjusts stock.qty by the delta
+ |  between new qty and the original qty (per line), and
+ |  restores stock for any line removed entirely.
+ | ========================================================= */
+public function update(Request $request, $id): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) $user->company_id;
+
+    // Load current header (dealer-scoped)
+    $header = DB::selectOne(
+        "SELECT id, ch_no, ch_dealer_id, ch_retailer_id, ch_date
+           FROM challan_order
+          WHERE id = ? AND ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+    if (!$header) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Challan not found.',
+        ], 404);
+    }
+
+    $v = Validator::make($request->all(), [
+        'ch_date'                     => ['required', 'string'],
+        'retailer_id'                 => ['required', 'integer'],
+        'remark'                      => ['nullable', 'string', 'max:255'],
+        'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
+        'items'                       => ['required', 'array', 'min:1'],
+        'items.*.product_id'          => ['required', 'integer'],
+        'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
+        'items.*.rate'                => ['required', 'numeric', 'min:0'],
+    ]);
+    if ($v->fails()) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Validation failed.',
+            'errors'  => $v->errors(),
+        ], 422);
+    }
+
+    $chDate = $this->parseDate($request->input('ch_date'));
+    if (!$chDate) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Invalid ch_date.',
+        ], 422);
+    }
+
+    // Retailer must belong to this dealer
+    $retailerId = (int) $request->input('retailer_id');
+    $retailerOk = DB::selectOne(
+        "SELECT id FROM retailer WHERE id = ? AND dealer_id = ? LIMIT 1",
+        [$retailerId, $dealerId]
+    );
+    if (!$retailerOk) {
+        return response()->json([
+            'status'  => false,
+            'message' => "Retailer {$retailerId} not found for this dealer.",
+        ], 404);
+    }
+
+    // Load current lines so we can compute stock deltas
+    $oldLines = DB::select(
+        "SELECT id, product_id, qty, free_qty, mrp
+           FROM challan_order_details
+          WHERE ch_id = ?",
+        [$id]
+    );
+
+    // Map old: product_id => [qty, free_qty, mrp]
+    $oldMap = [];
+    foreach ($oldLines as $row) {
+        $oldMap[(int) $row->product_id] = [
+            'qty'      => (float) $row->qty,
+            'free_qty' => (float) $row->free_qty,
+            'mrp'      => (float) $row->mrp,
+        ];
+    }
+
+    $items       = $request->input('items');
+    $discountPer = (float) ($request->input('discount_per') ?? 0);
+    $remark      = (string) $request->input('remark', '');
+
+    DB::beginTransaction();
+    try {
+        // ── Normalize incoming items (server-side fallbacks)
+        $normalized = [];
+        $subTotal   = 0.0;
+
+        foreach ($items as $it) {
+            $productId  = (int)   $it['product_id'];
+            $qty        = (float) $it['qty'];
+            $rate       = (float) $it['rate'];
+            $mrp        = (float) ($it['mrp']         ?? 0);
+            $freeQty    = (float) ($it['free_qty']    ?? $it['scheme'] ?? 0);
+            $tax        = (float) ($it['vat']         ?? 18);
+            $cd         = (float) ($it['cd']          ?? 0);
+            $cdType     = (int)   ($it['cd_type']     ?? 1);
+            $cdAmt      = (float) ($it['cd_amt']      ?? 0);
+            $disType    = (int)   ($it['dis_type']    ?? 1);
+            $disAmt     = (float) ($it['dis_amt']     ?? 0);
+            $disPct     = (float) ($it['dis_percent'] ?? 0);
+            $splDiscAmt = (float) ($it['spl_disc_amt'] ?? 0);
+            $cashAmt    = (float) ($it['cash_amt']    ?? 0);
+            $batchNo    = (string)($it['batch_no']    ?? '');
+            $mfgDate    = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
+            $orderId    = (string)($it['order_id']    ?? '');
+            $userId     = (int)   ($it['user_id']     ?? 0);
+
+            $gross   = round($qty * $rate, 2);
+            $taxable = isset($it['taxable_amt']) && $it['taxable_amt'] !== null
+                ? (float) $it['taxable_amt']
+                : round($gross - $cdAmt - $disAmt - $splDiscAmt - $cashAmt, 2);
+            $vatAmt  = isset($it['vat_amt']) && $it['vat_amt'] !== null
+                ? (float) $it['vat_amt']
+                : round($taxable * $tax / 100, 2);
+            $amount  = isset($it['amount']) && $it['amount'] !== null
+                ? (float) $it['amount']
+                : round($taxable + $vatAmt, 2);
+
+            // HSN
+            $hsn = (string) ($it['hsn_code'] ?? '');
+            if ($hsn === '') {
+                $cp  = DB::selectOne("SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1", [$productId]);
+                $hsn = (string) ($cp->hsn_code ?? '');
+            }
+
+            // ── Stock delta
+            $oldQty  = $oldMap[$productId]['qty']      ?? 0;
+            $oldFree = $oldMap[$productId]['free_qty'] ?? 0;
+            $oldTot  = $oldQty + $oldFree;
+            $newTot  = $qty + $freeQty;
+            $delta   = $newTot - $oldTot;
+
+            if ($delta > 0) {
+                // More stock going out → reduce
+                $this->reduceStock($dealerId, $productId, $delta);
+            } elseif ($delta < 0) {
+                // Less stock going out → give back
+                $this->restoreStock($dealerId, $productId, abs($delta), $mrp ?: ($oldMap[$productId]['mrp'] ?? 0));
+            }
+
+            $normalized[] = compact(
+                'productId', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
+                'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
+                'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
+                'splDiscAmt', 'cashAmt', 'orderId', 'userId'
+            );
+            $subTotal += $amount;
+        }
+
+        // ── Restore stock for any old line NOT present in the new set
+        $newProductIds = array_map(fn ($l) => $l['productId'], $normalized);
+        foreach ($oldMap as $oldProductId => $oldLine) {
+            if (!in_array($oldProductId, $newProductIds, true)) {
+                $this->restoreStock(
+                    $dealerId,
+                    $oldProductId,
+                    $oldLine['qty'] + $oldLine['free_qty'],
+                    $oldLine['mrp']
+                );
+            }
+        }
+
+        $discountAmt = round($subTotal * $discountPer / 100, 2);
+        $finalAmount = round($subTotal - $discountAmt, 2);
+        $amountRound = round($finalAmount);
+
+        // ── Update header
+        DB::update(
+            "UPDATE challan_order
+                SET ch_retailer_id = ?,
+                    ch_date        = ?,
+                    remark         = ?,
+                    discount_per   = ?,
+                    discount_amt   = ?,
+                    amount         = ?,
+                    remaining      = ?,
+                    amount_round   = ?
+              WHERE id = ? AND ch_dealer_id = ?",
+            [
+                $retailerId, $chDate, $remark,
+                $discountPer, $discountAmt,
+                $finalAmount, $finalAmount, $amountRound,
+                $id, $dealerId,
+            ]
+        );
+
+        // ── Delete old lines, insert new
+        DB::delete("DELETE FROM challan_order_details WHERE ch_id = ?", [$id]);
+
+        foreach ($normalized as $l) {
+            DB::insert(
+                "INSERT INTO challan_order_details
+                    (ch_id, product_id, hsn_code, catalog_details_id,
+                     batch_no, mfg_date, tax, vat_amt, qty, product_rate,
+                     free_qty, order_id, user_id, mrp,
+                     cd, cd_type, cd_amt,
+                     spl_disc_type, spl_disc_val, spl_disc_amt, cash_amt,
+                     dis_type, dis_amt, dis_percent,
+                     taxable_amt, remain_amount, sale_order_id, sync_status)
+                 VALUES
+                    (?, ?, ?, 0,
+                     ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?,
+                     ?, ?, ?,
+                     0, 0, ?, ?,
+                     ?, ?, ?,
+                     ?, ?, '', 1)",
+                [
+                    $id, $l['productId'], $l['hsn'],
+                    $l['batchNo'], $l['mfgDate'], $l['tax'], $l['vatAmt'],
+                    $l['qty'], $l['rate'], $l['freeQty'],
+                    $l['orderId'], $l['userId'], $l['mrp'],
+                    $l['cd'], $l['cdType'], $l['cdAmt'],
+                    $l['splDiscAmt'], $l['cashAmt'],
+                    $l['disType'], $l['disAmt'], $l['disPct'],
+                    $l['taxable'], $l['taxable'],
+                ]
+            );
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'status'       => true,
+            'message'      => 'Challan updated.',
+            'challan_id'   => $id,
+            'amount'       => $finalAmount,
+            'amount_round' => $amountRound,
+            'discount_amt' => $discountAmt,
+            'items_count'  => count($normalized),
+        ]);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json([
+            'status'  => false,
+            'message' => 'Challan update failed: ' . $e->getMessage(),
+        ], 500);
+    }
+}
+    /* =========================================================
+     |  HELPERS
+     | ========================================================= */
+
+    /**
+     * Role name lookup — table `_role`, PK `role_id`, label `rolename`.
+     */
+    private function resolveRoleName($roleId): string
+    {
+        if (empty($roleId)) return 'Unknown';
+        $row = DB::selectOne("SELECT rolename FROM _role WHERE role_id = ? LIMIT 1", [$roleId]);
+        return trim($row->rolename ?? 'Unknown');
+    }
+
+    /**
+     * Accepts d/m/Y, d-m-Y, Y-m-d, d/M/Y; returns Y-m-d or null.
+     */
+    private function parseDate($value): ?string
+    {
+        if (empty($value)) return null;
+        $value = trim((string) $value);
+        foreach (['d/m/Y', 'd-m-Y', 'Y-m-d', 'd/M/Y'] as $fmt) {
+            $dt = \DateTime::createFromFormat($fmt, $value);
+            if ($dt && $dt->format($fmt) === $value) {
+                return $dt->format('Y-m-d');
+            }
+        }
+        $ts = strtotime($value);
+        return $ts ? date('Y-m-d', $ts) : null;
+    }
+
+    /**
+     * Next challan number, per-company format:
+     *   213  → {dpId}/{FY}/00001           (5-digit seq)
+     *   331  → EF/{dealerId}/{year}/000001 (6-digit seq)
+     *   else → RPL/{dealerId}/{year}/000001 (6-digit seq)
+     */
+    private function generateChNo(int $dpId, int $dealerId, int $companyId): string
     {
         $sessionRow = DB::selectOne("SELECT session FROM session WHERE action = '1' LIMIT 1");
         $year       = $sessionRow->session ?? (date('Y') . '-' . (date('Y') + 1));
 
         $expyear = explode('-', $year);
-        $fyear   = substr($expyear[0] ?? '', 2);
-        $lyear   = substr($expyear[1] ?? '', 2);
-        $ystr    = $fyear . '-' . $lyear;
+        $ystr    = substr($expyear[0] ?? '', 2) . '-' . substr($expyear[1] ?? '', 2);
 
         $last = DB::selectOne(
             "SELECT ch_no FROM challan_order
@@ -386,203 +973,187 @@ class ChallanController extends Controller
             }
         }
 
-        $num = str_pad((string) $nextNum, 5, '0', STR_PAD_LEFT);
-        return "{$dpId}/{$ystr}/{$num}";
+        if ($companyId === 213) {
+            $num = str_pad((string) $nextNum, 5, '0', STR_PAD_LEFT);
+            return "{$dpId}/{$ystr}/{$num}";
+        }
+
+        $num = str_pad((string) $nextNum, 6, '0', STR_PAD_LEFT);
+        $prefix = ($companyId === 331) ? 'EF' : 'RPL';
+        return "{$prefix}/{$dealerId}/{$year}/{$num}";
     }
+
     /**
- * POST /api/challans/from-orders
- * Body:
- * {
- *   "ch_date": "2026-09-19",
- *   "discount_per": 0,
- *   "orders": [
- *     { "order_id": "...", "items": [ { product_id, qty, scheme_qty, mrp, rate, vat, vat_amt, taxable_amt, ... } ] }
- *   ]
- * }
- */
+     * FIFO stock reduction by mfg ascending.
+     *
+     * Reduces `stock.remaining` — but if the schema treats `qty` as
+     * authoritative, swap the target column here and in
+     * `ChallanHelperController::productStock()` / `formData()`.
+     */
+    private function reduceStock(int $dealerId, int $productId, float $qty): void
+    {
+        if ($qty <= 0) return;
 
-public function fromOrders(Request $request): JsonResponse
+        $rows = DB::select(
+            "SELECT id, remaining FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND remaining > 0
+              ORDER BY mfg ASC",
+            [$dealerId, $productId]
+        );
+
+        $left = (float) $qty;
+        foreach ($rows as $row) {
+            if ($left <= 0) break;
+
+            $thisQty = (float) $row->remaining;
+            if ($left >= $thisQty) {
+                DB::update("UPDATE stock SET remaining = 0 WHERE id = ?", [$row->id]);
+                $left -= $thisQty;
+            } else {
+                DB::update(
+                    "UPDATE stock SET remaining = ? WHERE id = ?",
+                    [$thisQty - $left, $row->id]
+                );
+                $left = 0;
+            }
+        }
+    }
+
+/* =========================================================
+ |  CANCEL
+ |  POST /api/challans/{id}/cancel
+ |
+ |  Marks the challan void + restores stock. Uses a
+ |  `reason` body field for the audit trail.
+ | ========================================================= */
+public function cancel(Request $request, $id): JsonResponse
 {
-    $request->validate([
-        'ch_date'                  => ['required', 'date_format:Y-m-d'],
-        'orders'                   => ['required', 'array', 'min:1'],
-        'orders.*.order_id'        => ['required', 'string'],
-        'orders.*.items'           => ['required', 'array', 'min:1'],
-        'orders.*.items.*.product_id' => ['required', 'integer'],
-        'orders.*.items.*.qty'        => ['required', 'numeric'],
-        'orders.*.items.*.rate'       => ['required', 'numeric'],
-    ]);
+    $user     = $request->user();
+    $dealerId = (int) $user->dealer_id;
+    $reason   = (string) $request->input('reason', 'No reason given');
 
-    $user      = $request->user();
-    $dealerId  = (int) $user->dealer_id;
-    $userId    = (int) $user->getKey();
-    $companyId = (int) $user->company_id;
+    $header = DB::selectOne(
+        "SELECT id, ch_no FROM challan_order
+          WHERE id = ? AND ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+    if (!$header) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Challan not found.',
+        ], 404);
+    }
 
-    $chDate      = $request->input('ch_date');
-    $discountPer = (float) $request->input('discount_per', 0);
-
-    $created = [];
+    // Already cancelled?
+    $already = DB::selectOne(
+        "SELECT 1 AS x FROM challan_order_cancel WHERE challan_id = ? LIMIT 1",
+        [$id]
+    );
+    if ($already) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Challan is already cancelled.',
+        ], 409);
+    }
 
     DB::beginTransaction();
     try {
-        foreach ($request->input('orders') as $order) {
-            $orderId = $order['order_id'];
-            $items   = $order['items'];
-
-            // Look up the sales order
-            $orderRow = DB::selectOne(
-                "SELECT * FROM user_sales_order
-                  WHERE order_id = ? AND dealer_id = ? LIMIT 1",
-                [$orderId, $dealerId]
+        // 1. Restore stock for every line
+        $lines = DB::select(
+            "SELECT product_id, qty, free_qty, mrp
+               FROM challan_order_details
+              WHERE ch_id = ?",
+            [$id]
+        );
+        foreach ($lines as $l) {
+            $this->restoreStock(
+                $dealerId,
+                (int) $l->product_id,
+                (float) $l->qty + (float) $l->free_qty,
+                (float) $l->mrp
             );
-            if (!$orderRow) {
-                DB::rollBack();
-                return response()->json(['status' => false, 'message' => "Order {$orderId} not found."], 404);
-            }
-
-            // ch_id — same pattern as legacy: dealer_id + ymdHis
-            $chId = $dealerId . date('ymdHis');
-            $guard = 0;
-            while (DB::table('challan_order')->where('id', $chId)->exists() && $guard < 20) {
-                usleep(100000);
-                $chId = $dealerId . date('ymdHis');
-                $guard++;
-            }
-            $chNo = $this->generateChNo($userId, $dealerId);
-
-            $subTotal = 0.0;
-            $orderLines = [];
-
-            foreach ($items as $it) {
-                $productId = (int) $it['product_id'];
-                $qty       = (float) $it['qty'];
-                $schQty    = (float) ($it['scheme_qty'] ?? 0);
-                $rate      = (float) $it['rate'];
-                $mrp       = (float) ($it['mrp'] ?? 0);
-                $tax       = (float) ($it['vat'] ?? 0);
-                $vatAmt    = (float) ($it['vat_amt'] ?? 0);
-                $taxable   = (float) ($it['taxable_amt'] ?? $qty * $rate);
-                $batchNo   = (string) ($it['batch_no'] ?? '');
-                $mfgDate   = $it['mfg_date'] ?? null;
-
-                // Reduce stock FIFO by mfg asc (same as single challan)
-                $this->reduceStock($dealerId, $productId, $qty + $schQty);
-
-                // Mark order line used
-                DB::update(
-                    "UPDATE user_sales_order_details SET status = 2
-                      WHERE order_id = ? AND product_id = ?",
-                    [$orderId, $productId]
-                );
-
-                $orderLines[] = [
-                    'product_id' => $productId,
-                    'qty'        => $qty,
-                    'scheme_qty' => $schQty,
-                    'rate'       => $rate,
-                    'mrp'        => $mrp,
-                    'tax'        => $tax,
-                    'vat_amt'    => $vatAmt,
-                    'taxable'    => $taxable,
-                    'batch_no'   => $batchNo,
-                    'mfg_date'   => $mfgDate ?: '1970-01-01',
-                ];
-
-                $subTotal += $taxable;
-            }
-
-            $discAmt = round($subTotal * $discountPer / 100, 2);
-            $amount  = round($subTotal - $discAmt, 2);
-
-            // Insert challan_order header
-            DB::insert(
-                "INSERT INTO challan_order
-                    (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id, ch_user_id,
-                     ch_date, date_added, company_id, invoice_type, book_status,
-                     dispatch_status, sesId, remark, sync_status, payment_status,
-                     discount_per, discount_amt, amount, remaining, amount_round)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, 1, 0, 0, 0, ?, 1, '0', ?, ?, ?, ?, ?)",
-                [
-                    $chId, $chNo, $userId, $dealerId,
-                    $orderRow->retailer_id, $orderRow->user_id,
-                    $chDate, $companyId,
-                    $orderRow->remarks ?? '',
-                    $discountPer, $discAmt, $amount, $amount, $amount,
-                ]
-            );
-
-            // Insert items
-            foreach ($orderLines as $l) {
-                DB::insert(
-                    "INSERT INTO challan_order_details
-                        (ch_id, product_id, supply_status, catalog_details_id,
-                         batch_no, tax, vat_amt, qty, product_rate, free_qty,
-                         order_id, user_id, mrp,
-                         dis_type, dis_amt, dis_percent,
-                         taxable_amt, remain_amount, mfg_date, sync_status)
-                     VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?, ?, ?, 1)",
-                    [
-                        $chId, $l['product_id'], $l['batch_no'],
-                        $l['tax'], $l['vat_amt'], $l['qty'], $l['rate'], $l['scheme_qty'],
-                        $orderId, $orderRow->user_id, $l['mrp'],
-                        $l['taxable'], $l['taxable'], $l['mfg_date'],
-                    ]
-                );
-            }
-
-            // Mark order as processed
-            DB::update(
-                "UPDATE user_sales_order SET order_status = '1'
-                  WHERE order_id = ?",
-                [$orderId]
-            );
-
-            $created[] = [
-                'order_id' => $orderId,
-                'ch_id'    => $chId,
-                'ch_no'    => $chNo,
-                'amount'   => $amount,
-            ];
         }
 
+        // 2. Mirror the header into challan_order_cancel
+        DB::insert(
+            "INSERT INTO challan_order_cancel
+                (challan_id, ch_no, dealer_id, cancel_reason,
+                 cancelled_by, cancelled_date)
+             VALUES (?, ?, ?, ?, ?, NOW())",
+            [
+                $id,
+                $header->ch_no,
+                $dealerId,
+                $reason,
+                (int) $user->getKey(),
+            ]
+        );
+
+        // 3. Mark challan
+        DB::update(
+            "UPDATE challan_order
+                SET dispatch_status = 3,
+                    payment_status  = '0'
+              WHERE id = ? AND ch_dealer_id = ?",
+            [$id, $dealerId]
+        );
+
         DB::commit();
+
         return response()->json([
-            'status'   => true,
-            'message'  => count($created) . ' challan(s) created.',
-            'challans' => $created,
+            'status'  => true,
+            'message' => 'Challan cancelled.',
+            'ch_id'   => $id,
+            'ch_no'   => $header->ch_no,
         ]);
 
     } catch (\Throwable $e) {
         DB::rollBack();
         return response()->json([
             'status'  => false,
-            'message' => 'Challan creation failed: ' . $e->getMessage(),
+            'message' => 'Cancel failed: ' . $e->getMessage(),
         ], 500);
     }
 }
+    /**
+ * Give stock back — inverse of reduceStock.
+ * Writes to stock.remaining; also bumps qty on the row that
+ * matches mrp when the client supplied one.
+ */
+private function restoreStock(int $dealerId, int $productId, float $qty, float $mrp = 0): void
+{
+    if ($qty <= 0) return;
 
-    private function reduceStock(int $dealerId, int $productId, float $qty): void
-    {
-        $rows = DB::select(
-            "SELECT id, remaining FROM stock
-              WHERE dealer_id = ? AND product_id = ?
-              ORDER BY mfg ASC",
-            [$dealerId, $productId]
+    // Prefer the exact mrp row if we know it
+    if ($mrp > 0) {
+        $row = DB::selectOne(
+            "SELECT id FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND mrp = ?
+              LIMIT 1",
+            [$dealerId, $productId, $mrp]
         );
-
-        $remaining = (float) $qty;
-        foreach ($rows as $row) {
-            if ($remaining <= 0) break;
-
-            $thisQty = (float) $row->remaining;
-            if ($remaining >= $thisQty) {
-                DB::update("UPDATE stock SET remaining = 0 WHERE id = ?", [$row->id]);
-                $remaining -= $thisQty;
-            } else {
-                $newRemaining = $thisQty - $remaining;
-                DB::update("UPDATE stock SET remaining = ? WHERE id = ?", [$newRemaining, $row->id]);
-                $remaining = 0;
-            }
+        if ($row) {
+            DB::update(
+                "UPDATE stock SET remaining = remaining + ? WHERE id = ?",
+                [$qty, $row->id]
+            );
+            return;
         }
     }
+
+    // Fallback: add back to the most recent row
+    $row = DB::selectOne(
+        "SELECT id FROM stock
+          WHERE dealer_id = ? AND product_id = ?
+          ORDER BY mfg DESC LIMIT 1",
+        [$dealerId, $productId]
+    );
+    if ($row) {
+        DB::update(
+            "UPDATE stock SET remaining = remaining + ? WHERE id = ?",
+            [$qty, $row->id]
+        );
+    }
+}
 }
