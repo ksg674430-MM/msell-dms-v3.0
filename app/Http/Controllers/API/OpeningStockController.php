@@ -14,6 +14,35 @@ class OpeningStockController extends Controller
      * GET /api/opening-stocks
      * Optional filters: order_no (product_id search), from_date, to_date
      */
+    use App\Support\FilterBuilder;
+
+public function query(Request $request): JsonResponse
+{
+    $user = $request->user();
+
+    $fb = FilterBuilder::make('opening_stock', $request)
+        ->hardScope('os.dealer_id = ?', [(int) $user->dealer_id]);
+
+    if ((int) $user->company_id > 0) {
+        $fb->hardScope('os.company_id = ?', [(int) $user->company_id]);
+    }
+
+    if (!$fb->isValid()) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Invalid filter.',
+            'errors'  => $fb->errors(),
+        ], 422);
+    }
+
+    $result = $fb->run();
+
+    return response()->json([
+        'status' => true,
+        'data'   => $result['rows'],
+        'meta'   => $result['meta'],
+    ]);
+}
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();

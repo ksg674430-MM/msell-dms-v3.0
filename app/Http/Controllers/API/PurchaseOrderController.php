@@ -13,6 +13,35 @@ class PurchaseOrderController extends Controller
     // GET /api/purchase-orders
     // Filters: order_no, from_date, to_date
     // -----------------------------------------------------------------
+    use App\Support\FilterBuilder;
+
+public function query(Request $request): JsonResponse
+{
+    $user = $request->user();
+
+    $fb = FilterBuilder::make('purchase_order', $request)      // ← change key
+        ->hardScope('po.dealer_id = ?', [(int) $user->dealer_id]);
+
+    if ((int) $user->company_id > 0) {
+        $fb->hardScope('po.company_id = ?', [(int) $user->company_id]);
+    }
+
+    if (!$fb->isValid()) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Invalid filter.',
+            'errors'  => $fb->errors(),
+        ], 422);
+    }
+
+    $result = $fb->run();
+
+    return response()->json([
+        'status' => true,
+        'data'   => $result['rows'],
+        'meta'   => $result['meta'],
+    ]);
+}
     public function index(Request $request)
     {
         $user     = $request->user();

@@ -24,39 +24,53 @@ use App\Http\Controllers\Api\PurchaseOrderController;
 
 use App\Http\Controllers\Api\MenuController;
 
+use App\Http\Controllers\Api\RetailerController;
+
+use App\Http\Controllers\Api\LookupController;
 
 
-Route::post('/login', [AuthController::class, 'login']);//1
+
+Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
     // Auth
-    Route::get('/me',      [AuthController::class, 'me']);//2
+    Route::get('/me',      [AuthController::class, 'me']);
     //Menu controller
     Route::get('/menu', [MenuController::class, 'index']);
-    Route::post('/logout', [AuthController::class, 'logout']);//3
+    Route::post('/logout', [AuthController::class, 'logout']);
 
     // Dashboard
-    Route::get('/dashboard',     [DashboardController::class, 'index']);//4
-    Route::get('/dashboard/mtd', [DashboardController::class, 'mtd']);//5
+    Route::get('/dashboard',     [DashboardController::class, 'index']);
+    Route::get('/dashboard/mtd', [DashboardController::class, 'mtd']);
+    Route::post('/challans/query',       [ChallanController::class, 'query']);
+
+
+
+
+
 
     // Profile
-    Route::get('/profile',  [ProfileController::class, 'show']);//6
-    Route::post('/profile', [ProfileController::class, 'update']);//7
+    Route::get('/profile',  [ProfileController::class, 'show']);
+    Route::post('/profile', [ProfileController::class, 'update']);
 
-    // Balance Stock  
-    Route::get('/reports/balance-stock',         [BalanceStockController::class, 'index']);//8
-    Route::get('/reports/balance-stock/filters', [BalanceStockController::class, 'filters']);//9
+    Route::get('/reports/balance-stock',                 [BalanceStockController::class, 'index']);          
+    Route::get('/reports/balance-stock/catalog-options', [BalanceStockController::class, 'catalogOptions']); 
+    Route::get('/reports/balance-stock/filters', [BalanceStockController::class, 'filters']);
+    Route::get('/filters/classifications', [BalanceStockController::class, 'classifications']);
+    Route::get('/filters/categories',      [BalanceStockController::class, 'categories']);
+    Route::get('/filters/product-names',   [BalanceStockController::class, 'productNames']);
+    Route::get('/filters/skus',            [BalanceStockController::class, 'skus']);
 
     //Opening Stock
-    Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']);//10
-    Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);//11
-    Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);//12
-    Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);//13
-    Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);//14
-    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);//15
+    Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']);
+    Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);
+    Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);
+    Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);
+    Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);
+    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);
     Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);
     Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);
-
+    Route::post('/opening-stocks/query', [OpeningStockController::class, 'query']);
     
 
      // Challan helpers (must come before /{id})
@@ -69,32 +83,35 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post  ('/challans/{id}/cancel', [ChallanController::class, 'cancel']);
 
     // Challan CRUD
-    Route::get   ('/challans',                            [ChallanController::class, 'index']);//21
-    Route::get   ('/challans/{id}',                       [ChallanController::class, 'show']);//22
-    Route::post  ('/challans',                            [ChallanController::class, 'store']);//23
+    Route::get   ('/challans',                            [ChallanController::class, 'index']);
+    Route::get   ('/challans/{id}',                       [ChallanController::class, 'show']);
+    Route::post  ('/challans',                            [ChallanController::class, 'store']);
     
     //Sales order
-    Route::get ('/sales-orders',         [SalesOrderController::class, 'index']);//24
-    Route::post('/sales-orders/cancel',  [SalesOrderController::class, 'cancel']);//25
-    Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);//26
+    Route::get ('/sales-orders',         [SalesOrderController::class, 'index']);
+    Route::post('/sales-orders/cancel',  [SalesOrderController::class, 'cancel']);
+    Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);
+    Route::post('/sales-orders/query',   [SalesOrderController::class, 'query']);
 
     // Challan from orders
-    Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);//27
+    Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);
 
      // Invoices (rich list replaces /challans for the invoice page)
-    Route::get   ('/invoices',              [InvoiceController::class, 'index']);//28
-    Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);//29
+    Route::get   ('/invoices',              [InvoiceController::class, 'index']);
+    Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);
+    Route::post('/invoices/query',       [InvoiceController::class, 'query']);
 
     // IRN this need to be tested too so do not check it yet
-    Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);//30
+    Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);
 
     //========== DGR claims these api's need to be TESTED =================//
-    Route::get   ('/dgr-claims',                [DgrClaimController::class, 'index']);//31
-    Route::get   ('/dgr-claims/check',          [DgrClaimController::class, 'check']);//32
-    Route::get   ('/dgr-claims/details',        [DgrClaimController::class, 'details']);//33
-    Route::post  ('/dgr-claims',                [DgrClaimController::class, 'store']);//34
-    Route::post  ('/dgr-claims/process',        [DgrClaimController::class, 'process']);//35
-    Route::post  ('/dgr-claims/approve',        [DgrClaimController::class, 'approve']);//36
+    Route::get   ('/dgr-claims',                [DgrClaimController::class, 'index']);
+    Route::get   ('/dgr-claims/check',          [DgrClaimController::class, 'check']);
+    Route::get   ('/dgr-claims/details',        [DgrClaimController::class, 'details']);
+    Route::post  ('/dgr-claims',                [DgrClaimController::class, 'store']);
+    Route::post  ('/dgr-claims/process',        [DgrClaimController::class, 'process']);
+    Route::post  ('/dgr-claims/approve',        [DgrClaimController::class, 'approve']);
+    Route::post('/dgr-claims/query',     [DgrClaimController::class, 'query']);
 
     Route::prefix('purchase-orders')->group(function () {
     Route::get('/',            [PurchaseOrderController::class, 'index']);
@@ -103,6 +120,24 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/{id}',        [PurchaseOrderController::class, 'show']);
     Route::put('/{id}',        [PurchaseOrderController::class, 'update']);
-    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);});
-
+    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);
+    Route::post('/query',[PurchaseOrderController::class, 'query']);
+    });
+//  Retailer's related methods
+Route::prefix('retailers')->group(function () {
+    Route::get('/',              [RetailerController::class, 'index']);
+    Route::post('/query', [RetailerController::class, 'query']);
+    Route::get('/form-data',     [RetailerController::class, 'formData']);   
+    Route::get('/locations',     [RetailerController::class, 'locations']);
+    Route::post('/',             [RetailerController::class, 'store']);
+    Route::get('/{id}',          [RetailerController::class, 'show']);
+    Route::put('/{id}',          [RetailerController::class, 'update']);
+    Route::delete('/{id}',       [RetailerController::class, 'destroy']);
+});
+// Master filter
+Route::prefix('lookup')->group(function () {
+    Route::get('/',                 [LookupController::class, 'directory']);
+    Route::get('/{entity}/schema',  [LookupController::class, 'schema']);
+    Route::post('/',                [LookupController::class, 'run']);
+});
 });    

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Balance Stock Filter Test</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f5f5f5; }
+    .box { background: #fff; padding: 16px; border-radius: 6px; margin-bottom: 16px; }
+    label { display: inline-block; margin-right: 16px; vertical-align: top; }
+    select { min-width: 220px; padding: 4px; }
+    button { padding: 6px 16px; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+    th { background: #2c5c9c; color: #fff; }
+    pre { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px;
+          overflow: auto; font-size: 12px; max-height: 300px; }
+    .ok  { color: green; font-weight: bold; }
+    .err { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h2>Balance Stock — Filter Test</h2>
+
+<div class="box">
+  <label>Username <input id="uname" value="TEST@rasna"></label>
+  <label>Password <input id="pass" type="password" value="TEST123"></label>
+  <button id="btn-login">1. Login</button>
+  <span id="login-status"></span>
+</div>
+
+<div class="box">
+  <label>Product Classification<br>
+    <select id="classification_id"><option value="">— login first —</option></select>
+  </label>
+
+  <label>Product Category<br>
+    <select id="category_id"><option value="">— select above —</option></select>
+  </label>
+
+  <label>Product Name<br>
+    <select id="product_name_id"><option value="">— select above —</option></select>
+  </label>
+
+  <label>SKU Name<br>
+    <select id="product_id"><option value="">— select above —</option></select>
+  </label>
+
+  <button id="btn-filter" disabled>Filter</button>
+  <button id="btn-reset">Reset</button>
+</div>
+
+<div class="box">
+  <div id="log-title">Log:</div>
+  <pre id="log">Waiting for login…</pre>
+</div>
+
+<div class="box">
+  <div><strong>Result (<span id="row-count">0</span> rows)</strong></div>
+  <div id="result-table"></div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:8000';
+let TOKEN = "";
+
+/* ---------- logging ---------- */
+function log(msg, kind = 'info') {
+  const el = document.getElementById('log');
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  el.textContent += line;
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---------- api helper ---------- */
+async function api(method, path, body) {
+  log(`${method} ${path}`);
+  const opts = {
+    method,
+    headers: {
+      'Accept': 'application/json',
+      ...(TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  };
+  const r = await fetch(API + path, opts);
+  const json = await r.json().catch(() => ({ raw: 'no json' }));
+  log(`  ← ${r.status} ${JSON.stringify(json).slice(0, 200)}`, r.ok ? 'ok' : 'err');
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return json;
+}
+
+/* ---------- dropdown helpers ---------- */
+function fill(sel, rows, ph = '== Please Select ==') {
+  const el = document.getElementById(sel);
+  el.innerHTML = `<option value="">${ph}</option>`;
+  for (const o of rows) {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.name;
+    el.appendChild(opt);
+  }
+  log(`  filled ${sel} with ${rows.length} options`);
+}
+function clear(sel, ph = '== Please Select ==') {
+  document.getElementById(sel).innerHTML = `<option value="">${ph}</option>`;
+}
+
+/* ---------- login ---------- */
+document.getElementById('btn-login').onclick = async () => {
+  const uname = document.getElementById('uname').value;
+  const pass  = document.getElementById('pass').value;
+  const st    = document.getElementById('login-status');
+
+  st.textContent = '…';
+  st.className = '';
+  try {
+    const r = await fetch(API + '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ uname, pass }),
+    });
+    const json = await r.json();
+    if (!r.ok || !json.token) {
+      st.textContent = '✗ ' + (json.message || 'login failed');
+      st.className = 'err';
+      log('LOGIN FAILED: ' + JSON.stringify(json), 'err');
+      return;
+    }
+    TOKEN = json.token;
+    st.textContent = '✓ logged in as ' + (json.user?.uname ?? uname);
+    st.className = 'ok';
+    log('TOKEN: ' + TOKEN.slice(0, 20) + '…');
+    document.getElementById('btn-filter').disabled = false;
+    await loadClassifications();
+  } catch (e) {
+    st.textContent = '✗ ' + e.message;
+    st.className = 'err';
+    log('LOGIN EXCEPTION: ' + e.message, 'err');
+  }
+};
+
+/* ---------- cascade ---------- */
+async function loadClassifications() {
+  const r = await api('GET', '/api/filters/classifications');
+  fill('classification_id', r.options ?? []);
+}
+
+document.getElementById('classification_id').onchange = async (e) => {
+  clear('category_id'); clear('product_name_id'); clear('product_id');
+  if (!e.target.value) return;
+  const r = await api('GET', '/api/filters/categories?classification_id=' + e.target.value);
+  fill('category_id', r.options ?? []);
+};
+
+document.getElementById('category_id').onchange = async (e) => {
+  clear('product_name_id'); clear('product_id');
+  if (!e.target.value) return;
+  const r = await api('GET', '/api/filters/product-names?category_id=' + e.target.value);
+  fill('product_name_id', r.options ?? []);
+};
+
+document.getElementById('product_name_id').onchange = async (e) => {
+  clear('product_id');
+  if (!e.target.value) return;
+  const r = await api('GET', '/api/filters/skus?product_name_id=' + e.target.value);
+  fill('product_id', r.options ?? []);
+};
+
+/* ---------- filter button ---------- */
+document.getElementById('btn-filter').onclick = async () => {
+  const sku     = document.getElementById('product_id').value;
+  const pName   = document.getElementById('product_name_id').value;
+  const cat     = document.getElementById('category_id').value;
+  const classif = document.getElementById('classification_id').value;
+
+  let qs = '';
+  if (sku)          qs = '?product_id='     + sku;
+  else if (pName)   qs = '?catalog_2_id='   + pName;
+  else if (cat)     qs = '?catalog_1_id='   + cat;
+  else if (classif) qs = '?catalog_0_id='   + classif;
+
+  log('FILTER →  ' + (qs || '(no filter, all rows)'));
+  try {
+    const r = await api('GET', '/api/reports/balance-stock' + qs);
+    renderTable(r);
+  } catch (e) {
+    log('REPORT ERROR: ' + e.message, 'err');
+  }
+};
+
+/* ---------- reset ---------- */
+document.getElementById('btn-reset').onclick = () => {
+  clear('classification_id', '== Please Select ==');
+  clear('category_id');
+  clear('product_name_id');
+  clear('product_id');
+  document.getElementById('result-table').innerHTML = '';
+  document.getElementById('row-count').textContent = '0';
+  log('RESET');
+  loadClassifications();
+};
+
+/* ---------- render table ---------- */
+function renderTable(resp) {
+  const rows = resp.rows || [];
+  document.getElementById('row-count').textContent = rows.length;
+
+  if (!rows.length) {
+    document.getElementById('result-table').innerHTML =
+      '<p style="color:#888">No rows returned.</p>';
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr>
+      <th>#</th><th>Item Code</th><th>Product</th>
+      <th>Category</th><th>MRP</th><th>Batch</th>
+      <th>Mfg</th><th>Qty</th><th>Stock Value</th>
+    </tr></thead><tbody>`;
+
+  rows.slice(0, 100).forEach((r, i) => {
+    html += `<tr>
+      <td>${i + 1}</td>
+      <td>${r.itemcode ?? ''}</td>
+      <td>${r.product_name ?? ''}</td>
+      <td>${r.cat ?? ''}</td>
+      <td>${r.stock_mrp ?? r.product_mrp ?? 0}</td>
+      <td>${r.batch_no ?? ''}</td>
+      <td>${r.mfg ?? ''}</td>
+      <td>${r.qty ?? 0}</td>
+      <td>${r.stock_value ?? 0}</td>
+    </tr>`;
+  });
+
+  if (rows.length > 100) {
+    html += `<tr><td colspan="9" style="text-align:center;color:#888">
+      … and ${rows.length - 100} more rows</td></tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('result-table').innerHTML = html;
+  log(`RENDERED ${rows.length} rows`);
+}
+</script>
+
+</body>
+</html>
