@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api;
+use App\Support\FilterBuilder;
 
 use App\Http\Controllers\Controller;
 use Carbon\Carbon;
@@ -14,7 +15,6 @@ class OpeningStockController extends Controller
      * GET /api/opening-stocks
      * Optional filters: order_no (product_id search), from_date, to_date
      */
-    use App\Support\FilterBuilder;
 
 public function query(Request $request): JsonResponse
 {
@@ -142,11 +142,10 @@ public function query(Request $request): JsonResponse
      *   ]
      * }
      */
-    public function store(Request $request): JsonResponse
+        public function store(Request $request): JsonResponse
     {
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
-        $personId  = (int) $user->getKey();
         $companyId = (int) ($user->company_id ?? 1);
 
         $request->validate([
@@ -156,6 +155,7 @@ public function query(Request $request): JsonResponse
             'items.*.mrp'               => ['required', 'numeric'],
             'items.*.dealer_rate'       => ['required', 'numeric'],
             'items.*.qty'               => ['required', 'numeric', 'min:0'],
+            'items.*.salable_damage'    => ['nullable', 'numeric', 'min:0'],
             'items.*.nonsalable_damage' => ['nullable', 'numeric', 'min:0'],
             'items.*.mfg'               => ['required', 'date_format:Y-m-d'],
         ]);
@@ -170,32 +170,33 @@ public function query(Request $request): JsonResponse
                 $mrp       = (float) $item['mrp'];
                 $rate      = (float) $item['dealer_rate'];
                 $qty       = (float) $item['qty'];
-                $nsQty     = (float) ($item['nonsalable_damage'] ?? 0);
+                $salableQty   = (int) ($item['salable_damage'] ?? 0);
+                $nsQty        = (int) ($item['nonsalable_damage'] ?? 0);
                 $mfg       = $item['mfg'];   // 'YYYY-MM-DD'
 
-                // 1. INSERT into opening_stocks
+                // 1. INSERT into opening_stocks (Removed `expire`, added `salable_damage`)
                 DB::insert(
                     "INSERT INTO opening_stocks
                         (product_id, batch_no, rate, dealer_rate, mrp,
                          person_id, csa_id, dealer_id, qty,
                          salable_damage, nonsalable_damage, remaining,
-                         mfg, expire, date, pr_rate, company_id,
+                         mfg, date, pr_rate, company_id,
                          action, sync_status, update_date_time)
                      VALUES
                         (?, ?, ?, ?, ?,
                          0, 0, ?, ?,
-                         0, ?, ?,
-                         ?, ?, NOW(), 0, ?,
+                         ?, ?, ?,
+                         ?, NOW(), 0, ?,
                          1, 1, NOW())",
                     [
                         $productId, $batchNo, $rate, $rate, $mrp,
                         $dealerId, $qty,
-                        $nsQty, $qty,
-                        $mfg, $mfg, $companyId,
+                        $salableQty, $nsQty, $qty,
+                        $mfg, $companyId,
                     ]
                 );
 
-                // 2. Sync into `stock` — check by (dealer, product, batch, mrp, mfg same month)
+                // 2. Sync into `stock`
                 $existing = DB::selectOne(
                     "SELECT id, qty
                        FROM stock
@@ -209,44 +210,46 @@ public function query(Request $request): JsonResponse
                 );
 
                 if ($existing) {
+                    // Updated: Removed `expire`, added `salable_damage`
                     DB::update(
                         "UPDATE stock
                             SET qty              = ?,
+                                salable_damage   = ?,
                                 nonsalable_damage = ?,
                                 dealer_rate      = ?,
                                 mrp              = ?,
-                                expire           = ?,
                                 date             = NOW(),
                                 update_date_time = NOW()
                           WHERE id = ?",
                         [
                             $existing->qty + $qty,
+                            $salableQty,
                             $nsQty,
                             $rate,
                             $mrp,
-                            $mfg,
                             $existing->id,
                         ]
                     );
                 } else {
+                    // Insert into stock (Removed `expire`, added `salable_damage`)
                     DB::insert(
                         "INSERT INTO stock
                             (product_id, batch_no, rate, dealer_rate, mrp,
                              person_id, csa_id, dealer_id, qty,
                              salable_damage, nonsalable_damage, remaining,
-                             mfg, expire, date, pr_rate, company_id,
+                             mfg, date, pr_rate, company_id,
                              action, sync_status, update_date_time)
                          VALUES
                             (?, ?, ?, ?, ?,
                              0, 0, ?, ?,
-                             0, ?, ?,
-                             ?, ?, NOW(), 0, ?,
+                             ?, ?, ?,
+                             ?, NOW(), 0, ?,
                              1, 1, NOW())",
                         [
                             $productId, $batchNo, $rate, $rate, $mrp,
                             $dealerId, $qty,
-                            $nsQty, $qty,
-                            $mfg, $mfg, $companyId,
+                            $salableQty, $nsQty, $qty,
+                            $mfg, $companyId,
                         ]
                     );
                 }
@@ -274,7 +277,7 @@ public function query(Request $request): JsonResponse
      * Simplest port: legacy's edit was incomplete, so we do a full replace.
      * Body is same shape as store().
      */
-    public function update(Request $request, int $id): JsonResponse
+         public function update(Request $request, int $id): JsonResponse
     {
         $user     = $request->user();
         $dealerId = (int) $user->dealer_id;
@@ -298,31 +301,32 @@ public function query(Request $request): JsonResponse
             'items.*.mrp'               => ['required', 'numeric'],
             'items.*.dealer_rate'       => ['required', 'numeric'],
             'items.*.qty'               => ['required', 'numeric', 'min:0'],
+            'items.*.salable_damage'    => ['nullable', 'numeric', 'min:0'],
             'items.*.nonsalable_damage' => ['nullable', 'numeric', 'min:0'],
             'items.*.mfg'               => ['required', 'date_format:Y-m-d'],
         ]);
 
         DB::beginTransaction();
         try {
-            // For simplicity: delete old row, insert new one
-            // (Legacy's edit path was incomplete; a full replace is safest.)
+            // Full replace strategy
             $old = DB::selectOne("SELECT * FROM opening_stocks WHERE id = ?", [$id]);
             DB::delete("DELETE FROM opening_stocks WHERE id = ?", [$id]);
 
             $item = $request->input('items.0');
 
+            // Removed `expire`, added `salable_damage`
             DB::insert(
                 "INSERT INTO opening_stocks
                     (product_id, batch_no, rate, dealer_rate, mrp,
                      person_id, csa_id, dealer_id, qty,
                      salable_damage, nonsalable_damage, remaining,
-                     mfg, expire, date, pr_rate, company_id,
+                     mfg, date, pr_rate, company_id,
                      action, sync_status, update_date_time)
                  VALUES
                     (?, ?, ?, ?, ?,
                      0, 0, ?, ?,
-                     0, ?, ?,
-                     ?, ?, NOW(), 0, ?,
+                     ?, ?, ?,
+                     ?, NOW(), 0, ?,
                      1, 1, NOW())",
                 [
                     (int)   $item['product_id'],
@@ -332,9 +336,9 @@ public function query(Request $request): JsonResponse
                     (float) $item['mrp'],
                     $dealerId,
                     (float) $item['qty'],
-                    (float) ($item['nonsalable_damage'] ?? 0),
+                    (int)   ($item['salable_damage'] ?? 0),
+                    (int)   ($item['nonsalable_damage'] ?? 0),
                     (float) $item['qty'],
-                    $item['mfg'],
                     $item['mfg'],
                     (int) ($user->company_id ?? 1),
                 ]
