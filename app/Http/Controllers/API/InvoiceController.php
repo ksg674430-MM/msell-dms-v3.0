@@ -466,7 +466,228 @@ private function invoiceLockReason(object $inv, int $dealerId): ?string
 
     return null;
 }
+public function update(Request $request, string $id): JsonResponse
+{
+    $user     = $request->user();
+    $dealerId = (int) $user->dealer_id;
 
+    $invoice = DB::selectOne(
+        "SELECT * FROM challan_order WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
+        [$id, $dealerId]
+    );
+
+    if (!$invoice) {
+        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+    }
+    if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        return response()->json(['status' => false, 'message' => $lock], 409);
+    }
+
+    $validated = $request->validate([
+        'ch_date'            => 'sometimes|date',
+        'retailer_id'        => 'sometimes',
+        'user_id'            => 'sometimes|integer',
+        'remark'             => 'sometimes|nullable|string|max:255',
+        'discount_per'       => 'sometimes|numeric|min:0|max:100',
+        'items'              => 'required|array|min:1',
+        'items.*.product_id' => 'required|integer',
+        'items.*.mrp'        => 'required|numeric',
+        'items.*.qty'        => 'required|numeric|min:0.001',
+        'items.*.rate'       => 'required|numeric|min:0',
+        'items.*.free_qty'   => 'nullable|numeric|min:0',
+        'items.*.cd_type'    => 'nullable|integer|in:1,2',
+        'items.*.cd'         => 'nullable|numeric|min:0',
+        'items.*.dis_type'   => 'nullable|integer|in:1,2',
+        'items.*.dis_amt'    => 'nullable|numeric|min:0',
+        'items.*.batch_no'   => 'nullable|string|max:11',
+        'items.*.mfg_date'   => 'nullable|date',
+    ]);
+
+    DB::transaction(function () use ($id, $invoice, $validated, $dealerId) {
+
+        // 1. Purane items load karo (comparison ke liye)
+        $oldItems = DB::select(
+            "SELECT product_id, qty, free_qty, mrp, batch_no, mfg_date
+               FROM challan_order_details
+              WHERE ch_id = ?",
+            [$id]
+        );
+
+        $oldMap = [];
+        foreach ($oldItems as $o) {
+            $key = $this->lineKey($o->product_id, $o->mrp, $o->batch_no, $o->mfg_date);
+            $oldMap[$key] = [
+                'qty'      => (float) $o->qty + (float) $o->free_qty,
+                'product_id' => (int) $o->product_id,
+                'mrp'      => (float) $o->mrp,
+                'batch_no' => (string) $o->batch_no,
+                'mfg_date' => (string) $o->mfg_date,
+            ];
+        }
+
+        // 2. Naye items build + stock delta apply
+        $lines        = [];
+        $totalTaxable = 0.0;
+        $totalVat     = 0.0;
+        $seenKeys     = [];
+
+        foreach ($validated['items'] as $row) {
+            $product = DB::selectOne(
+                "SELECT id, gst_percent FROM catalog_product WHERE id = ?",
+                [(int) $row['product_id']]
+            );
+            if (!$product) {
+                throw new \RuntimeException("Product {$row['product_id']} not found.");
+            }
+
+            $qty       = (float) $row['qty'];
+            $rate      = (float) $row['rate'];
+            $mrp       = (float) $row['mrp'];
+            $freeQty   = (float) ($row['free_qty'] ?? 0);
+            $newQtyTot = $qty + $freeQty;
+            $batchNo   = (string) ($row['batch_no'] ?? '');
+            $mfgDate   = (string) ($row['mfg_date'] ?? '1970-01-01');
+            $gross     = $qty * $rate;
+
+            $taxPercent = (float) $product->gst_percent;
+
+            $disType = (int)   ($row['dis_type'] ?? 1);
+            $disVal  = (float) ($row['dis_amt'] ?? 0);
+            $disAmt  = $disType === 1 ? round($gross * $disVal / 100, 2) : round($disVal, 2);
+
+            $cdType = (int)   ($row['cd_type'] ?? 1);
+            $cdVal  = (float) ($row['cd'] ?? 0);
+            $cdAmt  = $cdType === 1 ? round($gross * $cdVal / 100, 2) : round($cdVal, 2);
+
+            $taxable = round($gross - $cdAmt - $disAmt, 2);
+            $vatAmt  = round($taxable * $taxPercent / 100, 2);
+
+            // ---- Stock delta ----
+            $key = $this->lineKey((int) $row['product_id'], $mrp, $batchNo, $mfgDate);
+            $seenKeys[$key] = true;
+
+            if (isset($oldMap[$key])) {
+                $oldQtyTot = $oldMap[$key]['qty'];
+                if ($newQtyTot > $oldQtyTot) {
+                    // qty badhi → stock minus
+                    $delta = $newQtyTot - $oldQtyTot;
+                    $this->adjustStockQty($dealerId, (int) $row['product_id'], $mrp, $batchNo, $mfgDate, -$delta);
+                } elseif ($newQtyTot < $oldQtyTot) {
+                    // qty ghati → stock plus
+                    $delta = $oldQtyTot - $newQtyTot;
+                    $this->adjustStockQty($dealerId, (int) $row['product_id'], $mrp, $batchNo, $mfgDate, $delta);
+                }
+                // equal → kuch nahi
+            } else {
+                // Naya item → poora minus
+                $this->adjustStockQty($dealerId, (int) $row['product_id'], $mrp, $batchNo, $mfgDate, -$newQtyTot);
+            }
+
+            $lines[] = [
+                'ch_id'         => $id,
+                'product_id'    => (int) $row['product_id'],
+                'qty'           => $qty,
+                'product_rate'  => number_format($rate, 2, '.', ''),
+                'free_qty'      => (string) $freeQty,
+                'mrp'           => number_format($mrp, 2, '.', ''),
+                'tax'           => number_format($taxPercent, 2, '.', ''),
+                'vat_amt'       => number_format($vatAmt, 2, '.', ''),
+                'taxable_amt'   => number_format($taxable, 2, '.', ''),
+                'remain_amount' => (string) $taxable,
+                'cd'            => number_format($cdVal, 2, '.', ''),
+                'cd_type'       => $cdType,
+                'cd_amt'        => $cdAmt,
+                'dis_type'      => $disType,
+                'dis_amt'       => $disAmt,
+                'dis_percent'   => $disType === 1 ? $disVal : 0,
+                'batch_no'      => $batchNo,
+                'mfg_date'      => $mfgDate,
+                'user_id'       => (int) ($validated['user_id'] ?? $invoice->ch_user_id),
+                'sync_status'   => 1,
+                'old_rate'      => null,
+            ];
+
+            $totalTaxable += $taxable;
+            $totalVat     += $vatAmt;
+        }
+
+        // 3. Purane jo naye list me nahi hai → stock wapas
+        foreach ($oldMap as $key => $o) {
+            if (isset($seenKeys[$key])) continue;
+            if ($o['qty'] <= 0) continue;
+            $this->adjustStockQty(
+                $dealerId,
+                $o['product_id'],
+                $o['mrp'],
+                $o['batch_no'],
+                $o['mfg_date'],
+                $o['qty']   // plus
+            );
+        }
+
+        // 4. Details replace
+        DB::table('challan_order_details')->where('ch_id', $id)->delete();
+        DB::table('challan_order_details')->insert($lines);
+
+        // 5. Header totals
+        $subTotal    = round($totalTaxable + $totalVat, 2);
+        $discountPer = (float) ($validated['discount_per'] ?? $invoice->discount_per ?? 0);
+        $discountAmt = round($subTotal * $discountPer / 100, 2);
+        $grandTotal  = round($subTotal - $discountAmt, 2);
+
+        $headerUpdate = [
+            'discount_per' => number_format($discountPer, 2, '.', ''),
+            'discount_amt' => number_format($discountAmt, 2, '.', ''),
+            'discount'     => number_format($discountAmt, 2, '.', ''),
+            'amount'       => number_format($grandTotal, 2, '.', ''),
+            'remaining'    => number_format($grandTotal, 2, '.', ''),
+            'amount_round' => number_format($grandTotal, 2, '.', ''),
+        ];
+
+        if (isset($validated['ch_date']))           $headerUpdate['ch_date']        = $validated['ch_date'];
+        if (isset($validated['retailer_id']))       $headerUpdate['ch_retailer_id'] = (string) $validated['retailer_id'];
+        if (isset($validated['user_id']))           $headerUpdate['ch_user_id']     = (int) $validated['user_id'];
+        if (array_key_exists('remark', $validated)) $headerUpdate['remark']         = $validated['remark'] ?? '';
+
+        DB::table('challan_order')
+            ->where('id', $id)
+            ->where('ch_dealer_id', $dealerId)
+            ->update($headerUpdate);
+    });
+
+    return $this->show($request, $id);
+}
+
+private function lineKey(int $productId, float $mrp, string $batchNo, string $mfgDate): string
+{
+    return $productId . '|' . number_format($mrp, 2, '.', '') . '|' . $batchNo . '|' . $mfgDate;
+}
+
+private function adjustStockQty(
+    int $dealerId,
+    int $productId,
+    float $mrp,
+    string $batchNo,
+    string $mfgDate,
+    float $delta
+): void {
+    // delta positive = stock plus (wapas), delta negative = stock minus
+    $op = $delta >= 0 ? '+' : '-';
+    $abs = abs($delta);
+    if ($abs <= 0) return;
+
+    DB::update(
+        "UPDATE stock
+            SET qty = qty {$op} ?
+          WHERE dealer_id  = ?
+            AND product_id = ?
+            AND mrp        = ?
+            AND batch_no   = ?
+            AND mfg        = ?
+          LIMIT 1",
+        [$abs, $dealerId, $productId, number_format($mrp, 2, '.', ''), $batchNo, $mfgDate]
+    );
+}
 /**
  * Puts back the qty that the invoice had deducted from stock.
  *

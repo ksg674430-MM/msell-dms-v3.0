@@ -155,6 +155,7 @@ Route::prefix('retailers')->group(function () {
     Route::post('/invoices/query',       [InvoiceController::class, 'query']);
     Route::post  ('invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
     Route::delete('invoices/{id}',        [InvoiceController::class, 'destroy']);
+    Route::match(['PUT', 'PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']);
 
     // IRN this need to be tested too so do not check it yet
     Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);
