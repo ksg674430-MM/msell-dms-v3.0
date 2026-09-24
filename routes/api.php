@@ -116,7 +116,7 @@ Route::prefix('retailers')->group(function () {
     Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);
     Route::post('/opening-stocks/query', [OpeningStockController::class, 'query']);
 // Receive Stocks Api'and create Stocks and all things 
-     Route::prefix('purchase-orders')->group(function () {
+    Route::prefix('purchase-orders')->group(function () {
     Route::get('/',            [PurchaseOrderController::class, 'index']);
     Route::get('/form-data',   [PurchaseOrderController::class, 'formData']);
     Route::post('/',           [PurchaseOrderController::class, 'store']);

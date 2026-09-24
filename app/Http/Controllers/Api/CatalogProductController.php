@@ -1,67 +1,83 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 class CatalogProductController extends Controller
 {
     /**
      * GET /api/catalog-products
-     * Optional filters: item_name, item_code, catalog_1_id, catalog_2_id, catalog_3_id
+     * Filters: item_name, item_code, catalog_1_id, catalog_2_id, catalog_3_id
      */
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();
         $companyId = (int) ($user->company_id ?? 0);
-        $stateId   = (int) ($user->state_id ?? 0);
+        $stateId   = (string) ($user->state_id ?? 0);
 
         $where    = ["cp.company_id = ?"];
-        $bindings = [$companyId];
+        $bindings = [$stateId, $stateId, $companyId]; // for the 2 rate subqueries + where
 
         if ($itemName = $request->input('item_name')) {
             $where[] = "cv.product_name LIKE ?";
             $bindings[] = "%{$itemName}%";
         }
         if ($itemCode = $request->input('item_code')) {
-            $where[] = "cv.itemcode LIKE ?";
+            $where[] = "cp.itemcode LIKE ?";
             $bindings[] = "%{$itemCode}%";
         }
-
-        // Dynamic Catalog Filters
-        for ($i = 1; $i <= 4; $i++) { // Assuming max level 4
-            if ($catId = $request->input("catalog_{$i}_id")) {
-                $where[] = "cp.catalog_{$i}_id = ?";
-                $bindings[] = (int) $catId;
-            }
+        if ($c1 = $request->input('catalog_1_id')) {
+            $where[] = "cv.c0_id = ?";
+            $bindings[] = (int) $c1;
+        }
+        if ($c2 = $request->input('catalog_2_id')) {
+            $where[] = "cv.c1_id = ?";
+            $bindings[] = (int) $c2;
+        }
+        if ($c3 = $request->input('catalog_3_id')) {
+            $where[] = "cv.c2_id = ?";
+            $bindings[] = (int) $c3;
         }
 
         $whereSql = implode(' AND ', $where);
 
-        $rows = DB::select(
-            "SELECT 
-                cp.id, 
-                cp.itemcode, 
-                cp.name AS item_name, 
-                cp.hsn_code, 
-                cp.weight, 
-                cp.unit, 
-                cp.mrp, 
-                cp.dealer_rate, 
-                cp.image_name,
-                cv.c1 AS category_name,
-                cv.product_name,
-                prl.rate AS state_rate
-             FROM catalog_product cp
-             INNER JOIN catalog_view cv ON cv.product_id = cp.id
-             LEFT JOIN product_rate_list prl ON prl.product_id = cp.id AND prl.state_id = ?
-             WHERE {$whereSql}
-             ORDER BY cp.name ASC",
-            array_merge([$stateId], $bindings)
-        );
+        $sql = "SELECT
+                    cp.id,
+                    cp.itemcode,
+                    cp.name              AS item_name,
+                    cp.hsn_code,
+                    cp.weight,
+                    cp.unit,
+                    cp.image_name,
+                    cp.quantity_per_case,
+                    cp.catalog_id,
+                    cv.product_name,
+                    cv.c0_id, cv.c0_name,
+                    cv.c1_id, cv.c1_name,
+                    cv.c2_id, cv.c2_name,
+                    (SELECT prl.mrp FROM product_rate_list prl
+                        WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                        LIMIT 1) AS mrp,
+                    (SELECT prl.dealer_rate FROM product_rate_list prl
+                        WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                        LIMIT 1) AS dealer_rate
+                FROM catalog_product cp
+                INNER JOIN catalog_view cv ON cv.product_id = cp.id
+                WHERE {$whereSql}
+                ORDER BY cp.name ASC";
+
+        $rows = DB::select($sql, $bindings);
+
+        // Build image URLs
+        foreach ($rows as $row) {
+            $row->image_url = ($row->image_name && $row->image_name !== 'NA')
+                ? url("myuploads/product/{$row->image_name}")
+                : null;
+        }
 
         return response()->json([
             'status' => true,
@@ -76,58 +92,66 @@ class CatalogProductController extends Controller
     {
         $user      = $request->user();
         $companyId = (int) ($user->company_id ?? 0);
+        $stateId   = (string) ($user->state_id ?? 0);
 
         $row = DB::selectOne(
-            "SELECT * FROM catalog_product WHERE id = ? AND company_id = ? LIMIT 1",
-            [$id, $companyId]
+            "SELECT
+                cp.*,
+                cv.product_name,
+                cv.c0_id, cv.c0_name,
+                cv.c1_id, cv.c1_name,
+                cv.c2_id, cv.c2_name,
+                (SELECT prl.mrp FROM product_rate_list prl
+                    WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                    LIMIT 1) AS mrp,
+                (SELECT prl.dealer_rate FROM product_rate_list prl
+                    WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                    LIMIT 1) AS dealer_rate
+             FROM catalog_product cp
+             INNER JOIN catalog_view cv ON cv.product_id = cp.id
+             WHERE cp.id = ? AND cp.company_id = ?
+             LIMIT 1",
+            [$stateId, $stateId, $id, $companyId]
         );
 
         if (!$row) {
             return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
         }
 
-        // Fetch category hierarchy names if needed
-        $categoryDetails = DB::selectOne(
-            "SELECT 
-                c1.name AS c1_name, 
-                c2.name AS c2_name, 
-                c3.name AS c3_name 
-             FROM catalog_product cp
-             LEFT JOIN catalog_1 c1 ON c1.id = cp.catalog_1_id
-             LEFT JOIN catalog_2 c2 ON c2.id = cp.catalog_2_id
-             LEFT JOIN catalog_3 c3 ON c3.id = cp.catalog_3_id
-             WHERE cp.id = ?",
-            [$id]
-        );
+        $row->image_url = ($row->image_name && $row->image_name !== 'NA')
+            ? url("myuploads/product/{$row->image_name}")
+            : null;
 
-        return response()->json([
-            'status' => true,
-            'row'    => $row,
-            'categories' => $categoryDetails
-        ]);
+        return response()->json(['status' => true, 'row' => $row]);
     }
 
     /**
      * GET /api/catalog-products/filters
-     * Returns the cascading dropdown data for the form
+     * Cascading dropdown data
      */
     public function filters(Request $request): JsonResponse
     {
         $user      = $request->user();
         $companyId = (int) ($user->company_id ?? 0);
 
-        // Fetch Level 1
-        $level1 = DB::select("SELECT id, name FROM catalog_1 WHERE company_id = ? ORDER BY name", [$companyId]);
-        // Fetch Level 2
-        $level2 = DB::select("SELECT id, name, catalog_1_id FROM catalog_2 WHERE company_id = ? ORDER BY name", [$companyId]);
-        // Fetch Level 3
-        $level3 = DB::select("SELECT id, name, catalog_2_id FROM catalog_3 WHERE company_id = ? ORDER BY name", [$companyId]);
+        $level0 = DB::select(
+            "SELECT id, name FROM catalog_1 WHERE company_id = ? AND status = 1 ORDER BY name ASC",
+            [$companyId]
+        );
+        $level1 = DB::select(
+            "SELECT id, name, catalog_1_id AS c0_id FROM catalog_2 WHERE company_id = ? AND status = 1 ORDER BY name ASC",
+            [$companyId]
+        );
+        $level2 = DB::select(
+            "SELECT id, name, catalog_2_id AS c1_id FROM catalog_3 WHERE company_id = ? AND status = 1 ORDER BY name ASC",
+            [$companyId]
+        );
 
         return response()->json([
-            'status' => true,
+            'status'  => true,
+            'level_0' => $level0,
             'level_1' => $level1,
             'level_2' => $level2,
-            'level_3' => $level3,
         ]);
     }
 
@@ -136,130 +160,262 @@ class CatalogProductController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $user      = $request->user();
-        $companyId = (int) ($user->company_id ?? 0);
+        $user       = $request->user();
+        $companyId  = (int) ($user->company_id ?? 0);
+        $stateId    = (string) ($user->state_id ?? 0);
+        $templateId = (int) ($user->template_id ?? 0);
 
         $request->validate([
-            'itemcode'      => ['required', 'string', 'max:50', 'unique:catalog_product,itemcode'],
-            'name'          => ['required', 'string', 'max:255'],
-            'image'         => ['nullable', 'image', 'max:2048'], // Max 2MB
-            'weight'        => ['nullable', 'numeric'],
-            'unit'          => ['required', 'string', 'max:20'],
-            'catalog_1_id'  => ['required', 'integer'],
-            'catalog_2_id'  => ['required', 'integer'],
-            'catalog_3_id'  => ['nullable', 'integer'],
-            'mrp'           => ['required', 'numeric'],
-            'dealer_rate'   => ['required', 'numeric'],
+            'itemcode'          => ['required', 'string', 'max:20'],
+            'name'              => ['required', 'string', 'max:255'],
+            'image'             => ['nullable', 'image', 'max:2048'],
+            'weight'            => ['nullable', 'string', 'max:50'],
+            'unit'              => ['nullable', 'string', 'max:10'],
+            'hsn_code'          => ['nullable', 'string', 'max:20'],
+            'catalog_1_id'      => ['required', 'integer'],
+            'catalog_2_id'      => ['required', 'integer'],
+            'catalog_3_id'      => ['required', 'integer'],
+            'quantity_per_case' => ['nullable', 'integer'],
+            'mrp'               => ['nullable', 'numeric'],
+            'dealer_rate'       => ['nullable', 'numeric'],
+            'gst_percent'       => ['nullable', 'numeric'],
         ]);
+
+        // Duplicate check on itemcode + company
+        $dup = DB::selectOne(
+            "SELECT id FROM catalog_product WHERE itemcode = ? AND company_id = ? LIMIT 1",
+            [$request->itemcode, $companyId]
+        );
+        if ($dup) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Item Code already exists, please provide a different value.'
+            ], 422);
+        }
 
         DB::beginTransaction();
         try {
-            $imageName = null;
+            // Handle image upload (save to public/myuploads/product/, same as legacy)
+            $imageName = 'NA';
             if ($request->hasFile('image')) {
-                // Store in a public directory or S3 depending on your setup
-                $path = $request->file('image')->store('product_images', 'public');
-                $imageName = basename($path);
+                $file     = $request->file('image');
+                $fileName = time() . '_' . preg_replace('/\s+/', '_', $file->getClientOriginalName());
+                $file->move(public_path('myuploads/product'), $fileName);
+                $imageName = $fileName;
             }
 
+            // catalog_product.catalog_id = deepest level category (catalog_3)
+            $catalogId = (int) $request->catalog_3_id;
+
             DB::insert(
-                "INSERT INTO catalog_product 
-                    (itemcode, name, image_name, weight, unit, catalog_1_id, catalog_2_id, catalog_3_id, mrp, dealer_rate, company_id, status, created_at) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())",
+                "INSERT INTO catalog_product
+                    (name, itemcode, hsn_code, weight, unit, catalog_id, image_name,
+                     quantity_per_case, base_price, gst_percent, company_id, status,
+                     created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
                 [
-                    $request->itemcode,
                     $request->name,
+                    $request->itemcode,
+                    $request->hsn_code ?? '',
+                    $request->weight ?? '0',
+                    $request->unit ?? '100',
+                    $catalogId,
                     $imageName,
-                    $request->weight ?? 0,
-                    $request->unit,
-                    $request->catalog_1_id,
-                    $request->catalog_2_id,
-                    $request->catalog_3_id,
-                    $request->mrp,
-                    $request->dealer_rate,
-                    $companyId
+                    $request->quantity_per_case ?? 1,
+                    $request->dealer_rate ?? 0,
+                    $request->gst_percent ?? 0,
+                    $companyId,
                 ]
             );
 
+            $newProductId = DB::getPdo()->lastInsertId();
+
+            // Insert rates into product_rate_list (only if provided)
+            if ($request->filled('mrp') || $request->filled('dealer_rate')) {
+                DB::insert(
+                    "INSERT INTO product_rate_list
+                        (template_id, product_id, state_id, distributor_id, ss_id,
+                         mrp, mrp_pcs, dealer_rate, dealer_pcs_rate,
+                         retailer_rate, retailer_pcs_rate,
+                         company_id, status, created_at, updated_at)
+                     VALUES (?, ?, ?, 0, 0,
+                             ?, ?, ?, ?,
+                             0, 0,
+                             ?, 1, NOW(), NOW())",
+                    [
+                        $templateId,
+                        (string) $newProductId,
+                        $stateId,
+                        $request->mrp ?? 0,
+                        $request->mrp ?? 0,
+                        $request->dealer_rate ?? 0,
+                        $request->dealer_rate ?? 0,
+                        $companyId,
+                    ]
+                );
+            }
+
             DB::commit();
-            return response()->json(['status' => true, 'message' => 'Product saved successfully.']);
+            return response()->json([
+                'status'     => true,
+                'message'    => 'Product saved successfully.',
+                'product_id' => $newProductId,
+            ]);
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'Save failed: ' . $e->getMessage()], 500);
+            return response()->json([
+                'status'  => false,
+                'message' => 'Save failed: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
     /**
      * PUT /api/catalog-products/{id}
-     * Note: For file uploads via PUT, Laravel requires POST with _method=PUT. 
-     * Frontend should send POST request with `_method` = 'PUT' when uploading files.
+     * Note: For file upload, frontend should send POST with _method=PUT
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        $user      = $request->user();
-        $companyId = (int) ($user->company_id ?? 0);
+        $user       = $request->user();
+        $companyId  = (int) ($user->company_id ?? 0);
+        $stateId    = (string) ($user->state_id ?? 0);
+        $templateId = (int) ($user->template_id ?? 0);
 
         $existing = DB::selectOne(
             "SELECT id, image_name FROM catalog_product WHERE id = ? AND company_id = ? LIMIT 1",
             [$id, $companyId]
         );
-
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
         }
 
         $request->validate([
-            'itemcode'      => ['required', 'string', 'max:50', "unique:catalog_product,itemcode,{$id}"],
-            'name'          => ['required', 'string', 'max:255'],
-            'image'         => ['nullable', 'image', 'max:2048'],
-            'weight'        => ['nullable', 'numeric'],
-            'unit'          => ['required', 'string', 'max:20'],
-            'catalog_1_id'  => ['required', 'integer'],
-            'catalog_2_id'  => ['required', 'integer'],
-            'catalog_3_id'  => ['nullable', 'integer'],
-            'mrp'           => ['required', 'numeric'],
-            'dealer_rate'   => ['required', 'numeric'],
+            'itemcode'          => ['required', 'string', 'max:20'],
+            'name'              => ['required', 'string', 'max:255'],
+            'image'             => ['nullable', 'image', 'max:2048'],
+            'weight'            => ['nullable', 'string', 'max:50'],
+            'unit'              => ['nullable', 'string', 'max:10'],
+            'hsn_code'          => ['nullable', 'string', 'max:20'],
+            'catalog_1_id'      => ['required', 'integer'],
+            'catalog_2_id'      => ['required', 'integer'],
+            'catalog_3_id'      => ['required', 'integer'],
+            'quantity_per_case' => ['nullable', 'integer'],
+            'mrp'               => ['nullable', 'numeric'],
+            'dealer_rate'       => ['nullable', 'numeric'],
+            'gst_percent'       => ['nullable', 'numeric'],
         ]);
+
+        // Duplicate check excluding this row
+        $dup = DB::selectOne(
+            "SELECT id FROM catalog_product WHERE itemcode = ? AND company_id = ? AND id != ? LIMIT 1",
+            [$request->itemcode, $companyId, $id]
+        );
+        if ($dup) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Item Code already exists, please provide a different value.'
+            ], 422);
+        }
 
         DB::beginTransaction();
         try {
+            // Handle image replacement
             $imageName = $existing->image_name;
             if ($request->hasFile('image')) {
-                // Delete old image if exists
-                if ($imageName && Storage::disk('public')->exists('product_images/' . $imageName)) {
-                    Storage::disk('public')->delete('product_images/' . $imageName);
+                // Delete old image
+                if ($imageName && $imageName !== 'NA') {
+                    $oldPath = public_path("myuploads/product/{$imageName}");
+                    if (file_exists($oldPath)) @unlink($oldPath);
                 }
-                $path = $request->file('image')->store('product_images', 'public');
-                $imageName = basename($path);
+                $file     = $request->file('image');
+                $fileName = time() . '_' . preg_replace('/\s+/', '_', $file->getClientOriginalName());
+                $file->move(public_path('myuploads/product'), $fileName);
+                $imageName = $fileName;
             }
 
+            $catalogId = (int) $request->catalog_3_id;
+
             DB::update(
-                "UPDATE catalog_product SET 
-                    itemcode = ?, name = ?, image_name = ?, weight = ?, unit = ?, 
-                    catalog_1_id = ?, catalog_2_id = ?, catalog_3_id = ?, 
-                    mrp = ?, dealer_rate = ?, updated_at = NOW() 
+                "UPDATE catalog_product SET
+                    name = ?, itemcode = ?, hsn_code = ?, weight = ?, unit = ?,
+                    catalog_id = ?, image_name = ?, quantity_per_case = ?,
+                    base_price = ?, gst_percent = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
-                    $request->itemcode,
                     $request->name,
+                    $request->itemcode,
+                    $request->hsn_code ?? '',
+                    $request->weight ?? '0',
+                    $request->unit ?? '100',
+                    $catalogId,
                     $imageName,
-                    $request->weight ?? 0,
-                    $request->unit,
-                    $request->catalog_1_id,
-                    $request->catalog_2_id,
-                    $request->catalog_3_id,
-                    $request->mrp,
-                    $request->dealer_rate,
-                    $id
+                    $request->quantity_per_case ?? 1,
+                    $request->dealer_rate ?? 0,
+                    $request->gst_percent ?? 0,
+                    $id,
                 ]
             );
 
+            // Update or insert rate
+            if ($request->filled('mrp') || $request->filled('dealer_rate')) {
+                $existingRate = DB::selectOne(
+                    "SELECT id FROM product_rate_list
+                     WHERE product_id = ? AND state_id = ? AND status = 1 LIMIT 1",
+                    [(string) $id, $stateId]
+                );
+
+                if ($existingRate) {
+                    DB::update(
+                        "UPDATE product_rate_list SET
+                            mrp = ?, mrp_pcs = ?, dealer_rate = ?, dealer_pcs_rate = ?,
+                            updated_at = NOW()
+                         WHERE id = ?",
+                        [
+                            $request->mrp ?? 0,
+                            $request->mrp ?? 0,
+                            $request->dealer_rate ?? 0,
+                            $request->dealer_rate ?? 0,
+                            $existingRate->id,
+                        ]
+                    );
+                } else {
+                    DB::insert(
+                        "INSERT INTO product_rate_list
+                            (template_id, product_id, state_id, distributor_id, ss_id,
+                             mrp, mrp_pcs, dealer_rate, dealer_pcs_rate,
+                             retailer_rate, retailer_pcs_rate,
+                             company_id, status, created_at, updated_at)
+                         VALUES (?, ?, ?, 0, 0,
+                                 ?, ?, ?, ?,
+                                 0, 0,
+                                 ?, 1, NOW(), NOW())",
+                        [
+                            $templateId,
+                            (string) $id,
+                            $stateId,
+                            $request->mrp ?? 0,
+                            $request->mrp ?? 0,
+                            $request->dealer_rate ?? 0,
+                            $request->dealer_rate ?? 0,
+                            $companyId,
+                        ]
+                    );
+                }
+            }
+
             DB::commit();
-            return response()->json(['status' => true, 'message' => 'Product updated successfully.']);
+            return response()->json([
+                'status'  => true,
+                'message' => 'Product updated successfully.',
+            ]);
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'Update failed: ' . $e->getMessage()], 500);
+            return response()->json([
+                'status'  => false,
+                'message' => 'Update failed: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -275,17 +431,22 @@ class CatalogProductController extends Controller
             "SELECT image_name FROM catalog_product WHERE id = ? AND company_id = ? LIMIT 1",
             [$id, $companyId]
         );
-
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
         }
 
         DB::beginTransaction();
         try {
-            if ($existing->image_name && Storage::disk('public')->exists('product_images/' . $existing->image_name)) {
-                Storage::disk('public')->delete('product_images/' . $existing->image_name);
+            // Delete image
+            if ($existing->image_name && $existing->image_name !== 'NA') {
+                $path = public_path("myuploads/product/{$existing->image_name}");
+                if (file_exists($path)) @unlink($path);
             }
 
+            // Delete rates
+            DB::delete("DELETE FROM product_rate_list WHERE product_id = ?", [(string) $id]);
+
+            // Delete product
             DB::delete("DELETE FROM catalog_product WHERE id = ?", [$id]);
 
             DB::commit();

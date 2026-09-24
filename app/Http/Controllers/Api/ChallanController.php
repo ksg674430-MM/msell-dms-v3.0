@@ -1116,35 +1116,34 @@ public function cancel(Request $request, $id): JsonResponse
         ], 500);
     }
 }
-use App\Support\FilterBuilder;
 
-public function query(Request $request): JsonResponse
-{
-    $user = $request->user();
+// public function query(Request $request): JsonResponse
+// {
+//     $user = $request->user();
 
-    $fb = FilterBuilder::make('purchase_order', $request)      // ← change key
-        ->hardScope('po.dealer_id = ?', [(int) $user->dealer_id]);
+//     $fb = FilterBuilder::make('purchase_order', $request)      // ← change key
+//         ->hardScope('po.dealer_id = ?', [(int) $user->dealer_id]);
 
-    if ((int) $user->company_id > 0) {
-        $fb->hardScope('po.company_id = ?', [(int) $user->company_id]);
-    }
+//     if ((int) $user->company_id > 0) {
+//         $fb->hardScope('po.company_id = ?', [(int) $user->company_id]);
+//     }
 
-    if (!$fb->isValid()) {
-        return response()->json([
-            'status'  => false,
-            'message' => 'Invalid filter.',
-            'errors'  => $fb->errors(),
-        ], 422);
-    }
+//     if (!$fb->isValid()) {
+//         return response()->json([
+//             'status'  => false,
+//             'message' => 'Invalid filter.',
+//             'errors'  => $fb->errors(),
+//         ], 422);
+//     }
 
-    $result = $fb->run();
+//     $result = $fb->run();
 
-    return response()->json([
-        'status' => true,
-        'data'   => $result['rows'],
-        'meta'   => $result['meta'],
-    ]);
-}
+//     return response()->json([
+//         'status' => true,
+//         'data'   => $result['rows'],
+//         'meta'   => $result['meta'],
+//     ]);
+// }
   /**
  * Give stock back — inverse of reduceStock.
  * Writes to stock.remaining; also bumps qty on the row that
