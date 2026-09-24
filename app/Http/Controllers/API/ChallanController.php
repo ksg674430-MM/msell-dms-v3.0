@@ -196,10 +196,11 @@ class ChallanController extends Controller
         $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
 
         // State — try `id` first, fall back to `stateid`
-        $stateRow = DB::selectOne("SELECT * FROM state WHERE id = ? LIMIT 1", [$stateId]);
-        if (!$stateRow) {
-            $stateRow = DB::selectOne("SELECT * FROM state WHERE stateid = ? LIMIT 1", [$stateId]);
-        }
+        // State — PK is `stateid`
+$stateRow = DB::selectOne(
+    "SELECT * FROM state WHERE stateid = ? LIMIT 1",
+    [$stateId]
+);
 
         return response()->json([
             'status'       => true,
