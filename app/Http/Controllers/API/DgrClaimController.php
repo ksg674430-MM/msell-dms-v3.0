@@ -13,35 +13,35 @@ class DgrClaimController extends Controller
      * GET /api/dgr-claims
      * List of DGR image/amount claims for the dealer.
      */
-    use App\Support\FilterBuilder;
+//     use App\Support\FilterBuilder;
 
-public function query(Request $request): JsonResponse
-{
-    $user = $request->user();
+// public function query(Request $request): JsonResponse
+// {
+//     $user = $request->user();
 
-    $fb = FilterBuilder::make('dgr_claim', $request)
-        ->hardScope('c.dealer_id = ?', [(int) $user->dealer_id]);
+//     $fb = FilterBuilder::make('dgr_claim', $request)
+//         ->hardScope('c.dealer_id = ?', [(int) $user->dealer_id]);
 
-    if ((int) $user->company_id > 0) {
-        $fb->hardScope('c.company_id = ?', [(int) $user->company_id]);
-    }
+//     if ((int) $user->company_id > 0) {
+//         $fb->hardScope('c.company_id = ?', [(int) $user->company_id]);
+//     }
 
-    if (!$fb->isValid()) {
-        return response()->json([
-            'status'  => false,
-            'message' => 'Invalid filter.',
-            'errors'  => $fb->errors(),
-        ], 422);
-    }
+//     if (!$fb->isValid()) {
+//         return response()->json([
+//             'status'  => false,
+//             'message' => 'Invalid filter.',
+//             'errors'  => $fb->errors(),
+//         ], 422);
+//     }
 
-    $result = $fb->run();
+//     $result = $fb->run();
 
-    return response()->json([
-        'status' => true,
-        'data'   => $result['rows'],
-        'meta'   => $result['meta'],
-    ]);
-}
+//     return response()->json([
+//         'status' => true,
+//         'data'   => $result['rows'],
+//         'meta'   => $result['meta'],
+//     ]);
+// }
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();
