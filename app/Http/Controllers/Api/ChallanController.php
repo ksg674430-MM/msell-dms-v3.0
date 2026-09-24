@@ -133,91 +133,90 @@ class ChallanController extends Controller
     }
 
     /* =========================================================
-     |  FORM BOOTSTRAP
-     |  GET /api/challans/form-data
-     | ========================================================= */
-    public function formData(Request $request): JsonResponse
-    {
-        $user      = $request->user();
-        $dpId      = (int) $user->getKey();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) $user->company_id;
-        $stateId   = (int) $user->state_id;
-        $roleName  = $this->resolveRoleName($user->role_id);
+ |  FORM BOOTSTRAP
+ |  GET /api/challans/form-data
+ | ========================================================= */
+public function formData(Request $request): JsonResponse
+{
+    $user      = $request->user();
+    $dpId      = (int) $user->getKey();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) $user->company_id;
+    $stateId   = (int) $user->state_id;
+    $roleName  = $this->resolveRoleName($user->role_id);
 
-        // Retailers (DISTRIBUTOR)
-        $retailers = DB::select(
-            "SELECT r.id, CONCAT_WS(' ', r.name, '[', l7.name, ']') AS name
-               FROM retailer r
-               INNER JOIN location_7 l7 ON l7.id = r.location_id
-              WHERE r.dealer_id = ? AND r.retailer_status = '1'
-              GROUP BY r.id
-              ORDER BY r.name ASC",
+    // ---- Retailers (DISTRIBUTOR)
+    $retailers = DB::select(
+        "SELECT r.id, CONCAT_WS(' ', r.name, '[', l7.name, ']') AS name
+           FROM retailer r
+           INNER JOIN location_7 l7 ON l7.id = r.location_id
+          WHERE r.dealer_id = ? AND r.retailer_status = '1'
+          GROUP BY r.id
+          ORDER BY r.name ASC",
+        [$dealerId]
+    );
+
+    // ---- Beats (field force) — DISTRIBUTOR only
+    $beats = [];
+    if ($roleName === 'DISTRIBUTOR') {
+        $beats = DB::select(
+            "SELECT DISTINCT d.user_id AS id,
+                    CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name,
+                              '[', rl.rolename, ']') AS name
+               FROM dealer_location_rate_list d
+               INNER JOIN person       p  ON p.id  = d.user_id
+               INNER JOIN person_login pl ON pl.person_id = d.user_id
+               INNER JOIN _role        rl ON rl.role_id   = p.role_id
+              WHERE pl.person_status = 1
+                AND d.dealer_id = ?
+              ORDER BY p.first_name",
             [$dealerId]
         );
-
-        // Field force (DISTRIBUTOR only)
-        $users = [];
-        if ($roleName === 'DISTRIBUTOR') {
-            $users = DB::select(
-                "SELECT DISTINCT d.user_id AS id,
-                        CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name,
-                                  '[', rl.rolename, ']') AS name
-                   FROM dealer_location_rate_list d
-                   INNER JOIN person       p  ON p.id  = d.user_id
-                   INNER JOIN person_login pl ON pl.person_id = d.user_id
-                   INNER JOIN _role        rl ON rl.role_id   = p.role_id
-                  WHERE pl.person_status = 1
-                    AND d.dealer_id = ?
-                  ORDER BY p.first_name",
-                [$dealerId]
-            );
-        }
-
-        // Products with available stock
-        $products = DB::select(
-            "SELECT cp.id,
-                    CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name,
-                    cp.quantity_per_case,
-                    cp.hsn_code,
-                    COALESCE(SUM(s.qty), 0) AS available_stock
-               FROM catalog_product cp
-               LEFT JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ?
-              WHERE cp.status = 1
-                AND cp.company_id = ?
-              GROUP BY cp.id
-              HAVING available_stock > 0
-              ORDER BY cp.id",
-            [$dealerId, $companyId]
-        );
-
-        // Session year
-        $sessionRow  = DB::selectOne("SELECT * FROM session WHERE action = '1' LIMIT 1");
-        $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
-
-        // State — try `id` first, fall back to `stateid`
-        // State — PK is `stateid`
-$stateRow = DB::selectOne(
-    "SELECT * FROM state WHERE stateid = ? LIMIT 1",
-    [$stateId]
-);
-
-        return response()->json([
-            'status'       => true,
-            'role'         => $roleName,
-            'retailers'    => $retailers,
-            'users'        => $users,
-            'products'     => $products,
-            'session'      => $sessionRow,
-            'session_year' => $sessionYear,
-            'state'        => $stateRow,
-            'next_ch_no'   => $this->generateChNo($dpId, $dealerId, $companyId),
-            'dealer_id'    => $dealerId,
-            'company_id'   => $companyId,
-            'state_id'     => $stateId,
-            'dp_id'        => $dpId,
-        ]);
     }
+
+    // ---- Products with available stock
+    $products = DB::select(
+        "SELECT cp.id,
+                CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name,
+                cp.quantity_per_case,
+                cp.hsn_code,
+                COALESCE(SUM(s.qty), 0) AS available_stock
+           FROM catalog_product cp
+           LEFT JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ?
+          WHERE cp.status = 1
+            AND cp.company_id = ?
+          GROUP BY cp.id
+          HAVING available_stock > 0
+          ORDER BY cp.id",
+        [$dealerId, $companyId]
+    );
+
+    // ---- Session year
+    $sessionRow  = DB::selectOne("SELECT * FROM session WHERE action = '1' LIMIT 1");
+    $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
+
+    // ---- State — PK is `stateid`
+    $stateRow = DB::selectOne(
+        "SELECT * FROM state WHERE stateid = ? LIMIT 1",
+        [$stateId]
+    );
+
+    return response()->json([
+        'status'       => true,
+        'role'         => $roleName,
+        'retailers'    => $retailers,
+        'beats'        => $beats,
+        'products'     => $products,
+        'session'      => $sessionRow,
+        'session_year' => $sessionYear,
+        'state'        => $stateRow,
+        'next_ch_no'   => $this->generateChNo($dpId, $dealerId, $companyId),
+        'dealer_id'    => $dealerId,
+        'company_id'   => $companyId,
+        'state_id'     => $stateId,
+        'dp_id'        => $dpId,
+    ]);
+}
 
     /* =========================================================
      |  SAVE
