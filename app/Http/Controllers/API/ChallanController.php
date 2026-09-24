@@ -351,9 +351,7 @@ class ChallanController extends Controller
                 $vatAmt   = isset($it['vat_amt']) && $it['vat_amt'] !== null
                     ? (float) $it['vat_amt']
                     : round($taxable * $tax / 100, 2);
-                $amount   = isset($it['amount']) && $it['amount'] !== null
-                    ? (float) $it['amount']
-                    : round($taxable + $vatAmt, 2);
+                $amount   = round($taxable + $vatAmt, 2);
 
                 // HSN lookup
                 $hsn = (string) ($it['hsn_code'] ?? '');
@@ -431,7 +429,7 @@ class ChallanController extends Controller
                         $l['cd'], $l['cdType'], $l['cdAmt'],
                         $l['splDiscAmt'], $l['cashAmt'],
                         $l['disType'], $l['disAmt'], $l['disPct'],
-                        $l['taxable'], $l['amount'],
+                        $l['amount'], $l['amount'],
                     ]
                 );
 
@@ -573,7 +571,7 @@ class ChallanController extends Controller
                         $tax       = (float) ($it['vat']         ?? 18);
                         $taxable   = (float) ($it['taxable_amt'] ?? ($qty * $rate));
                         $vatAmt    = (float) ($it['vat_amt']     ?? round($taxable * $tax / 100, 2));
-                        $amount    = (float) ($it['amount']      ?? round($taxable + $vatAmt, 2));
+                        $amount    = round($taxable + $vatAmt, 2);
                         $batchNo   = (string)($it['batch_no']    ?? '');
                         $mfgDate   = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
 
@@ -655,7 +653,7 @@ class ChallanController extends Controller
                                 $l['batchNo'], $l['tax'], $l['vatAmt'],
                                 $l['qty'], $l['rate'], $l['schQty'],
                                 $orderId, $orderRow->user_id, $l['mrp'],
-                                $l['taxable'], $l['amount'], $l['mfgDate'],
+                                $l['amount'], $l['amount'], $l['mfgDate'],
                             ]
                         );
                     }
@@ -833,9 +831,7 @@ class ChallanController extends Controller
                 $vatAmt  = isset($it['vat_amt']) && $it['vat_amt'] !== null
                     ? (float) $it['vat_amt']
                     : round($taxable * $tax / 100, 2);
-                $amount  = isset($it['amount']) && $it['amount'] !== null
-                    ? (float) $it['amount']
-                    : round($taxable + $vatAmt, 2);
+                $amount  = round($taxable + $vatAmt, 2);
 
                 // HSN
                 $hsn = (string) ($it['hsn_code'] ?? '');
@@ -929,7 +925,7 @@ class ChallanController extends Controller
                         $l['cd'], $l['cdType'], $l['cdAmt'],
                         $l['splDiscAmt'], $l['cashAmt'],
                         $l['disType'], $l['disAmt'], $l['disPct'],
-                        $l['taxable'], $l['amount'],
+                        $l['amount'], $l['amount'],
                     ]
                 );
             }
