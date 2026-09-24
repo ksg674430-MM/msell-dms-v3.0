@@ -292,8 +292,9 @@ class ChallanController extends Controller
 
         // Allocate a unique challan id
         $chId = null;
-        for ($attempt = 0; $attempt < 5; $attempt++) {
-            $candidate = $dealerId . date('ymdHis') . random_int(100, 999);
+        $baseId = (int) ($dealerId . date('ymdHis'));
+        for ($attempt = 0; $attempt < 50; $attempt++) {
+            $candidate = $baseId + $attempt;
             $exists = DB::selectOne(
                 "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
                 [$candidate]
@@ -541,8 +542,9 @@ class ChallanController extends Controller
 
                     // Allocate unique challan id
                     $chId = null;
-                    for ($attempt = 0; $attempt < 5; $attempt++) {
-                        $candidate = $dealerId . date('ymdHis') . random_int(100, 999);
+                    $baseId = (int) ($dealerId . date('ymdHis'));
+                    for ($attempt = 0; $attempt < 50; $attempt++) {
+                        $candidate = $baseId + $attempt;
                         $exists = DB::selectOne(
                             "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
                             [$candidate]
