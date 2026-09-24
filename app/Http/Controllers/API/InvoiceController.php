@@ -303,13 +303,11 @@ class InvoiceController extends Controller
         return '';
     }
 
-
-    public function cancel(Request $request, string $id): JsonResponse
+public function cancel(Request $request, string $id): JsonResponse
 {
     $validated = $request->validate([
         'reason' => 'nullable|string|max:255',
     ]);
-
     $reason = $validated['reason'] ?? 'No reason provided';
 
     $user     = $request->user();
@@ -327,7 +325,6 @@ class InvoiceController extends Controller
     if (!$invoice) {
         return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
     }
-
     if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
         return response()->json(['status' => false, 'message' => $lock], 409);
     }
@@ -342,7 +339,7 @@ class InvoiceController extends Controller
         );
         foreach ($detailRows as $r) {
             $data = (array) $r;
-            $data['status'] = 1;
+            $data['status'] = 'CANCEL';               // ← yahan
             DB::table('challan_order_details_cancel')->insert($data);
         }
         DB::table('challan_order_details')->where('ch_id', $id)->delete();
@@ -354,9 +351,8 @@ class InvoiceController extends Controller
         if (!$headerRow) {
             throw new \RuntimeException('Header vanished mid-transaction.');
         }
-
         $h = (array) $headerRow;
-        $h['status'] = 1;
+        $h['status'] = 'CANCEL';                      // ← yahan
         $h['remark'] = trim(($headerRow->remark ?? '') . ' | CANCELLED: ' . $reason);
         $h['sesId']  = (int) $user->id;
 
@@ -371,7 +367,6 @@ class InvoiceController extends Controller
         'ch_no'   => $invoice->ch_no,
     ]);
 }
-
 public function destroy(Request $request, string $id): JsonResponse
 {
     $user     = $request->user();
@@ -410,19 +405,17 @@ public function destroy(Request $request, string $id): JsonResponse
 
         $this->restoreStock($id, $dealerId, (int) $invoice->company_id);
 
-        // Details move — named insert, positional nahi
         $detailRows = DB::select(
             "SELECT * FROM challan_order_details WHERE ch_id = ?",
             [$id]
         );
         foreach ($detailRows as $r) {
             $data = (array) $r;
-            $data['status'] = 1;
+            $data['status'] = 'DELETE';               // ← yahan
             DB::table('challan_order_details_cancel')->insert($data);
         }
         DB::table('challan_order_details')->where('ch_id', $id)->delete();
 
-        // Header move — named insert
         $headerRow = DB::selectOne(
             "SELECT * FROM challan_order WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
             [$id, $dealerId]
@@ -430,9 +423,8 @@ public function destroy(Request $request, string $id): JsonResponse
         if (!$headerRow) {
             throw new \RuntimeException('Header vanished mid-transaction.');
         }
-
         $h = (array) $headerRow;
-        $h['status'] = 1;
+        $h['status'] = 'DELETE';                      // ← yahan
         $h['remark'] = trim(($headerRow->remark ?? '') . ' | DELETED');
         $h['sesId']  = (int) $user->id;
 
