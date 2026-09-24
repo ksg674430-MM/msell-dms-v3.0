@@ -153,6 +153,8 @@ Route::prefix('retailers')->group(function () {
     Route::get   ('/invoices',              [InvoiceController::class, 'index']);
     Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);
     Route::post('/invoices/query',       [InvoiceController::class, 'query']);
+    Route::post  ('invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+    Route::delete('invoices/{id}',        [InvoiceController::class, 'destroy']);
 
     // IRN this need to be tested too so do not check it yet
     Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);

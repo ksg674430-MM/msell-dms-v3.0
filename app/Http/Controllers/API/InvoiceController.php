@@ -42,6 +42,19 @@ class InvoiceController extends Controller
 //         'meta'   => $result['meta'],
 //     ]);
 // }
+
+private function tableExists(string $table): bool
+{
+    $row = DB::selectOne(
+        "SELECT COUNT(*) AS c
+           FROM information_schema.tables
+          WHERE table_schema = DATABASE()
+            AND table_name   = ?",
+        [$table]
+    );
+
+    return ((int) ($row->c ?? 0)) > 0;
+}
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -301,4 +314,214 @@ class InvoiceController extends Controller
         if ((int) $r->invoice_type === 2) return 'Secondary Sale Invoice';
         return '';
     }
+ 
+public function cancel(Request $request, string $id): JsonResponse
+{
+    $validated = $request->validate([
+        'reason' => 'required|string|max:255',
+    ]);
+
+    $user     = $request->user();
+    $dealerId = (int) $user->dealer_id;
+
+    $invoice = DB::selectOne(
+        "SELECT id, ch_no, company_id, ch_dealer_id, dispatch_status,
+                payment_status, isclaim, crdr_status, remark
+           FROM challan_order
+          WHERE id = ? AND ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+
+    if (!$invoice) {
+        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+    }
+
+    if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        return response()->json(['status' => false, 'message' => $lock], 409);
+    }
+
+    DB::transaction(function () use ($id, $invoice, $user, $validated, $dealerId) {
+
+        // 1. Stock wapas
+        $this->restoreStock($id, $dealerId, (int) $invoice->company_id);
+
+        // 2. Details move — named insert, positional nahi
+        $detailRows = DB::select(
+            "SELECT * FROM challan_order_details WHERE ch_id = ?",
+            [$id]
+        );
+        foreach ($detailRows as $r) {
+            $data = (array) $r;
+            $data['status'] = 1;
+            DB::table('challan_order_details_cancel')->insert($data);
+        }
+        DB::table('challan_order_details')->where('ch_id', $id)->delete();
+
+        // 3. Header move — named insert
+        $headerRow = DB::selectOne(
+            "SELECT * FROM challan_order WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
+            [$id, $dealerId]
+        );
+        if (!$headerRow) {
+            throw new \RuntimeException('Header vanished mid-transaction.');
+        }
+        $h = (array) $headerRow;
+        $h['status']  = 1;
+        $h['remark']  = trim(($headerRow->remark ?? '') . ' | CANCELLED: ' . $validated['reason']);
+        $h['sesId']   = (int) $user->id;
+
+        DB::table('challan_order_cancel')->insert($h);
+        DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
+    });
+
+    return response()->json([
+        'status'  => true,
+        'message' => 'Invoice cancelled and moved to challan_order_cancel.',
+        'id'      => (string) $invoice->id,
+        'ch_no'   => $invoice->ch_no,
+    ]);
+}
+
+
+public function destroy(Request $request, string $id): JsonResponse
+{
+    $user     = $request->user();
+    $dealerId = (int) $user->dealer_id;
+
+    $invoice = DB::selectOne(
+        "SELECT id, ch_no, company_id, dispatch_status, payment_status, isclaim
+           FROM challan_order
+          WHERE id = ? AND ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+
+    // Agar already cancel table me hai, kuch mat karo
+    if (!$invoice) {
+        $already = DB::selectOne(
+            "SELECT id, ch_no FROM challan_order_cancel
+              WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
+            [$id, $dealerId]
+        );
+        if ($already) {
+            return response()->json([
+                'status'  => true,
+                'message' => 'Invoice already cancelled.',
+                'id'      => (string) $already->id,
+                'ch_no'   => $already->ch_no,
+            ]);
+        }
+        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+    }
+
+    if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        return response()->json(['status' => false, 'message' => $lock], 409);
+    }
+
+    DB::transaction(function () use ($id, $invoice, $user, $dealerId) {
+        $this->restoreStock($id, $dealerId, (int) $invoice->company_id);
+
+        if ($this->tableExists('challan_order_details_cancel')) {
+            DB::statement(
+                "INSERT INTO challan_order_details_cancel
+                 SELECT * FROM challan_order_details WHERE ch_id = ?",
+                [$id]
+            );
+            DB::table('challan_order_details')->where('ch_id', $id)->delete();
+        }
+
+        DB::statement(
+            "INSERT INTO challan_order_cancel
+             SELECT *, 1 AS status FROM challan_order WHERE id = ? AND ch_dealer_id = ?",
+            [$id, $dealerId]
+        );
+
+        DB::table('challan_order_cancel')
+            ->where('id', $id)
+            ->update([
+                'remark' => trim(($invoice->remark ?? '') . ' | DELETED'),
+                'sesId'  => (int) $user->id,
+            ]);
+
+        DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
+    });
+
+    return response()->json([
+        'status'  => true,
+        'message' => 'Invoice moved to challan_order_cancel.',
+        'id'      => (string) $invoice->id,
+        'ch_no'   => $invoice->ch_no,
+    ]);
+}
+/**
+ * Returns a human message if the invoice is locked from cancel/delete, else null.
+ */
+private function invoiceLockReason(object $inv, int $dealerId): ?string
+{
+    if ((int) $inv->dispatch_status === 1) return 'Invoice already dispatched.';
+    if ((int) $inv->payment_status  === 1) return 'Payment already recorded against this invoice.';
+    if ((int) $inv->isclaim         === 1) return 'Claim already filed against this invoice.';
+
+    $irn = DB::selectOne(
+        "SELECT id FROM einvoice_api_logs
+          WHERE challan_id = ? AND status = 1
+          LIMIT 1",
+        [(string) $inv->id]
+    );
+    if ($irn) return 'E-invoice (IRN) already generated for this invoice.';
+
+    $claim = DB::selectOne(
+        "SELECT id FROM dms_retailer_images_amount_claim
+          WHERE order_id = ? AND dealer_id = ?
+          LIMIT 1",
+        [(string) $inv->id, $dealerId]
+    );
+    if ($claim) return 'Claim exists for this invoice.';
+
+    return null;
+}
+
+/**
+ * Puts back the qty that the invoice had deducted from stock.
+ *
+ * ⚠ Assumes:
+ *   - stock has columns: dealer_id, product_id, batch_no, mfg, qty, remaining
+ *   - challan_order_details.mfg_date maps to stock.mfg
+ *   - the same qty column(s) the save path decremented are restored here.
+ *     If save only touched `remaining`, drop the `qty = qty + ?` part.
+ */
+private function restoreStock(string $chId, int $dealerId, int $companyId): void
+{
+    $items = DB::select(
+        "SELECT product_id, batch_no, mfg_date, qty, free_qty
+           FROM challan_order_details
+          WHERE ch_id = ?",
+        [$chId]
+    );
+
+    foreach ($items as $it) {
+        $totalQty = (float) $it->qty + (float) $it->free_qty;
+        if ($totalQty <= 0) continue;
+
+        DB::update(
+            "UPDATE stock
+                SET qty       = qty       + ?,
+                    remaining = remaining + ?
+              WHERE dealer_id  = ?
+                AND product_id = ?
+                AND batch_no   = ?
+                AND mfg        = ?
+              LIMIT 1",
+            [
+                $totalQty,
+                $totalQty,
+                $dealerId,
+                (int) $it->product_id,
+                (string) $it->batch_no,
+                $it->mfg_date,
+            ]
+        );
+    }
+}
 }
