@@ -208,7 +208,7 @@ class ChallanController extends Controller
             'status'       => true,
             'role'         => $roleName,
             'retailers'    => $retailers,
-            'beats'        => $beats,
+            'field_force_name'        => $beats,
             'products'     => $products,
             'session'      => $sessionRow,
             'session_year' => $sessionYear,
