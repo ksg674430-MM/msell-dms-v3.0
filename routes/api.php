@@ -131,7 +131,6 @@ Route::prefix('retailers')->group(function () {
     Route::get   ('/challans/next-number',                [ChallanController::class, 'nextNumber']);
     Route::get   ('/challans/form-data',                  [ChallanController::class, 'formData']);
     Route::post  ('/challans/scheme-qty',                 [ChallanHelperController::class, 'schemeQty']);
-    Route::post  ('/challans/scheme-rate',                [ChallanHelperController::class, 'schemeRate']);//19
     Route::get   ('/challans/product-stock/{id}',         [ChallanHelperController::class, 'productStock']);//20
     Route::put   ('/challans/{id}',        [ChallanController::class, 'update']);
     Route::post  ('/challans/{id}/cancel', [ChallanController::class, 'cancel']);
