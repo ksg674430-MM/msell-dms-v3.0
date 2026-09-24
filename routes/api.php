@@ -36,7 +36,7 @@ use App\Http\Controllers\Api\CatalogProductController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:sanctum')->group( function () {
     // Auth
     Route::get('/me',      [AuthController::class, 'me']);
     //Menu controller
@@ -49,37 +49,33 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/challans/query',       [ChallanController::class, 'query']);
 
 
-
-
-
-
     // Profile
     Route::get('/profile',  [ProfileController::class, 'show']);
     Route::post('/profile', [ProfileController::class, 'update']);
 
-    // MAster Routes 
+    // Master Routes 
     // Van 
     Route::get('/vans', [VanController::class, 'index']);
-Route::get('/vans/{id}', [VanController::class, 'show']);
-Route::post('/vans', [VanController::class, 'store']);
-Route::put('/vans/{id}', [VanController::class, 'update']);
-Route::delete('/vans/{id}', [VanController::class, 'destroy']);
+    Route::get('/vans/{id}', [VanController::class, 'show']);
+    Route::post('/vans', [VanController::class, 'store']);
+    Route::put('/vans/{id}', [VanController::class, 'update']);
+    Route::delete('/vans/{id}', [VanController::class, 'destroy']);
 
-// Threshold Routes
-Route::get('/thresholds', [ThresholdController::class, 'index']);
-Route::get('/thresholds/products', [ThresholdController::class, 'products']);
-Route::get('/thresholds/{id}', [ThresholdController::class, 'show']);
-Route::post('/thresholds', [ThresholdController::class, 'store']);
-Route::put('/thresholds/{id}', [ThresholdController::class, 'update']);
-Route::delete('/thresholds/{id}', [ThresholdController::class, 'destroy']);
-// CatalogController
+    // Threshold Routes
+    Route::get('/thresholds', [ThresholdController::class, 'index']);
+    Route::get('/thresholds/products', [ThresholdController::class, 'products']);
+    Route::get('/thresholds/{id}', [ThresholdController::class, 'show']);
+    Route::post('/thresholds', [ThresholdController::class, 'store']);
+    Route::put('/thresholds/{id}', [ThresholdController::class, 'update']);
+    Route::delete('/thresholds/{id}', [ThresholdController::class, 'destroy']);
 
-Route::get('/catalog-products', [CatalogProductController::class, 'index']);
-Route::get('/catalog-products/filters', [CatalogProductController::class, 'filters']);
-Route::get('/catalog-products/{id}', [CatalogProductController::class, 'show']);
-Route::post('/catalog-products', [CatalogProductController::class, 'store']);
-Route::put('/catalog-products/{id}', [CatalogProductController::class, 'update']);
-Route::delete('/catalog-products/{id}', [CatalogProductController::class, 'destroy']);
+    // CatalogController
+    Route::get('/catalog-products', [CatalogProductController::class, 'index']);
+    Route::get('/catalog-products/filters', [CatalogProductController::class, 'filters']);
+    Route::get('/catalog-products/{id}', [CatalogProductController::class, 'show']);
+    Route::post('/catalog-products', [CatalogProductController::class, 'store']);
+    Route::put('/catalog-products/{id}', [CatalogProductController::class, 'update']);
+    Route::delete('/catalog-products/{id}', [CatalogProductController::class, 'destroy']);
 
 //  Retailer's related methods
 Route::prefix('retailers')->group(function () {
@@ -177,4 +173,5 @@ Route::prefix('lookup')->group(function () {
     Route::get('/{entity}/schema',  [LookupController::class, 'schema']);
     Route::post('/',                [LookupController::class, 'run']);
 });
+
 });    
