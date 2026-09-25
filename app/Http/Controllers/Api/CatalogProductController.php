@@ -14,116 +14,137 @@ class CatalogProductController extends Controller
      * Filters: item_name, item_code, catalog_1_id, catalog_2_id, catalog_3_id
      */
     public function index(Request $request): JsonResponse
-    {
-        $user      = $request->user();
-        $companyId = (int) ($user->company_id ?? 0);
-        $stateId   = (string) ($user->state_id ?? 0);
+{
+    $user            = $request->user();
+    $companyId       = (int) ($user->company_id ?? 0);
+    $stateId         = (string) ($user->state_id ?? 0);
+    $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
 
-        $where    = ["cp.company_id = ?"];
-        $bindings = [$stateId, $stateId, $companyId]; // for the 2 rate subqueries + where
+    // Per-piece rate column depends on login type
+    // DB/SS (ownership_type_id = 245) → ss_pcs_rate, else dealer_pcs_rate
+    $rateCol = ($ownershipTypeId === 245) ? 'ss_pcs_rate' : 'dealer_pcs_rate';
 
-        if ($itemName = $request->input('item_name')) {
-            $where[] = "cv.product_name LIKE ?";
-            $bindings[] = "%{$itemName}%";
-        }
-        if ($itemCode = $request->input('item_code')) {
-            $where[] = "cp.itemcode LIKE ?";
-            $bindings[] = "%{$itemCode}%";
-        }
-        if ($c1 = $request->input('catalog_1_id')) {
-            $where[] = "cv.c0_id = ?";
-            $bindings[] = (int) $c1;
-        }
-        if ($c2 = $request->input('catalog_2_id')) {
-            $where[] = "cv.c1_id = ?";
-            $bindings[] = (int) $c2;
-        }
-        if ($c3 = $request->input('catalog_3_id')) {
-            $where[] = "cv.c2_id = ?";
-            $bindings[] = (int) $c3;
-        }
+    // Company 213 only counts active rate rows
+    $statusFilter = ($companyId === 213) ? " AND prl.status = 1" : "";
 
-        $whereSql = implode(' AND ', $where);
+    // Bindings order: subquery1 state, subquery2 state, company WHERE, EXISTS state
+    $bindings = [$stateId, $stateId, $companyId];
 
-        $sql = "SELECT
-                    cp.id,
-                    cp.itemcode,
-                    cp.name              AS item_name,
-                    cp.hsn_code,
-                    cp.weight,
-                    cp.unit,
-                    cp.image_name,
-                    cp.quantity_per_case,
-                    cp.catalog_id,
-                    cv.product_name,
-                    cv.c0_id, cv.c0_name,
-                    cv.c1_id, cv.c1_name,
-                    cv.c2_id, cv.c2_name,
-                    (SELECT prl.mrp FROM product_rate_list prl
-                        WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
-                        LIMIT 1) AS mrp,
-                    (SELECT prl.dealer_rate FROM product_rate_list prl
-                        WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
-                        LIMIT 1) AS dealer_rate
-                FROM catalog_product cp
-                INNER JOIN catalog_view cv ON cv.product_id = cp.id
-                WHERE {$whereSql}
-                ORDER BY cp.name ASC";
+    $where = ["cp.company_id = ?"];
 
-        $rows = DB::select($sql, $bindings);
+    // Legacy: only products that have a rate row for user's state
+    $where[]    = "EXISTS (SELECT 1 FROM product_rate_list prl
+                            WHERE prl.product_id = cp.id
+                              AND prl.state_id = ?{$statusFilter})";
+    $bindings[] = $stateId;
 
-        // Build image URLs
-        foreach ($rows as $row) {
-            $row->image_url = ($row->image_name && $row->image_name !== 'NA')
-                ? url("myuploads/product/{$row->image_name}")
-                : null;
-        }
-
-        return response()->json([
-            'status' => true,
-            'rows'   => $rows,
-        ]);
+    if ($itemName = $request->input('item_name')) {
+        $where[]    = "cv.product_name LIKE ?";
+        $bindings[] = "%{$itemName}%";
+    }
+    if ($itemCode = $request->input('item_code')) {
+        $where[]    = "cp.itemcode LIKE ?";
+        $bindings[] = "%{$itemCode}%";
+    }
+    if ($c1 = $request->input('catalog_1_id')) {
+        $where[]    = "cv.c0_id = ?";
+        $bindings[] = (int) $c1;
+    }
+    if ($c2 = $request->input('catalog_2_id')) {
+        $where[]    = "cv.c1_id = ?";
+        $bindings[] = (int) $c2;
+    }
+    if ($c3 = $request->input('catalog_3_id')) {
+        $where[]    = "cv.c2_id = ?";
+        $bindings[] = (int) $c3;
     }
 
-    /**
-     * GET /api/catalog-products/{id}
-     */
-    public function show(Request $request, int $id): JsonResponse
-    {
-        $user      = $request->user();
-        $companyId = (int) ($user->company_id ?? 0);
-        $stateId   = (string) ($user->state_id ?? 0);
+    $whereSql = implode(' AND ', $where);
 
-        $row = DB::selectOne(
-            "SELECT
-                cp.*,
+    $sql = "SELECT
+                cp.id,
+                cp.itemcode,
+                cp.name              AS item_name,
+                cp.hsn_code,
+                cp.weight,
+                cp.unit,
+                cp.image_name,
+                cp.quantity_per_case,
+                cp.catalog_id,
                 cv.product_name,
                 cv.c0_id, cv.c0_name,
                 cv.c1_id, cv.c1_name,
                 cv.c2_id, cv.c2_name,
-                (SELECT prl.mrp FROM product_rate_list prl
-                    WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                (SELECT prl.mrp_pcs FROM product_rate_list prl
+                    WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
                     LIMIT 1) AS mrp,
-                (SELECT prl.dealer_rate FROM product_rate_list prl
-                    WHERE prl.product_id = cp.id AND prl.state_id = ? AND prl.status = 1
+                (SELECT prl.{$rateCol} FROM product_rate_list prl
+                    WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
                     LIMIT 1) AS dealer_rate
-             FROM catalog_product cp
-             INNER JOIN catalog_view cv ON cv.product_id = cp.id
-             WHERE cp.id = ? AND cp.company_id = ?
-             LIMIT 1",
-            [$stateId, $stateId, $id, $companyId]
-        );
+            FROM catalog_product cp
+            LEFT JOIN catalog_view cv ON cv.product_id = cp.id
+            WHERE {$whereSql}
+            ORDER BY COALESCE(cv.c0_name,'') ASC,
+                     COALESCE(cv.c1_name,'') ASC,
+                     COALESCE(cv.c2_name,'') ASC,
+                     cp.name ASC";
 
-        if (!$row) {
-            return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
-        }
+    $rows = DB::select($sql, $bindings);
 
+    foreach ($rows as $row) {
         $row->image_url = ($row->image_name && $row->image_name !== 'NA')
             ? url("myuploads/product/{$row->image_name}")
             : null;
-
-        return response()->json(['status' => true, 'row' => $row]);
     }
+
+    return response()->json([
+        'status' => true,
+        'rows'   => $rows,
+    ]);
+}
+    /**
+     * GET /api/catalog-products/{id}
+     */
+   public function show(Request $request, int $id): JsonResponse
+{
+    $user            = $request->user();
+    $companyId       = (int) ($user->company_id ?? 0);
+    $stateId         = (string) ($user->state_id ?? 0);
+    $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
+
+    $rateCol      = ($ownershipTypeId === 245) ? 'ss_pcs_rate' : 'dealer_pcs_rate';
+    $statusFilter = ($companyId === 213) ? " AND prl.status = 1" : "";
+
+    $row = DB::selectOne(
+        "SELECT
+            cp.*,
+            cv.product_name,
+            cv.c0_id, cv.c0_name,
+            cv.c1_id, cv.c1_name,
+            cv.c2_id, cv.c2_name,
+            (SELECT prl.mrp_pcs FROM product_rate_list prl
+                WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
+                LIMIT 1) AS mrp,
+            (SELECT prl.{$rateCol} FROM product_rate_list prl
+                WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
+                LIMIT 1) AS dealer_rate
+         FROM catalog_product cp
+         LEFT JOIN catalog_view cv ON cv.product_id = cp.id
+         WHERE cp.id = ? AND cp.company_id = ?
+         LIMIT 1",
+        [$stateId, $stateId, $id, $companyId]
+    );
+
+    if (!$row) {
+        return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
+    }
+
+    $row->image_url = ($row->image_name && $row->image_name !== 'NA')
+        ? url("myuploads/product/{$row->image_name}")
+        : null;
+
+    return response()->json(['status' => true, 'row' => $row]);
+}
 
     /**
      * GET /api/catalog-products/filters
