@@ -33,145 +33,199 @@ use App\Http\Controllers\Api\ThresholdController;
 use App\Http\Controllers\Api\CatalogProductController;
 
 
-
+// ============================================================
+// PUBLIC (no auth)
+// ============================================================
+// MENU: Login screen
 Route::post('/login', [AuthController::class, 'login']);
 
-Route::middleware('auth:sanctum')->group( function () {
-    // Auth
-    Route::get('/me',      [AuthController::class, 'me']);
-    //Menu controller
-    Route::get('/menu', [MenuController::class, 'index']);
-    Route::post('/logout', [AuthController::class, 'logout']);
+Route::middleware('auth:sanctum')->group(function () {
 
-    // Dashboard
-    Route::get('/dashboard',     [DashboardController::class, 'index']);
-    Route::get('/dashboard/mtd', [DashboardController::class, 'mtd']);
-    Route::post('/challans/query',       [ChallanController::class, 'query']);
+    // ========================================================
+    // AUTH  → MENU: App boot / Session
+    // ========================================================
+    Route::get('/me',      [AuthController::class, 'me']);       // app load pe user info
+    Route::post('/logout', [AuthController::class, 'logout']);   // MENU: Logout button
 
+    // ========================================================
+    // MENU  → MENU: Sidebar / Hamburger
+    // ========================================================
+    Route::get('/menu', [MenuController::class, 'index']);       // sidebar items (role-wise)
 
-    // Profile
-    Route::get('/profile',  [ProfileController::class, 'show']);
-    Route::post('/profile', [ProfileController::class, 'update']);
+    // ========================================================
+    // DASHBOARD  → MENU: Dashboard / Home
+    // ========================================================
+    Route::get('/dashboard',     [DashboardController::class, 'index']);  // cards, today's sale
+    Route::get('/dashboard/mtd', [DashboardController::class, 'mtd']);    // month-to-date view
 
-    // Master Routes 
-    // Van 
-    Route::get('/vans', [VanController::class, 'index']);
-    Route::get('/vans/{id}', [VanController::class, 'show']);
-    Route::post('/vans', [VanController::class, 'store']);
-    Route::put('/vans/{id}', [VanController::class, 'update']);
-    Route::delete('/vans/{id}', [VanController::class, 'destroy']);
+    // ========================================================
+    // PROFILE  → MENU: My Profile
+    // ========================================================
+    Route::get('/profile',  [ProfileController::class, 'show']);    // profile screen load
+    Route::post('/profile', [ProfileController::class, 'update']);  // save button
 
-    // Threshold Routes
-    Route::get('/thresholds', [ThresholdController::class, 'index']);
-    Route::get('/thresholds/products', [ThresholdController::class, 'products']);
-    Route::get('/thresholds/{id}', [ThresholdController::class, 'show']);
-    Route::post('/thresholds', [ThresholdController::class, 'store']);
-    Route::put('/thresholds/{id}', [ThresholdController::class, 'update']);
-    Route::delete('/thresholds/{id}', [ThresholdController::class, 'destroy']);
+    // ========================================================
+    // MASTER DATA
+    // ========================================================
 
-    // CatalogController
-    Route::get('/catalog-products', [CatalogProductController::class, 'index']);
-    Route::get('/catalog-products/filters', [CatalogProductController::class, 'filters']);
-    Route::get('/catalog-products/{id}', [CatalogProductController::class, 'show']);
-    Route::post('/catalog-products', [CatalogProductController::class, 'store']);
-    Route::put('/catalog-products/{id}', [CatalogProductController::class, 'update']);
-    Route::delete('/catalog-products/{id}', [CatalogProductController::class, 'destroy']);
+    // --------------------------------------------------------
+    // VAN  → MENU: Master → Van
+    // --------------------------------------------------------
+    Route::get   ('/vans',      [VanController::class, 'index']);   // van list
+    Route::get   ('/vans/{id}', [VanController::class, 'show']);    // van detail
+    Route::post  ('/vans',      [VanController::class, 'store']);   // add van
+    Route::put   ('/vans/{id}', [VanController::class, 'update']);  // edit van
+    Route::delete('/vans/{id}', [VanController::class, 'destroy']); // delete van
 
-//  Retailer's related methods
-Route::prefix('retailers')->group(function () {
-    Route::get('/',              [RetailerController::class, 'index']);
-    Route::post('/query', [RetailerController::class, 'query']);
-    Route::get('/form-data',     [RetailerController::class, 'formData']);   
-    Route::get('/locations',     [RetailerController::class, 'locations']);
-    Route::post('/',             [RetailerController::class, 'store']);
-    Route::get('/{id}',          [RetailerController::class, 'show']);
-    Route::put('/{id}',          [RetailerController::class, 'update']);
-    Route::delete('/{id}',       [RetailerController::class, 'destroy']);
-});
+    // --------------------------------------------------------
+    // THRESHOLD  → MENU: Master → Threshold / Low-stock alert
+    // --------------------------------------------------------
+    Route::get   ('/thresholds',          [ThresholdController::class, 'index']);    // list
+    Route::get   ('/thresholds/products', [ThresholdController::class, 'products']); // product dropdown
+    Route::get   ('/thresholds/{id}',     [ThresholdController::class, 'show']);     // detail
+    Route::post  ('/thresholds',          [ThresholdController::class, 'store']);    // create
+    Route::put   ('/thresholds/{id}',     [ThresholdController::class, 'update']);   // edit
+    Route::delete('/thresholds/{id}',     [ThresholdController::class, 'destroy']);  // delete
 
-//Master Ends
+    // --------------------------------------------------------
+    // CATALOG PRODUCT  → MENU: Master → Products
+    // --------------------------------------------------------
+    Route::get   ('/catalog-products',         [CatalogProductController::class, 'index']);   // product list
+    Route::get   ('/catalog-products/filters', [CatalogProductController::class, 'filters']); // filter dropdowns
+    Route::get   ('/catalog-products/{id}',    [CatalogProductController::class, 'show']);    // product detail
+    Route::post  ('/catalog-products',         [CatalogProductController::class, 'store']);   // add product
+    Route::put   ('/catalog-products/{id}',    [CatalogProductController::class, 'update']);  // edit
+    Route::delete('/catalog-products/{id}',    [CatalogProductController::class, 'destroy']); // delete
 
-// Stocks Start 
-// Current Stock APis
-    Route::get('/reports/balance-stock',                 [BalanceStockController::class, 'index']);          
-    Route::get('/reports/balance-stock/catalog-options', [BalanceStockController::class, 'catalogOptions']); 
-    Route::get('/reports/balance-stock/filters', [BalanceStockController::class, 'filters']);
-    Route::get('/filters/classifications', [BalanceStockController::class, 'classifications']);
-    Route::get('/filters/categories',      [BalanceStockController::class, 'categories']);
-    Route::get('/filters/product-names',   [BalanceStockController::class, 'productNames']);
-    Route::get('/filters/skus',            [BalanceStockController::class, 'skus']);
-
-// Opening Stock Api's 
-    Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']);
-    Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);
-    Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);
-    Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);
-    Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);
-    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);
-    Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);
-    Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);
-    Route::post('/opening-stocks/query', [OpeningStockController::class, 'query']);
-// Receive Stocks Api'and create Stocks and all things 
-    Route::prefix('purchase-orders')->group(function () {
-    Route::get('/',            [PurchaseOrderController::class, 'index']);
-    Route::get('/form-data',   [PurchaseOrderController::class, 'formData']);
-    Route::post('/',           [PurchaseOrderController::class, 'store']);
-
-    Route::get('/{id}',        [PurchaseOrderController::class, 'show']);
-    Route::put('/{id}',        [PurchaseOrderController::class, 'update']);
-    Route::post('/{id}/receive', [PurchaseOrderController::class, 'receive']);
-    Route::post('/query',[PurchaseOrderController::class, 'query']);
+    // --------------------------------------------------------
+    // RETAILER  → MENU: Master → Retailers
+    // --------------------------------------------------------
+    Route::prefix('retailers')->group(function () {
+        Route::get   ('/',           [RetailerController::class, 'index']);     // retailer list
+        Route::post  ('/query',      [RetailerController::class, 'query']);     // filtered search
+        Route::get   ('/form-data',  [RetailerController::class, 'formData']);  // dropdowns (beat, class, route…)
+        Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
+        Route::post  ('/',           [RetailerController::class, 'store']);     // create retailer
+        Route::get   ('/{id}',       [RetailerController::class, 'show']);      // retailer detail
+        Route::put   ('/{id}',       [RetailerController::class, 'update']);    // edit
+        Route::delete('/{id}',       [RetailerController::class, 'destroy']);   // delete
     });
 
-     // Challan helpers (must come before /{id})
-    Route::get   ('/challans/next-number',                [ChallanController::class, 'nextNumber']);
-    Route::get   ('/challans/form-data',                  [ChallanController::class, 'formData']);
-    Route::post  ('/challans/scheme-qty',                 [ChallanHelperController::class, 'schemeQty']);
-    Route::get   ('/challans/product-stock/{id}',         [ChallanHelperController::class, 'productStock']);//20
-    Route::put   ('/challans/{id}',        [ChallanController::class, 'update']);
-    Route::post  ('/challans/{id}/cancel', [ChallanController::class, 'cancel']);
+    // ========================================================
+    // STOCK
+    // ========================================================
 
-    // Challan CRUD
-    Route::get   ('/challans',                            [ChallanController::class, 'index']);
-    Route::get   ('/challans/{id}',                       [ChallanController::class, 'show']);
-    Route::post  ('/challans',                            [ChallanController::class, 'store']);
-    
-    //Sales order
-    Route::get ('/sales-orders',         [SalesOrderController::class, 'index']);
-    Route::post('/sales-orders/cancel',  [SalesOrderController::class, 'cancel']);
-    Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);
-    Route::post('/sales-orders/query',   [SalesOrderController::class, 'query']);
+    // --------------------------------------------------------
+    // BALANCE STOCK  → MENU: Reports → Current Stock / Balance Stock
+    // --------------------------------------------------------
+    Route::get('/reports/balance-stock',                 [BalanceStockController::class, 'index']);          // main report
+    Route::get('/reports/balance-stock/catalog-options', [BalanceStockController::class, 'catalogOptions']); // product filter dropdown
+    Route::get('/reports/balance-stock/filters',         [BalanceStockController::class, 'filters']);        // all filters
+    Route::get('/filters/classifications',               [BalanceStockController::class, 'classifications']); // filter: class
+    Route::get('/filters/categories',                    [BalanceStockController::class, 'categories']);      // filter: category
+    Route::get('/filters/product-names',                 [BalanceStockController::class, 'productNames']);    // filter: name
+    Route::get('/filters/skus',                          [BalanceStockController::class, 'skus']);            // filter: SKU
 
-    // Challan from orders
-    Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);
+    // --------------------------------------------------------
+    // OPENING STOCK  → MENU: Stock → Opening Stock
+    // --------------------------------------------------------
+    Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']); // product picker
+    Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);    // opening stock list
+    Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);     // detail
+    Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);    // add opening stock
+    Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);   // edit
+    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
+    Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
 
-     // Invoices (rich list replaces /challans for the invoice page)
-    Route::get   ('/invoices',              [InvoiceController::class, 'index']);
-    Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);
-    Route::post('/invoices/query',       [InvoiceController::class, 'query']);
-    Route::post  ('invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
-    Route::delete('invoices/{id}',        [InvoiceController::class, 'destroy']);
-    Route::match(['PUT', 'PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']);
+    // --------------------------------------------------------
+    // IMPORT  → MENU: Stock → Import (Bulk upload)
+    // --------------------------------------------------------
+    Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);  // Excel upload → opening stock
+    Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);  // Excel upload → receive stock
 
-    // IRN this need to be tested too so do not check it yet
-    Route::post  ('/invoices/{challanId}/irn', [IrnController::class, 'generate']);
+    // --------------------------------------------------------
+    // PURCHASE ORDER / RECEIVE STOCK  → MENU: Purchase → Purchase Order, Receive Stock
+    // --------------------------------------------------------
+    Route::prefix('purchase-orders')->group(function () {
+        Route::get ('/',              [PurchaseOrderController::class, 'index']);     // PO list
+        Route::get ('/form-data',     [PurchaseOrderController::class, 'formData']);  // supplier/product dropdowns
+        Route::post('/',              [PurchaseOrderController::class, 'store']);     // create PO
+        Route::get ('/{id}',          [PurchaseOrderController::class, 'show']);      // PO detail
+        Route::put ('/{id}',          [PurchaseOrderController::class, 'update']);    // edit PO
+        Route::post('/{id}/receive',  [PurchaseOrderController::class, 'receive']);   // receive → stock in
+        Route::post('/query',         [PurchaseOrderController::class, 'query']);     // filtered search
+    });
 
-    //========== DGR claims these api's need to be TESTED =================//
-    Route::get   ('/dgr-claims',                [DgrClaimController::class, 'index']);
-    Route::get   ('/dgr-claims/check',          [DgrClaimController::class, 'check']);
-    Route::get   ('/dgr-claims/details',        [DgrClaimController::class, 'details']);
-    Route::post  ('/dgr-claims',                [DgrClaimController::class, 'store']);
-    Route::post  ('/dgr-claims/process',        [DgrClaimController::class, 'process']);
-    Route::post  ('/dgr-claims/approve',        [DgrClaimController::class, 'approve']);
-    Route::post('/dgr-claims/query',     [DgrClaimController::class, 'query']);
+    // ========================================================
+    // CHALLAN / INVOICE (Direct sale)
+    // ========================================================
 
-   
+    // --------------------------------------------------------
+    // CHALLAN HELPERS  → MENU: Invoice → Direct Invoice (form load helpers)
+    // NOTE: Order matters. Static routes MUST come before /{id} else
+    //       Laravel "next-number" ko id samajh lega.
+    // --------------------------------------------------------
+    Route::get ('/challans/next-number',            [ChallanController::class, 'nextNumber']);        // auto inv. no.
+    Route::get ('/challans/form-data',              [ChallanController::class, 'formData']);          // retailer, salesman, beat dropdowns
+    Route::post('/challans/scheme-qty',             [ChallanHelperController::class, 'schemeQty']);   // scheme qty calc
+    Route::get ('/challans/product-stock/{id}',     [ChallanHelperController::class, 'productStock']);// batch + mrp + rate + stock
+    Route::post('/challans/query',                  [ChallanController::class, 'query']);             // filtered challan search
 
-// Master filter
-Route::prefix('lookup')->group(function () {
-    Route::get('/',                 [LookupController::class, 'directory']);
-    Route::get('/{entity}/schema',  [LookupController::class, 'schema']);
-    Route::post('/',                [LookupController::class, 'run']);
+    // --------------------------------------------------------
+    // CHALLAN CRUD  → MENU: Invoice → Direct Invoice
+    // --------------------------------------------------------
+    Route::get   ('/challans',                [ChallanController::class, 'index']);   // challan list
+    Route::get   ('/challans/{id}',           [ChallanController::class, 'show']);    // challan detail
+    Route::post  ('/challans',                [ChallanController::class, 'store']);   // create direct invoice
+    Route::put   ('/challans/{id}',           [ChallanController::class, 'update']);  // edit invoice
+    Route::post  ('/challans/{id}/cancel',    [ChallanController::class, 'cancel']);  // cancel (move to _cancel table)
+
+    // ========================================================
+    // SALES ORDER  → MENU: Order → Sales Order
+    // ========================================================
+    Route::get ('/sales-orders',           [SalesOrderController::class, 'index']);  // order list
+    Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);   // order detail
+    Route::post('/sales-orders/query',     [SalesOrderController::class, 'query']);  // filtered search
+    Route::post('/sales-orders/cancel',    [SalesOrderController::class, 'cancel']); // cancel order
+
+    // --------------------------------------------------------
+    // CHALLAN FROM ORDERS  → MENU: Order → Convert to Invoice
+    // --------------------------------------------------------
+    Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);  // selected orders → invoices
+
+    // ========================================================
+    // INVOICE (rich list)  → MENU: Invoice → Invoice Details
+    // (Ye /challans ka replacement hai invoice page ke liye)
+    // ========================================================
+    Route::get   ('/invoices',              [InvoiceController::class, 'index']);   // invoice list with items+claim
+    Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);    // invoice detail
+    Route::post  ('/invoices/query',        [InvoiceController::class, 'query']);   // filtered search
+    Route::match(['PUT','PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']); // edit invoice
+    Route::post  ('invoices/{id}/cancel',   [InvoiceController::class, 'cancel']);  // cancel (challan_order → _cancel)
+    Route::delete('invoices/{id}',          [InvoiceController::class, 'destroy']); // delete (challan_order → _cancel with DELETE)
+
+    // ========================================================
+    // E-INVOICE (IRN)  → MENU: Invoice → Generate IRN
+    // ========================================================
+    Route::post('/invoices/{challanId}/irn', [IrnController::class, 'generate']);   // GST portal IRN
+
+    // ========================================================
+    // DGR CLAIM  → MENU: Claims → DGR Claim
+    // ========================================================
+    Route::get  ('/dgr-claims',          [DgrClaimController::class, 'index']);   // claim list
+    Route::get  ('/dgr-claims/check',    [DgrClaimController::class, 'check']);   // eligibility check
+    Route::get  ('/dgr-claims/details',  [DgrClaimController::class, 'details']); // line detail
+    Route::post ('/dgr-claims',          [DgrClaimController::class, 'store']);   // create claim
+    Route::post ('/dgr-claims/process',  [DgrClaimController::class, 'process']); // process claim
+    Route::post ('/dgr-claims/approve',  [DgrClaimController::class, 'approve']); // approve claim
+    Route::post ('/dgr-claims/query',    [DgrClaimController::class, 'query']);   // filtered search
+
+    // ========================================================
+    // LOOKUP  → MENU: Generic (dropdowns, autocompletes)
+    // ========================================================
+    Route::prefix('lookup')->group(function () {
+        Route::get ('/',                [LookupController::class, 'directory']); // all entities list
+        Route::get ('/{entity}/schema', [LookupController::class, 'schema']);    // column definitions
+        Route::post('/',                [LookupController::class, 'run']);       // run dynamic query
+    });
 });
-
-});    

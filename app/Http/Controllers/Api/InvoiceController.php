@@ -192,6 +192,7 @@ class InvoiceController extends Controller
             'retailer_id'        => 'sometimes',
             'user_id'            => 'sometimes|integer',
             'remark'             => 'sometimes|nullable|string|max:255',
+            'edited_remarks'     => 'sometimes|nullable|string|max:255',   // FIX #3
             'discount_per'       => 'sometimes|numeric|min:0|max:100',
             'items'              => 'required|array|min:1',
             'items.*.product_id' => 'required|integer',
@@ -251,16 +252,22 @@ class InvoiceController extends Controller
 
                 $taxPercent = (float) $product->gst_percent;
 
+                // Trade discount — on gross
                 $disType = (int)   ($row['dis_type'] ?? 1);
                 $disVal  = (float) ($row['dis_amt'] ?? 0);
                 $disAmt  = $disType === 1 ? round($gross * $disVal / 100, 2) : round($disVal, 2);
 
+                // FIX #2: ATD % is applied on the amount AFTER trade discount
+                $afterTrade = $gross - $disAmt;
                 $cdType = (int)   ($row['cd_type'] ?? 1);
                 $cdVal  = (float) ($row['cd'] ?? 0);
-                $cdAmt  = $cdType === 1 ? round($gross * $cdVal / 100, 2) : round($cdVal, 2);
+                $cdAmt  = $cdType === 1 ? round($afterTrade * $cdVal / 100, 2) : round($cdVal, 2);
 
                 $taxable = round($gross - $cdAmt - $disAmt, 2);
                 $vatAmt  = round($taxable * $taxPercent / 100, 2);
+
+                // FIX #1: legacy line total includes GST
+                $lineTotal = round($taxable + $vatAmt, 2);
 
                 // stock delta
                 $key = $this->lineKey((int) $row['product_id'], $batchNo, $mfgDate);
@@ -286,8 +293,9 @@ class InvoiceController extends Controller
                     'mrp'           => number_format($mrp, 2, '.', ''),
                     'tax'           => number_format($taxPercent, 2, '.', ''),
                     'vat_amt'       => number_format($vatAmt, 2, '.', ''),
-                    'taxable_amt'   => number_format($taxable, 2, '.', ''),
-                    'remain_amount' => (string) $taxable,
+                    // FIX #1: legacy stores GST-inclusive line total
+                    'taxable_amt'   => number_format($lineTotal, 2, '.', ''),
+                    'remain_amount' => number_format($lineTotal, 2, '.', ''),
                     'cd'            => number_format($cdVal, 2, '.', ''),
                     'cd_type'       => $cdType,
                     'cd_amt'        => $cdAmt,
@@ -332,6 +340,10 @@ class InvoiceController extends Controller
             if (isset($validated['retailer_id']))       $headerUpdate['ch_retailer_id'] = (string) $validated['retailer_id'];
             if (isset($validated['user_id']))           $headerUpdate['ch_user_id']     = (int) $validated['user_id'];
             if (array_key_exists('remark', $validated)) $headerUpdate['remark']         = $validated['remark'] ?? '';
+            // FIX #3: persist edited_remarks
+            if (array_key_exists('edited_remarks', $validated)) {
+                $headerUpdate['edited_remarks'] = $validated['edited_remarks'] ?? '';
+            }
 
             DB::table('challan_order')
                 ->where('id', $id)
