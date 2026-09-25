@@ -178,6 +178,14 @@ class ChallanController extends Controller
         // FIX: stock availability now reads `remaining` (the column that
         // reduceStock/restoreStock actually update). Previously it read
         // `qty`, so the UI showed stale stock after a challan was saved.
+        $beatList = DB::select(
+    "SELECT DISTINCT l7.id, l7.name
+       FROM location_7 l7
+       INNER JOIN dealer_location_rate_list r ON r.location_id = l7.id
+      WHERE r.dealer_id = ?
+      ORDER BY l7.name",
+    [$dealerId]
+);
         $products = DB::select(
             "SELECT cp.id,
                     CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name,
@@ -218,6 +226,7 @@ class ChallanController extends Controller
             'company_id'   => $companyId,
             'state_id'     => $stateId,
             'dp_id'        => $dpId,
+            'beats'=>$beatList,
         ]);
     }
 
