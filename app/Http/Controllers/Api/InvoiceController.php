@@ -109,67 +109,136 @@ class InvoiceController extends Controller
         return response()->json(['status' => true, 'rows' => $out]);
     }
 
-    public function show(Request $request, string $id): JsonResponse
-    {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
+    
 
-        $header = DB::selectOne(
-            "SELECT co.*, r.name AS retailer_name, r.address AS retailer_address,
-                    r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
-                    r.contact_per_name,
-                    d.name AS dealer_name,
-                    l7.name AS beat_name,
-                    p.first_name, p.middle_name, p.last_name
-               FROM challan_order co
-               LEFT JOIN retailer r ON r.id = co.ch_retailer_id
-               LEFT JOIN dealer  d ON d.id = co.ch_dealer_id
-               LEFT JOIN location_7 l7 ON l7.id = r.location_id
-               LEFT JOIN person p ON p.id = co.ch_user_id
-              WHERE co.id = ? AND co.ch_dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
+public function show(Request $request, string $id): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
 
-        if (!$header) {
-            return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
-        }
+    $header = DB::selectOne(
+        "SELECT co.*,
+                r.name AS retailer_name, r.address AS retailer_address,
+                r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
+                r.contact_per_name,
+                r.state_id_retailer AS retailer_state_id,
+                r.pin_no            AS retailer_pin_no,
+                d.name AS dealer_name,
+                d.address        AS dealer_address,
+                d.tin_no         AS dealer_tin_no,
+                d.pan_no         AS dealer_pan_no,
+                d.landline       AS dealer_landline,
+                d.other_numbers  AS dealer_other_numbers,
+                d.pin_no         AS dealer_pin_no,
+                d.state_id       AS dealer_state_id,
+                d.dealer_code    AS dealer_code,
+                l7.name AS beat_name,
+                p.first_name, p.middle_name, p.last_name
+           FROM challan_order co
+           LEFT JOIN retailer r ON r.id = co.ch_retailer_id
+           LEFT JOIN dealer  d ON d.id = co.ch_dealer_id
+           LEFT JOIN location_7 l7 ON l7.id = r.location_id
+           LEFT JOIN person p ON p.id = co.ch_user_id
+          WHERE co.id = ? AND co.ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
 
-        $items = DB::select(
-            "SELECT cod.*,
-                    cv.product_name, cv.itemcode, cv.hsn_code_view AS hsn_code,
-                    cv.qty_per_case, cv.weight, cv.igst AS gst_percent
-               FROM challan_order_details cod
-               LEFT JOIN catalog_view cv ON cv.product_id = cod.product_id
-              WHERE cod.ch_id = ?
-              ORDER BY cod.id ASC",
-            [$id]
-        );
-
-        $claim = DB::selectOne(
-            "SELECT * FROM dms_retailer_images_amount_claim
-              WHERE order_id = ? AND company_id = ? AND dealer_id = ?
-              LIMIT 1",
-            [$id, $companyId, $dealerId]
-        );
-
-        $irnLog = DB::selectOne(
-            "SELECT irn, ackno, ackdate, qr_path, status
-               FROM einvoice_api_logs
-              WHERE challan_id = ? AND status = 1
-              ORDER BY id DESC LIMIT 1",
-            [$id]
-        );
-
-        return response()->json([
-            'status'  => true,
-            'header'  => $header,
-            'items'   => $items,
-            'claim'   => $claim,
-            'irn'     => $irnLog,
-        ]);
+    if (!$header) {
+        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
     }
+
+    // st: 1 if retailer state == dealer state
+    $retailerState = (int) ($header->retailer_state_id ?? 0);
+    $dealerState   = (int) ($header->dealer_state_id   ?? 0);
+    $st = ($retailerState > 0 && $retailerState === $dealerState) ? 1 : 0;
+
+    $items = DB::select(
+        "SELECT cod.*,
+                cv.product_name, cv.itemcode, cv.hsn_code_view AS hsn_code,
+                cv.qty_per_case, cv.weight, cv.igst AS gst_percent
+           FROM challan_order_details cod
+           LEFT JOIN catalog_view cv ON cv.product_id = cod.product_id
+          WHERE cod.ch_id = ?
+          ORDER BY cod.id ASC",
+        [$id]
+    );
+
+    // Drug licence — latest registration row for this dealer_code
+    $reg = null;
+    if (!empty($header->dealer_code)) {
+        $reg = DB::selectOne(
+            "SELECT dl_no_wholesale, dl_no_retail
+               FROM dms_registration
+              WHERE dealer_code = ?
+              ORDER BY id DESC
+              LIMIT 1",
+            [$header->dealer_code]
+        );
+    }
+
+    // po_no — company 213 only
+    $poNo = null;
+    if ($companyId === 213) {
+        $invoiceType = (int) $header->invoice_type;
+
+        if ($invoiceType === 2) {
+            $row = DB::selectOne(
+                "SELECT sed.po_no
+                   FROM challan_order_details cod
+                   INNER JOIN user_sales_order_extra_details sed
+                           ON sed.order_id = cod.order_id
+                  WHERE cod.ch_id = ?
+                    AND sed.po_no IS NOT NULL
+                    AND sed.po_no <> ''
+                  LIMIT 1",
+                [$id]
+            );
+            $poNo = $row->po_no ?? null;
+        } elseif ($invoiceType === 1) {
+            $poNo = $header->direct_invoice_po_no ?? null;
+        }
+    }
+
+    $claim = DB::selectOne(
+        "SELECT * FROM dms_retailer_images_amount_claim
+          WHERE order_id = ? AND company_id = ? AND dealer_id = ?
+          LIMIT 1",
+        [$id, $companyId, $dealerId]
+    );
+
+    $irnLog = DB::selectOne(
+        "SELECT irn, ackno, ackdate, qr_path, status
+           FROM einvoice_api_logs
+          WHERE challan_id = ? AND status = 1
+          ORDER BY id DESC LIMIT 1",
+        [$id]
+    );
+
+    return response()->json([
+        'status' => true,
+        'header' => $header,
+        'items'  => $items,
+        'claim'  => $claim,
+        'irn'    => $irnLog,
+
+        'st'     => $st,
+        'seller' => [
+            'name'              => $header->dealer_name,
+            'address'           => $header->dealer_address,
+            'tin_no'            => $header->dealer_tin_no,
+            'pan_no'            => $header->dealer_pan_no,
+            'landline'          => $header->dealer_landline,
+            'other_numbers'     => $header->dealer_other_numbers,
+            'pin_no'            => $header->dealer_pin_no,
+            'drug_licence_no'   => $reg->dl_no_wholesale ?? null,
+            'drug_licence_no_2' => $reg->dl_no_retail    ?? null,
+        ],
+        'retailer_pin_no' => $header->retailer_pin_no,
+        'po_no'           => $poNo,
+    ]);
+}
 
     public function update(Request $request, string $id): JsonResponse
     {
