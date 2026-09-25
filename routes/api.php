@@ -203,6 +203,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::match(['PUT','PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']); // edit invoice
     Route::post  ('invoices/{id}/cancel',   [InvoiceController::class, 'cancel']);  // cancel (challan_order → _cancel)
     Route::delete('invoices/{id}',          [InvoiceController::class, 'destroy']); // delete (challan_order → _cancel with DELETE)
+    Route::post('/invoices/{id}/displayclaim', [InvoiceController::class, 'storeClaim']);
 
     // ========================================================
     // E-INVOICE (IRN)  → MENU: Invoice → Generate IRN

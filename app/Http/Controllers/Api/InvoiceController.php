@@ -703,4 +703,93 @@ class InvoiceController extends Controller
             [$abs, $dealerId, $productId, $batchNo, $mfgDate]
         );
     }
+    public function storeClaim(Request $request, string $id): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
+
+    $invoice = DB::selectOne(
+        "SELECT id, ch_no, ch_retailer_id, ch_dealer_id, amount
+           FROM challan_order
+          WHERE id = ? AND ch_dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+    if (!$invoice) {
+        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+    }
+
+    $existing = DB::selectOne(
+        "SELECT id FROM dms_retailer_images_amount_claim
+          WHERE order_id = ? AND dealer_id = ? AND company_id = ?
+          LIMIT 1",
+        [(string) $id, $dealerId, $companyId]
+    );
+    if ($existing) {
+        return response()->json(['status' => false, 'message' => 'Claim already submitted for this invoice.'], 409);
+    }
+
+    $request->validate([
+        'contract_form_image'   => ['required', 'image', 'max:4096'],
+        'shop_display_images'   => ['required', 'array', 'min:1', 'max:14'],
+        'shop_display_images.*' => ['image', 'max:4096'],
+        'other_image_1'         => ['nullable', 'image', 'max:4096'],
+        'other_image_2'         => ['nullable', 'image', 'max:4096'],
+        'contract_date'         => ['nullable', 'date'],
+        'start_date'            => ['nullable', 'date'],
+        'display_period_days'   => ['nullable', 'string', 'max:50'],
+    ]);
+
+    DB::beginTransaction();
+    try {
+        // doc_1 = contract form
+        $docs = [];
+        $docs['doc_1'] = $this->saveClaimFile($request->file('contract_form_image'));
+
+        // doc_2 .. doc_15 = shop display images (max 14)
+        $i = 2;
+        foreach ($request->file('shop_display_images') as $f) {
+            if ($i > 15) break;
+            $docs['doc_' . $i] = $this->saveClaimFile($f);
+            $i++;
+        }
+
+        // doc_16 = other image 1, doc_17 = other image 2
+        if ($request->hasFile('other_image_1')) {
+            $docs['doc_16'] = $this->saveClaimFile($request->file('other_image_1'));
+        }
+        if ($request->hasFile('other_image_2')) {
+            $docs['doc_17'] = $this->saveClaimFile($request->file('other_image_2'));
+        }
+
+        $row = array_merge([
+            'order_id'      => (string) $id,
+            'company_id'    => $companyId,
+            'dealer_id'     => $dealerId,
+            'retailer_id'   => (string) $invoice->ch_retailer_id,
+            'date_time'     => date('Y-m-d H:i:s'),
+            'contract_date' => $request->contract_date,
+            'start_date'    => $request->start_date,
+            'display_period'=> (string) ($request->display_period_days ?? ''),
+            'claim_amount'  => '0',
+            'claim_status'  => 0,
+        ], $docs);
+
+        DB::table('dms_retailer_images_amount_claim')->insert($row);
+
+        DB::commit();
+        return response()->json(['status' => true, 'message' => 'Claim submitted successfully.']);
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json(['status' => false, 'message' => 'Claim failed: ' . $e->getMessage()], 500);
+    }
+}
+
+private function saveClaimFile($file): string
+{
+    $name = time() . '_' . bin2hex(random_bytes(4)) . '_' . preg_replace('/\s+/', '_', $file->getClientOriginalName());
+    $file->move(public_path('myupload/claim'), $name);
+    return $name;
+}
 }
