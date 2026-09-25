@@ -209,19 +209,18 @@ class RetailerController extends Controller
             [$companyId]
         );
 
-        // ---- Class tiers (from schema comment: 0=none, 1=Platinum, ...)
-        $classes = [
-            ['id' => 0, 'label' => 'None'],
-            ['id' => 1, 'label' => 'Platinum'],
-            ['id' => 2, 'label' => 'Diamond'],
-            ['id' => 3, 'label' => 'Gold'],
-            ['id' => 4, 'label' => 'Silver'],
-        ];
+        $outletCategories = DB::select(
+            "SELECT id, outlet_category
+               FROM _retailer_outlet_category
+              WHERE company_id = ? AND status = 1
+              ORDER BY outlet_category",
+            [$companyId]
+        );
 
         return response()->json([
             'status'          => true,
             'outlet_types'    => $outletTypes,
-            'classes'         => $classes,
+            'outlet_categories' => $outletCategories,
             'location_levels' => $levels,
             'level_1_options' => $level1Options,
             'retailer_level'  => $retailerLevel,
@@ -308,7 +307,7 @@ class RetailerController extends Controller
             'pin_no'            => ['nullable', 'string', 'max:20'],
             'tin_no'            => ['nullable', 'string', 'max:20'],
             'outlet_type_id'    => ['nullable', 'integer'],
-            'class'             => ['nullable', 'integer', 'in:0,1,2,3,4,5'],
+            'class'             => ['nullable', 'integer'],
             'avg_per_month_pur' => ['nullable', 'numeric'],
             'location_id'       => ['nullable', 'integer'],
             'state_id'          => ['nullable', 'integer'],
@@ -459,7 +458,7 @@ class RetailerController extends Controller
             'pin_no'            => ['nullable', 'string', 'max:20'],
             'tin_no'            => ['nullable', 'string', 'max:20'],
             'outlet_type_id'    => ['nullable', 'integer'],
-            'class'             => ['nullable', 'integer', 'in:0,1,2,3,4,5'],
+            'class'             => ['nullable', 'integer'],
             'avg_per_month_pur' => ['nullable', 'numeric'],
             'location_id'       => ['nullable', 'integer'],
             'state_id'          => ['nullable', 'integer'],
