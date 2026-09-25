@@ -9,35 +9,44 @@ use Illuminate\Support\Facades\DB;
 
 class ThresholdController extends Controller
 {
-    /**
-     * GET /api/thresholds
-     */
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) ($user->company_id ?? 0);
 
+        $where    = ["t.dealer_id = ?", "t.company_id = ?"];
+        $bindings = [$dealerId, $companyId];
+
+        if ($request->filled('retailer_id')) {
+            $where[]    = "t.retailer_id = ?";
+            $bindings[] = (string) $request->input('retailer_id');
+        }
+        if ($productId = $request->input('product_id')) {
+            $where[]    = "t.product_id = ?";
+            $bindings[] = (int) $productId;
+        }
+        if ($search = $request->input('search')) {
+            $where[]    = "(cp.name LIKE ? OR cp.itemcode LIKE ?)";
+            $bindings[] = "%{$search}%";
+            $bindings[] = "%{$search}%";
+        }
+
+        $whereSql = implode(' AND ', $where);
+
         $rows = DB::select(
             "SELECT t.id, t.product_id, t.qty, t.max_qty, t.retailer_id,
                     cp.name AS product_name, cp.itemcode
                FROM threshold t
                INNER JOIN catalog_product cp ON cp.id = t.product_id
-              WHERE t.dealer_id = ? AND t.company_id = ?
+              WHERE {$whereSql}
               ORDER BY cp.name ASC",
-            [$dealerId, $companyId]
+            $bindings
         );
 
-        return response()->json([
-            'status' => true,
-            'rows'   => $rows,
-        ]);
+        return response()->json(['status' => true, 'rows' => $rows]);
     }
 
-    /**
-     * GET /api/thresholds/products
-     * Dropdown source for "New" form
-     */
     public function products(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -50,15 +59,9 @@ class ThresholdController extends Controller
             [$companyId]
         );
 
-        return response()->json([
-            'status'   => true,
-            'products' => $rows,
-        ]);
+        return response()->json(['status' => true, 'products' => $rows]);
     }
 
-    /**
-     * GET /api/thresholds/{id}
-     */
     public function show(Request $request, int $id): JsonResponse
     {
         $user      = $request->user();
@@ -66,9 +69,12 @@ class ThresholdController extends Controller
         $companyId = (int) ($user->company_id ?? 0);
 
         $row = DB::selectOne(
-            "SELECT id, product_id, qty, max_qty, retailer_id
-               FROM threshold
-              WHERE id = ? AND dealer_id = ? AND company_id = ? LIMIT 1",
+            "SELECT t.id, t.product_id, t.qty, t.max_qty, t.retailer_id,
+                    cp.name AS product_name, cp.itemcode
+               FROM threshold t
+               LEFT JOIN catalog_product cp ON cp.id = t.product_id
+              WHERE t.id = ? AND t.dealer_id = ? AND t.company_id = ?
+              LIMIT 1",
             [$id, $dealerId, $companyId]
         );
 
@@ -79,9 +85,6 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'row' => $row]);
     }
 
-    /**
-     * POST /api/thresholds
-     */
     public function store(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -95,29 +98,36 @@ class ThresholdController extends Controller
             'retailer_id' => ['nullable', 'string', 'max:50'],
         ]);
 
-        // Verify product exists in this company
         $product = DB::selectOne(
             "SELECT id FROM catalog_product WHERE id = ? AND company_id = ? LIMIT 1",
-            [$request->product_id, $companyId]
+            [(int) $request->product_id, $companyId]
         );
-
         if (!$product) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Invalid product selected.'
-            ], 422);
+            return response()->json(['status' => false, 'message' => 'Invalid product selected.'], 422);
         }
 
-        // retailer_id: default to '' if not sent (DB is NOT NULL varchar(50))
-        $retailerId = $request->input('retailer_id', '');
+        $retailerId = (string) $request->input('retailer_id', '');
+
+        // ✅ FIX #2: Duplicate check
+        $dup = DB::selectOne(
+            "SELECT id FROM threshold
+              WHERE dealer_id = ? AND company_id = ? AND product_id = ? AND retailer_id = ?
+              LIMIT 1",
+            [$dealerId, $companyId, (int) $request->product_id, $retailerId]
+        );
+        if ($dup) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Threshold already exists for this product and retailer.'
+            ], 422);
+        }
 
         DB::insert(
             "INSERT INTO threshold
                 (company_id, dealer_id, product_id, qty, max_qty, retailer_id)
              VALUES (?, ?, ?, ?, ?, ?)",
             [
-                $companyId,
-                $dealerId,
+                $companyId, $dealerId,
                 (int) $request->product_id,
                 (int) $request->qty,
                 (int) ($request->max_qty ?? 0),
@@ -132,9 +142,6 @@ class ThresholdController extends Controller
         ]);
     }
 
-    /**
-     * PUT /api/thresholds/{id}
-     */
     public function update(Request $request, int $id): JsonResponse
     {
         $user      = $request->user();
@@ -142,10 +149,11 @@ class ThresholdController extends Controller
         $companyId = (int) ($user->company_id ?? 0);
 
         $existing = DB::selectOne(
-            "SELECT id FROM threshold WHERE id = ? AND dealer_id = ? AND company_id = ? LIMIT 1",
+            "SELECT id FROM threshold
+              WHERE id = ? AND dealer_id = ? AND company_id = ?
+              LIMIT 1",
             [$id, $dealerId, $companyId]
         );
-
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
         }
@@ -159,34 +167,45 @@ class ThresholdController extends Controller
 
         $product = DB::selectOne(
             "SELECT id FROM catalog_product WHERE id = ? AND company_id = ? LIMIT 1",
-            [$request->product_id, $companyId]
+            [(int) $request->product_id, $companyId]
         );
-
         if (!$product) {
             return response()->json(['status' => false, 'message' => 'Invalid product selected.'], 422);
         }
 
-        $retailerId = $request->input('retailer_id', '');
+        $retailerId = (string) $request->input('retailer_id', '');
 
+        // ✅ FIX #2: Duplicate check (exclude current)
+        $dup = DB::selectOne(
+            "SELECT id FROM threshold
+              WHERE dealer_id = ? AND company_id = ? AND product_id = ? AND retailer_id = ? AND id != ?
+              LIMIT 1",
+            [$dealerId, $companyId, (int) $request->product_id, $retailerId, $id]
+        );
+        if ($dup) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Another threshold already exists for this product and retailer.'
+            ], 422);
+        }
+
+        // ✅ FIX #1: dealer_id + company_id in WHERE
         DB::update(
             "UPDATE threshold SET
                 product_id = ?, qty = ?, max_qty = ?, retailer_id = ?
-             WHERE id = ?",
+              WHERE id = ? AND dealer_id = ? AND company_id = ?",
             [
                 (int) $request->product_id,
                 (int) $request->qty,
                 (int) ($request->max_qty ?? 0),
                 $retailerId,
-                $id,
+                $id, $dealerId, $companyId,
             ]
         );
 
         return response()->json(['status' => true, 'message' => 'Threshold updated successfully.']);
     }
 
-    /**
-     * DELETE /api/thresholds/{id}
-     */
     public function destroy(Request $request, int $id): JsonResponse
     {
         $user      = $request->user();

@@ -18,8 +18,8 @@ class VanController extends Controller
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) ($user->company_id ?? 0);
 
-        $where    = ["dealer_id = ?", "company_id = ?"];
-        $bindings = [$dealerId, $companyId];
+        $where    = ["dealer_id = ?"];
+        $bindings = [$dealerId];
 
         if ($vanNo = $request->input('van_no')) {
             $where[]    = "van_no LIKE ?";

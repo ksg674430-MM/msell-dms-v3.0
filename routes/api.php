@@ -69,7 +69,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ========================================================
 
     // --------------------------------------------------------
-    // VAN  → MENU: Master → Van
+    // VAN  → MENU: Master → Supply vehicle
     // --------------------------------------------------------
     Route::get   ('/vans',      [VanController::class, 'index']);   // van list
     Route::get   ('/vans/{id}', [VanController::class, 'show']);    // van detail
