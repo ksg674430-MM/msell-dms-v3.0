@@ -324,4 +324,99 @@ class BalanceStockController extends Controller
         }
         return $map;
     }
+    public function destroy(Request $request, string $id): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
+
+    // Legacy rule: company 44 → delete blocked
+    if ($companyId === 44) {
+        return response()->json(['status' => false, 'message' => 'Delete not allowed.'], 403);
+    }
+
+    $stock = DB::selectOne(
+        "SELECT id, product_id, batch_no, mfg, qty
+           FROM stock
+          WHERE id = ? AND dealer_id = ?
+          LIMIT 1",
+        [$id, $dealerId]
+    );
+    if (!$stock) {
+        return response()->json(['status' => false, 'message' => 'Stock row not found.'], 404);
+    }
+
+    DB::transaction(function () use ($stock, $dealerId) {
+        DB::delete(
+            "DELETE FROM stock WHERE id = ? AND dealer_id = ?",
+            [$stock->id, $dealerId]
+        );
+    });
+
+    return response()->json([
+        'status'  => true,
+        'message' => 'Stock successfully deleted',
+    ]);
+}
+
+   public function bulkUpdate(Request $request): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
+
+    // Rule 1: company 44 block
+    if ($companyId === 44) {
+        return response()->json(['status' => false, 'message' => 'Edit not allowed.'], 403);
+    }
+
+    // Rule 2: legacy — sirf edit_stock = 1 wale dealer edit kar sakte hain
+    $dealer = DB::selectOne(
+        "SELECT edit_stock FROM dealer WHERE id = ? LIMIT 1",
+        [$dealerId]
+    );
+    if (!$dealer || (int) $dealer->edit_stock !== 1) {
+        return response()->json(['status' => false, 'message' => 'Not allowed to edit stock.'], 403);
+    }
+
+    $validated = $request->validate([
+        'rows'             => 'required|array|min:1',
+        'rows.*.id'        => 'required|integer',
+        'rows.*.qty'       => 'required|numeric|min:0',
+        'rows.*.nonsale'   => 'nullable|numeric|min:0',
+        'rows.*.batch_no'  => 'nullable|string|max:11',
+        'rows.*.mfg'       => 'nullable|date',
+        'rows.*.intransit' => 'nullable|numeric|min:0',
+    ]);
+
+    DB::transaction(function () use ($validated, $dealerId) {
+
+        foreach ($validated['rows'] as $row) {
+            $existing = DB::selectOne(
+                "SELECT id FROM stock
+                  WHERE id = ? AND dealer_id = ?
+                  LIMIT 1",
+                [(int) $row['id'], $dealerId]
+            );
+            if (!$existing) {
+                throw new \RuntimeException("Stock row {$row['id']} not found.");
+            }
+
+            $update = ['qty' => (float) $row['qty']];
+            if (array_key_exists('nonsale', $row))   $update['nonsale']   = (float) $row['nonsale'];
+            if (array_key_exists('batch_no', $row))  $update['batch_no']  = (string) $row['batch_no'];
+            if (array_key_exists('mfg', $row))       $update['mfg']       = (string) $row['mfg'];
+            if (array_key_exists('intransit', $row)) $update['intransit'] = (float) $row['intransit'];
+
+            DB::table('stock')
+                ->where('id', $row['id'])
+                ->where('dealer_id', $dealerId)
+                ->update($update);
+        }
+    });
+
+    return response()->json(['status' => true, 'message' => 'Stock updated successfully.']);
+}
+
+   
 }

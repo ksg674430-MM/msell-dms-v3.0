@@ -124,6 +124,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/filters/categories',                    [BalanceStockController::class, 'categories']);      // filter: category
     Route::get('/filters/product-names',                 [BalanceStockController::class, 'productNames']);    // filter: name
     Route::get('/filters/skus',                          [BalanceStockController::class, 'skus']);            // filter: SKU
+    Route::delete('/reports/balance-stock/{id}', [BalanceStockController::class, 'destroy']);// delete stock
+    Route::post('/reports/balance-stock/edit', [BalanceStockController::class, 'bulkUpdate']);//  edit stock
 
     // --------------------------------------------------------
     // OPENING STOCK  → MENU: Stock → Opening Stock
