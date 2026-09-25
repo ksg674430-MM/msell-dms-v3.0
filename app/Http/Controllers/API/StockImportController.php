@@ -10,6 +10,89 @@ use Illuminate\Support\Facades\DB;
 class StockImportController extends Controller
 {
     /**
+     * GET /api/opening-stocks/import-format
+     * Returns PreviousStock.csv — mirrors legacy
+     * modules/import/export_previous_opening_stock.php
+     */
+    public function importFormat(Request $request)
+    {
+        $user            = $request->user();
+        $dealerId        = (int) $user->dealer_id;
+        $companyId       = (int) ($user->company_id ?? 0);
+        $stateId         = (string) ($user->state_id ?? 0);
+        $templateId      = (int) ($user->template_id ?? 0);
+        $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
+
+        $dealer = DB::selectOne(
+            "SELECT id, dealer_code, quantity_type, csa_id, ownership_type_id
+               FROM dealer WHERE id = ? LIMIT 1",
+            [$dealerId]
+        );
+
+        if (!$dealer) {
+            return response()->json(['status' => false, 'message' => 'Dealer not found'], 404);
+        }
+
+        // Fallback: agar user me ownership_type_id nahi hai to dealer se lo
+        if ($ownershipTypeId === 0) {
+            $ownershipTypeId = (int) ($dealer->ownership_type_id ?? 0);
+        }
+
+        $isDepo           = ($ownershipTypeId === 245);   // DEPO login — legacy confirm
+        $isCaseDealer     = ((int) ($dealer->quantity_type ?? 0) === 1);
+        $useTemplateRates = ($companyId === 213 && $templateId > 0);
+
+        if ($isDepo) {
+            $rateCol = $isCaseDealer ? 'ss_case_rate' : 'ss_pcs_rate';
+            $mrpCol  = $isCaseDealer ? 'mrp'          : 'mrp_pcs';
+        } else {
+            $rateCol = $isCaseDealer ? 'dealer_rate'  : 'dealer_pcs_rate';
+            $mrpCol  = $isCaseDealer ? 'mrp'          : 'mrp_pcs';
+        }
+
+        $rateTable = $useTemplateRates ? 'product_rate_list_template' : 'product_rate_list';
+
+        $rows = DB::select(
+            "SELECT cp.id,
+                    cp.itemcode,
+                    cp.name AS product_name,
+                    prl.{$mrpCol}  AS mrp,
+                    prl.{$rateCol} AS rate
+               FROM catalog_product cp
+               LEFT JOIN {$rateTable} prl
+                      ON prl.product_id = cp.id
+                     AND prl.state_id   = ?
+                     AND prl.status     = 1
+              WHERE cp.company_id = ?
+                AND cp.status     = 1
+              ORDER BY cp.name ASC",
+            [$stateId, $companyId]
+        );
+
+        $qtyHeader = $isCaseDealer ? 'Quantity(In CASE)' : 'Quantity(In PCS)';
+
+        $csv = "S.No,Item Code,Product Name,MRP,Rate,{$qtyHeader},Batch No,Mfg Date(dd/mm/yyyy)\n";
+        $i = 1;
+        foreach ($rows as $r) {
+            $csv .= implode(',', [
+                $i++,
+                $this->csvEscape($r->itemcode),
+                $this->csvEscape($r->product_name),
+                number_format((float) ($r->mrp  ?? 0), 2, '.', ''),
+                number_format((float) ($r->rate ?? 0), 2, '.', ''),
+                0,
+                '',
+                '',
+            ]) . "\n";
+        }
+
+        return response($csv, 200, [
+            'Content-Type'        => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="PreviousStock.csv"',
+        ]);
+    }
+
+    /**
      * POST /api/opening-stocks/import
      * multipart/form-data with field name "excelFile" (CSV)
      *
@@ -18,17 +101,16 @@ class StockImportController extends Controller
     public function openingStock(Request $request): JsonResponse
     {
         $request->validate([
-            'excelFile' => ['required', 'file', 'mimes:csv,txt', 'max:10240'], // 10 MB
+            'excelFile' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
         ]);
 
-        $user       = $request->user();
-        $dealerId   = (int) $user->dealer_id;
-        $companyId  = (int) ($user->company_id ?? 0);
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
+        $userId    = (int) $user->getKey();
 
-        // csa_id from dealer row — mirrors legacy myrowval('dealer','csa_id',...)
         $csaId = (int) (DB::table('dealer')->where('id', $dealerId)->value('csa_id') ?? 0);
 
-        // Preload item_code => product_id map (mirrors legacy $ch_data build)
         $itemCodeMap = DB::table('catalog_product')
             ->where('company_id', $companyId)
             ->pluck('id', 'itemcode')
@@ -40,51 +122,47 @@ class StockImportController extends Controller
             return response()->json(['status' => false, 'message' => 'Unable to read uploaded file.'], 400);
         }
 
-        $inserted = 0;
-        $errors   = [];
-        $rowNum   = 1; // header counts as row 1, first data row is 2 (matches legacy $inum=2)
+        $inserted      = 0;
+        $errors        = [];
+        $importedCodes = [];
+        $rowNum        = 1;
 
         DB::beginTransaction();
         try {
-            // Skip header row
             fgetcsv($fh, 1000, ',');
 
             while (($row = fgetcsv($fh, 1000, ',')) !== false) {
                 $rowNum++;
 
-                // Skip empty trailing lines
                 if (count($row) < 8 || (trim($row[0]) === '' && trim($row[1]) === '')) {
                     continue;
                 }
 
-                $itemCode  = trim($row[1]);
-                $mrp       = trim($row[3]);
-                $rate      = trim($row[4]);
-                $qty       = trim($row[5]);
-                $batchNo   = trim($row[6]);
-                $mfgRaw    = trim($row[7]);
+                $itemCode = trim($row[1]);
+                $mrp      = trim($row[3]);
+                $rate     = trim($row[4]);
+                $qty      = trim($row[5]);
+                $batchNo  = trim($row[6]);
+                $mfgRaw   = trim($row[7]);
 
-                // 1. Item code lookup
                 if (!isset($itemCodeMap[$itemCode])) {
                     $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) not found in company {$companyId}."];
                     continue;
                 }
                 $productId = (int) $itemCodeMap[$itemCode];
 
-                // 2. Mandatory fields
                 if ($mrp === '' || $rate === '' || $qty === '' || $batchNo === '' || $mfgRaw === '') {
                     $errors[] = ['row' => $rowNum, 'reason' => 'Missing mandatory field (mrp / rate / qty / batch_no / mfg_date).'];
                     continue;
                 }
 
-                // 3. Mfg date parse (dd/mm/yyyy → Y-m-d)
                 $mfgDate = $this->parseDate($mfgRaw);
                 if (!$mfgDate) {
                     $errors[] = ['row' => $rowNum, 'reason' => "Invalid mfg date: {$mfgRaw}"];
                     continue;
                 }
 
-                // 4. Insert into opening_stocks
+                // opening_stocks
                 DB::insert(
                     "INSERT IGNORE INTO opening_stocks
                         (product_id, batch_no, rate, dealer_rate, mrp,
@@ -94,20 +172,19 @@ class StockImportController extends Controller
                          action, sync_status, update_date_time)
                      VALUES
                         (?, ?, ?, ?, ?,
-                         0, ?, ?, ?,
+                         ?, ?, ?, ?,
                          0, 0, ?,
                          ?, ?, NOW(), ?, ?,
                          1, 1, NOW())",
                     [
                         $productId, $batchNo, (float) $rate, (float) $rate, (float) $mrp,
-                        $csaId, $dealerId, (float) $qty,
+                        $userId, $csaId, $dealerId, (float) $qty,
                         (float) $qty,
                         $mfgDate, $mfgDate, (float) $rate, $companyId,
                     ]
                 );
 
-                // 5. Sync into stock table
-                //    Legacy uses LIKE on month-year: mfg like 'YYYY-MM%'
+                // stock upsert
                 $existingStock = DB::selectOne(
                     "SELECT id, qty, mfg FROM stock
                       WHERE product_id = ?
@@ -148,13 +225,13 @@ class StockImportController extends Controller
                              action, sync_status, update_date_time)
                          VALUES
                             (?, ?, ?, ?, ?,
-                             0, 0, ?, ?,
+                             ?, ?, ?, ?,
                              0, 0, ?,
                              ?, ?, NOW(), 0, ?,
                              1, 1, NOW())",
                         [
                             $productId, $batchNo, (float) $rate, (float) $rate, (float) $mrp,
-                            $dealerId, (float) $qty,
+                            $userId, $csaId, $dealerId, (float) $qty,
                             (float) $qty,
                             $mfgDate, $mfgDate, $companyId,
                         ]
@@ -162,11 +239,11 @@ class StockImportController extends Controller
                 }
 
                 $inserted++;
+                $importedCodes[] = $itemCode;
             }
 
             fclose($fh);
 
-            // Legacy rolls back if ANY row fails — we match that behaviour
             if (!empty($errors)) {
                 DB::rollBack();
                 return response()->json([
@@ -181,11 +258,12 @@ class StockImportController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'   => true,
-                'message'  => "{$inserted} row(s) imported successfully.",
-                'total'    => $inserted,
-                'inserted' => $inserted,
-                'errors'   => [],
+                'status'         => true,
+                'message'        => "{$inserted} row(s) imported successfully.",
+                'total'          => $inserted,
+                'inserted'       => $inserted,
+                'imported_codes' => $importedCodes,
+                'errors'         => [],
             ]);
 
         } catch (\Throwable $e) {
@@ -218,7 +296,6 @@ class StockImportController extends Controller
         $csaId        = (int) ($user->csa_id ?? 0);
         $quantityType = (int) ($user->quantity_type ?? 0);
 
-        // Preload rate list — legacy picks dealer_rate vs dealer_pcs_rate based on quantity_type
         $mrpCol  = $quantityType === 1 ? 'mrp'         : 'mrp_pcs';
         $rateCol = $quantityType === 1 ? 'dealer_rate' : 'dealer_pcs_rate';
 
@@ -245,10 +322,11 @@ class StockImportController extends Controller
             return response()->json(['status' => false, 'message' => 'Unable to read uploaded file.'], 400);
         }
 
-        $inserted = 0;
-        $errors   = [];
-        $rowNum   = 1;
-        $createdIds = [];
+        $inserted      = 0;
+        $errors        = [];
+        $importedCodes = [];
+        $rowNum        = 1;
+        $createdIds    = [];
 
         DB::beginTransaction();
         try {
@@ -261,12 +339,12 @@ class StockImportController extends Controller
                     continue;
                 }
 
-                $invoiceDate = trim($row[1]);   // dd/mm/yyyy
+                $invoiceDate = trim($row[1]);
                 $invoiceNo   = trim($row[2]);
                 $skuCode     = trim($row[3]);
                 $skuId       = (int) trim($row[4]);
                 $skuQty      = (float) trim($row[5]);
-                $saleDate    = trim($row[6]);   // dd/mm/yyyy
+                $saleDate    = trim($row[6]);
                 $remarks     = trim($row[7]);
 
                 if ($skuId <= 0 || $skuQty <= 0 || $saleDate === '') {
@@ -282,23 +360,20 @@ class StockImportController extends Controller
 
                 $invoiceDateParsed = $this->parseDate($invoiceDate) ?: $saleDateParsed;
 
-                // finalOrderId = Ymd(sale_date) + dealer_id  (matches legacy)
                 $finalOrderId = date('Ymd', strtotime($saleDateParsed)) . $dealerId;
                 $createdIds[$finalOrderId] = true;
 
-                $rate = $rateMap[$skuId]['dealer_rate'] ?? 0;
-                $mrp  = $rateMap[$skuId]['mrp']         ?? 0;
+                $rate    = $rateMap[$skuId]['dealer_rate'] ?? 0;
+                $mrp     = $rateMap[$skuId]['mrp']         ?? 0;
                 $mfgDate = date('Y-m-d');
                 $totalValue = $rate * $skuQty;
 
-                // ---- Header check ----
                 $exists = DB::table('purchase_order')
                     ->where('dealer_id', $dealerId)
                     ->where('order_id', $finalOrderId)
                     ->exists();
 
                 if ($exists) {
-                    // ---- Details check ----
                     $detail = DB::selectOne(
                         "SELECT auto, quantity FROM purchase_order_details
                           WHERE product_id = ? AND order_id = ?
@@ -307,9 +382,8 @@ class StockImportController extends Controller
                     );
 
                     if ($detail) {
-                        // Accumulate quantity
-                        $newQty     = (float) $detail->quantity + $skuQty;
-                        $newTotal   = $rate * $newQty;
+                        $newQty   = (float) $detail->quantity + $skuQty;
+                        $newTotal = $rate * $newQty;
                         DB::update(
                             "UPDATE purchase_order_details
                                 SET quantity = ?, total_amount = ?, gross_amt = ?
@@ -331,7 +405,6 @@ class StockImportController extends Controller
                         );
                     }
                 } else {
-                    // ---- Insert new PO header ----
                     $createdDate = $saleDateParsed . ' ' . date('H:i:s');
 
                     DB::insert(
@@ -362,6 +435,7 @@ class StockImportController extends Controller
                 }
 
                 $inserted++;
+                $importedCodes[] = $skuCode;
             }
 
             fclose($fh);
@@ -384,6 +458,7 @@ class StockImportController extends Controller
                 'message'        => "{$inserted} row(s) imported successfully.",
                 'total'          => $inserted,
                 'inserted'       => $inserted,
+                'imported_codes' => $importedCodes,
                 'orders_created' => array_keys($createdIds),
                 'errors'         => [],
             ]);
@@ -407,21 +482,28 @@ class StockImportController extends Controller
         $raw = trim($raw);
         if ($raw === '') return null;
 
-        // Normalize slashes to dashes
         $normalized = str_replace('/', '-', $raw);
 
-        // Case: dd-mm-yyyy
         if (preg_match('/^(\d{1,2})-(\d{1,2})-(\d{4})$/', $normalized, $m)) {
             return sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]);
         }
 
-        // Case: yyyy-mm-dd
         if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $normalized, $m)) {
             return sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]);
         }
 
-        // Fallback to strtotime
         $ts = strtotime($normalized);
         return $ts ? date('Y-m-d', $ts) : null;
+    }
+
+    /**
+     * CSV-safe string escape
+     */
+    private function csvEscape($v): string
+    {
+        $v = (string) $v;
+        return (str_contains($v, ',') || str_contains($v, '"') || str_contains($v, "\n"))
+            ? '"' . str_replace('"', '""', $v) . '"'
+            : $v;
     }
 }

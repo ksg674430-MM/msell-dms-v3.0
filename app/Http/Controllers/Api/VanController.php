@@ -22,8 +22,16 @@ class VanController extends Controller
         $bindings = [$dealerId, $companyId];
 
         if ($vanNo = $request->input('van_no')) {
-            $where[] = "van_no LIKE ?";
+            $where[]    = "van_no LIKE ?";
             $bindings[] = "%{$vanNo}%";
+        }
+        if ($request->filled('status')) {
+            $where[]    = "status = ?";
+            $bindings[] = (int) $request->input('status');
+        }
+        if ($driver = $request->input('driver_name')) {
+            $where[]    = "driver_name LIKE ?";
+            $bindings[] = "%{$driver}%";
         }
 
         $whereSql = implode(' AND ', $where);
@@ -83,16 +91,17 @@ class VanController extends Controller
             'license_no'  => ['required', 'string', 'max:30'],
             'vtype'       => ['required', 'string', 'max:200'],
             'address'     => ['required', 'string'],
-            'capacity'    => ['nullable', 'integer'],
+            'capacity'    => ['nullable', 'integer', 'min:0'],
             'status'      => ['nullable', 'integer', 'in:0,1'],
         ]);
 
-        // Duplicate check
+        // Duplicate: dealer + company scoped
         $exists = DB::selectOne(
-            "SELECT id FROM van WHERE van_no = ? AND company_id = ? LIMIT 1",
-            [$request->van_no, $companyId]
+            "SELECT id FROM van
+              WHERE van_no = ? AND dealer_id = ? AND company_id = ?
+              LIMIT 1",
+            [$request->van_no, $dealerId, $companyId]
         );
-
         if ($exists) {
             return response()->json([
                 'status'  => false,
@@ -100,12 +109,24 @@ class VanController extends Controller
             ], 422);
         }
 
-        // Generate unique vanId: dealer_id + YmdHis (e.g. 4130320220602042859)
-        $vanId = $dealerId . now()->format('YmdHis');
+        // Generate vanId: dealer_id (5-6 digits) + YmdHis (14 digits) = 19-20 digits
+        // Bigint(20) safe. Retry on collision (rare).
+        $vanId     = null;
+        $attempts  = 0;
+        do {
+            $vanId = (int) ($dealerId . now()->format('YmdHis'));
+            if (!DB::selectOne("SELECT id FROM van WHERE vanId = ? LIMIT 1", [$vanId])) {
+                break;
+            }
+            usleep(200000); // 200ms
+            $attempts++;
+        } while ($attempts < 5);
 
-        // Ensure uniqueness (paranoia check)
-        while (DB::selectOne("SELECT id FROM van WHERE vanId = ? LIMIT 1", [$vanId])) {
-            $vanId = $dealerId . now()->format('YmdHis') . mt_rand(1, 9);
+        if ($attempts >= 5) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Could not generate unique van ID. Please retry.'
+            ], 500);
         }
 
         DB::insert(
@@ -148,10 +169,11 @@ class VanController extends Controller
         $companyId = (int) ($user->company_id ?? 0);
 
         $existing = DB::selectOne(
-            "SELECT id FROM van WHERE id = ? AND dealer_id = ? AND company_id = ? LIMIT 1",
+            "SELECT id FROM van
+              WHERE id = ? AND dealer_id = ? AND company_id = ?
+              LIMIT 1",
             [$id, $dealerId, $companyId]
         );
-
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
         }
@@ -163,16 +185,16 @@ class VanController extends Controller
             'license_no'  => ['required', 'string', 'max:30'],
             'vtype'       => ['required', 'string', 'max:200'],
             'address'     => ['required', 'string'],
-            'capacity'    => ['nullable', 'integer'],
+            'capacity'    => ['nullable', 'integer', 'min:0'],
             'status'      => ['nullable', 'integer', 'in:0,1'],
         ]);
 
-        // Duplicate van_no excluding current record
         $exists = DB::selectOne(
-            "SELECT id FROM van WHERE van_no = ? AND company_id = ? AND id != ? LIMIT 1",
-            [$request->van_no, $companyId, $id]
+            "SELECT id FROM van
+              WHERE van_no = ? AND dealer_id = ? AND company_id = ? AND id != ?
+              LIMIT 1",
+            [$request->van_no, $dealerId, $companyId, $id]
         );
-
         if ($exists) {
             return response()->json([
                 'status'  => false,
@@ -184,7 +206,7 @@ class VanController extends Controller
             "UPDATE van SET
                 van_no = ?, driver_name = ?, mobile = ?, license_no = ?,
                 vtype = ?, capacity = ?, status = ?, address = ?
-             WHERE id = ?",
+             WHERE id = ? AND dealer_id = ? AND company_id = ?",
             [
                 $request->van_no,
                 $request->driver_name,
@@ -195,6 +217,8 @@ class VanController extends Controller
                 (int) ($request->status ?? 1),
                 $request->address,
                 $id,
+                $dealerId,
+                $companyId,
             ]
         );
 
@@ -203,6 +227,7 @@ class VanController extends Controller
 
     /**
      * DELETE /api/vans/{id}
+     * Soft delete — sets status = 0
      */
     public function destroy(Request $request, int $id): JsonResponse
     {
@@ -210,15 +235,21 @@ class VanController extends Controller
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) ($user->company_id ?? 0);
 
-        $deleted = DB::table('van')
-            ->where('id', $id)
-            ->where('dealer_id', $dealerId)
-            ->where('company_id', $companyId)
-            ->delete();
-
-        if (!$deleted) {
+        $exists = DB::selectOne(
+            "SELECT id FROM van
+              WHERE id = ? AND dealer_id = ? AND company_id = ?
+              LIMIT 1",
+            [$id, $dealerId, $companyId]
+        );
+        if (!$exists) {
             return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
         }
+
+        DB::update(
+            "UPDATE van SET status = 0
+              WHERE id = ? AND dealer_id = ? AND company_id = ?",
+            [$id, $dealerId, $companyId]
+        );
 
         return response()->json(['status' => true, 'message' => 'Van deleted successfully.']);
     }
