@@ -109,158 +109,147 @@ class InvoiceController extends Controller
         return response()->json(['status' => true, 'rows' => $out]);
     }
 
-    
-public function show(Request $request, string $id): JsonResponse
-{
-    $user      = $request->user();
-    $dealerId  = (int) $user->dealer_id;
-    $companyId = (int) ($user->company_id ?? 0);
+    public function show(Request $request, string $id): JsonResponse
+    {
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
 
-    $header = DB::selectOne(
-    "SELECT co.*,
-            r.name AS retailer_name, r.address AS retailer_address,
-            r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
-            r.contact_per_name,
-            r.state_id_retailer AS retailer_state_id,
-            r.pin_no            AS retailer_pin_no,
-            d.name AS dealer_name,
-            d.address        AS dealer_address,
-            d.tin_no         AS dealer_tin_no,
-            d.pan_no         AS dealer_pan_no,
-            d.landline       AS dealer_landline,
-            d.other_numbers  AS dealer_other_numbers,
-            d.pin_no         AS dealer_pin_no,
-            d.state_id       AS dealer_state_id,
-            d.dealer_code    AS dealer_code,
-            d.town_id        AS dealer_town_id,
-            l5.name          AS dealer_town_name,
-            l7.name          AS beat_name,
-            p.first_name, p.middle_name, p.last_name
-       FROM challan_order co
-       LEFT JOIN retailer   r  ON r.id  = co.ch_retailer_id
-       LEFT JOIN dealer     d  ON d.id  = co.ch_dealer_id
-       LEFT JOIN location_5 l5 ON l5.id = d.town_id
-       LEFT JOIN location_7 l7 ON l7.id = r.location_id
-       LEFT JOIN person     p  ON p.id  = co.ch_user_id
-      WHERE co.id = ? AND co.ch_dealer_id = ?
-      LIMIT 1",
-    [$id, $dealerId]
-);
-
-    if (!$header) {
-        return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
-    }
-
-    // dealer town lookup — table name confirm karke badal dena
-    $dealerTown = null;
-    if (!empty($header->dealer_town_id)) {
-        $t = DB::selectOne(
-            "SELECT name FROM town WHERE id = ? LIMIT 1",   // ⚠ table name confirm
-            [$header->dealer_town_id]
-        );
-        $dealerTown = $t->name ?? null;
-    }
-
-    // st
-    $retailerState = (int) ($header->retailer_state_id ?? 0);
-    $dealerState   = (int) ($header->dealer_state_id   ?? 0);
-    $st = ($retailerState > 0 && $retailerState === $dealerState) ? 1 : 0;
-
-    // ITEMS — FIX: catalog_product use karo, catalog_view nahi
-    $items = DB::select(
-        "SELECT cod.*,
-                cp.name              AS product_name,
-                cp.itemcode          AS itemcode,
-                cp.hsn_code          AS hsn_code,
-                cp.quantity_per_case AS qty_per_case,
-                cp.weight            AS weight,
-                cp.gst_percent       AS gst_percent
-           FROM challan_order_details cod
-           LEFT JOIN catalog_product cp ON cp.id = cod.product_id
-          WHERE cod.ch_id = ?
-          ORDER BY cod.id ASC",
-        [$id]
-    );
-
-    // drug licence
-    $reg = null;
-    if (!empty($header->dealer_code)) {
-        $reg = DB::selectOne(
-            "SELECT dl_no_wholesale, dl_no_retail
-               FROM dms_registration
-              WHERE dealer_code = ?
-              ORDER BY id DESC
+        $header = DB::selectOne(
+            "SELECT co.*,
+                    r.name AS retailer_name, r.address AS retailer_address,
+                    r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
+                    r.contact_per_name,
+                    r.state_id_retailer AS retailer_state_id,
+                    r.pin_no            AS retailer_pin_no,
+                    d.name AS dealer_name,
+                    d.address        AS dealer_address,
+                    d.tin_no         AS dealer_tin_no,
+                    d.pan_no         AS dealer_pan_no,
+                    d.landline       AS dealer_landline,
+                    d.other_numbers  AS dealer_other_numbers,
+                    d.pin_no         AS dealer_pin_no,
+                    d.state_id       AS dealer_state_id,
+                    d.dealer_code    AS dealer_code,
+                    d.town_id        AS dealer_town_id,
+                    l5.name          AS dealer_town_name,
+                    l7.name          AS beat_name,
+                    p.first_name, p.middle_name, p.last_name
+               FROM challan_order co
+               LEFT JOIN retailer   r  ON r.id  = co.ch_retailer_id
+               LEFT JOIN dealer     d  ON d.id  = co.ch_dealer_id
+               LEFT JOIN location_5 l5 ON l5.id = d.town_id
+               LEFT JOIN location_7 l7 ON l7.id = r.location_id
+               LEFT JOIN person     p  ON p.id  = co.ch_user_id
+              WHERE co.id = ? AND co.ch_dealer_id = ?
               LIMIT 1",
-            [$header->dealer_code]
+            [$id, $dealerId]
         );
-    }
 
-    // po_no (company 213)
-    $poNo = null;
-    if ($companyId === 213) {
-        $invoiceType = (int) $header->invoice_type;
-
-        if ($invoiceType === 2) {
-            $row = DB::selectOne(
-                "SELECT sed.po_no
-                   FROM challan_order_details cod
-                   INNER JOIN user_sales_order_extra_details sed
-                           ON sed.order_id = cod.order_id
-                  WHERE cod.ch_id = ?
-                    AND sed.po_no IS NOT NULL
-                    AND sed.po_no <> ''
-                  LIMIT 1",
-                [$id]
-            );
-            $poNo = $row->po_no ?? null;
-        } elseif ($invoiceType === 1) {
-            $poNo = $header->direct_invoice_po_no ?? null;
+        if (!$header) {
+            return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
+
+        // st: 1 if retailer state == dealer state (IGST vs CGST/SGST)
+        $retailerState = (int) ($header->retailer_state_id ?? 0);
+        $dealerState   = (int) ($header->dealer_state_id   ?? 0);
+        $st = ($retailerState > 0 && $retailerState === $dealerState) ? 1 : 0;
+
+        // ITEMS — catalog_product se naam/hsn/gst lo (catalog_view me sirf 21 rows thi)
+        $items = DB::select(
+            "SELECT cod.*,
+                    cp.name              AS product_name,
+                    cp.itemcode          AS itemcode,
+                    cp.hsn_code          AS hsn_code,
+                    cp.quantity_per_case AS qty_per_case,
+                    cp.weight            AS weight,
+                    cp.gst_percent       AS gst_percent
+               FROM challan_order_details cod
+               LEFT JOIN catalog_product cp ON cp.id = cod.product_id
+              WHERE cod.ch_id = ?
+              ORDER BY cod.id ASC",
+            [$id]
+        );
+
+        // Drug licence — latest registration row for this dealer_code
+        $reg = null;
+        if (!empty($header->dealer_code)) {
+            $reg = DB::selectOne(
+                "SELECT dl_no_wholesale, dl_no_retail
+                   FROM dms_registration
+                  WHERE dealer_code = ?
+                  ORDER BY id DESC
+                  LIMIT 1",
+                [$header->dealer_code]
+            );
+        }
+
+        // po_no — company 213 only
+        $poNo = null;
+        if ($companyId === 213) {
+            $invoiceType = (int) $header->invoice_type;
+
+            if ($invoiceType === 2) {
+                $row = DB::selectOne(
+                    "SELECT sed.po_no
+                       FROM challan_order_details cod
+                       INNER JOIN user_sales_order_extra_details sed
+                               ON sed.order_id = cod.order_id
+                      WHERE cod.ch_id = ?
+                        AND sed.po_no IS NOT NULL
+                        AND sed.po_no <> ''
+                      LIMIT 1",
+                    [$id]
+                );
+                $poNo = $row->po_no ?? null;
+            } elseif ($invoiceType === 1) {
+                $poNo = $header->direct_invoice_po_no ?? null;
+            }
+        }
+
+        $claim = DB::selectOne(
+            "SELECT * FROM dms_retailer_images_amount_claim
+              WHERE order_id = ? AND company_id = ? AND dealer_id = ?
+              LIMIT 1",
+            [$id, $companyId, $dealerId]
+        );
+
+        $irnLog = DB::selectOne(
+            "SELECT irn, ackno, ackdate, qr_path, status
+               FROM einvoice_api_logs
+              WHERE challan_id = ? AND status = 1
+              ORDER BY id DESC LIMIT 1",
+            [$id]
+        );
+
+        return response()->json([
+            'status' => true,
+            'header' => $header,
+            'items'  => $items,
+            'claim'  => $claim,
+            'irn'    => $irnLog,
+
+            'st'     => $st,
+            'seller' => [
+                'name'              => $header->dealer_name,
+                'address'           => $header->dealer_address,
+                'tin_no'            => $header->dealer_tin_no,
+                'pan_no'            => $header->dealer_pan_no,
+                'landline'          => $header->dealer_landline,
+                'other_numbers'     => $header->dealer_other_numbers,
+                'pin_no'            => $header->dealer_pin_no,
+                'drug_licence_no'   => $reg->dl_no_wholesale ?? null,
+                'drug_licence_no_2' => $reg->dl_no_retail    ?? null,
+            ],
+            'retailer_pin_no' => $header->retailer_pin_no,
+            'po_no'           => $poNo,
+
+            // claim form ke fields
+            'depot_name'        => $header->dealer_name,
+            'ss_stockist_town'  => $header->dealer_town_name,
+            'retailer_category' => $header->retailer_class,
+        ]);
     }
-
-    $claim = DB::selectOne(
-        "SELECT * FROM dms_retailer_images_amount_claim
-          WHERE order_id = ? AND company_id = ? AND dealer_id = ?
-          LIMIT 1",
-        [$id, $companyId, $dealerId]
-    );
-
-    $irnLog = DB::selectOne(
-        "SELECT irn, ackno, ackdate, qr_path, status
-           FROM einvoice_api_logs
-          WHERE challan_id = ? AND status = 1
-          ORDER BY id DESC LIMIT 1",
-        [$id]
-    );
-
-    return response()->json([
-        'status' => true,
-        'header' => $header,
-        'items'  => $items,
-        'claim'  => $claim,
-        'irn'    => $irnLog,
-
-        'st'     => $st,
-        'seller' => [
-            'name'              => $header->dealer_name,
-            'address'           => $header->dealer_address,
-            'tin_no'            => $header->dealer_tin_no,
-            'pan_no'            => $header->dealer_pan_no,
-            'landline'          => $header->dealer_landline,
-            'other_numbers'     => $header->dealer_other_numbers,
-            'pin_no'            => $header->dealer_pin_no,
-            'drug_licence_no'   => $reg->dl_no_wholesale ?? null,
-            'drug_licence_no_2' => $reg->dl_no_retail    ?? null,
-        ],
-        'retailer_pin_no' => $header->retailer_pin_no,
-        'po_no'           => $poNo,
-
-        // naye fields — claim form ke liye
-        'depot_name'        => $header->dealer_name,
-        'ss_stockist_town'  => $dealerTown,
-        'retailer_category' => $header->retailer_class,   // int — frontend map karega
-    ]);
-}
 
     public function update(Request $request, string $id): JsonResponse
     {
@@ -348,7 +337,7 @@ public function show(Request $request, string $id): JsonResponse
                 $disVal  = (float) ($row['dis_amt'] ?? 0);
                 $disAmt  = $disType === 1 ? round($gross * $disVal / 100, 2) : round($disVal, 2);
 
-                // FIX #2: ATD % is applied on the amount AFTER trade discount
+                // FIX #2: ATD % applied on amount AFTER trade discount
                 $afterTrade = $gross - $disAmt;
                 $cdType = (int)   ($row['cd_type'] ?? 1);
                 $cdVal  = (float) ($row['cd'] ?? 0);
@@ -357,7 +346,7 @@ public function show(Request $request, string $id): JsonResponse
                 $taxable = round($gross - $cdAmt - $disAmt, 2);
                 $vatAmt  = round($taxable * $taxPercent / 100, 2);
 
-                // FIX #1: legacy line total includes GST
+                // FIX #1: legacy stores GST-inclusive line total
                 $lineTotal = round($taxable + $vatAmt, 2);
 
                 // stock delta
@@ -574,64 +563,64 @@ public function show(Request $request, string $id): JsonResponse
     }
 
     /* ================= helpers ================= */
-private function loadItems(array $invoiceIds, int $stateId): array
-{
-    if (empty($invoiceIds)) return [];
 
-    $ids = [];
-    foreach ($invoiceIds as $id) $ids[] = "'" . addslashes($id) . "'";
-    $in = implode(',', $ids);
+    private function loadItems(array $invoiceIds, int $stateId): array
+    {
+        if (empty($invoiceIds)) return [];
 
-    $rows = DB::select(
-        "SELECT cod.ch_id, cod.product_id, cod.qty, cod.product_rate,
-                cod.free_qty, cod.tax, cod.vat_amt, cod.taxable_amt,
-                cod.mrp, cod.old_rate, cod.cd_amt, cod.spl_disc_amt,
-                cod.spl_disc_val, cod.dis_amt, cod.dis_percent,
-                cod.dis_type, cod.cd_type, cod.batch_no, cod.mfg_date,
-                cp.name              AS product_name,
-                cp.quantity_per_case AS qty_per_case,
-                cp.weight            AS weight,
-                cp.itemcode          AS itemcode,
-                cp.hsn_code          AS hsn_code
-           FROM challan_order_details cod
-           LEFT JOIN catalog_product cp ON cp.id = cod.product_id
-          WHERE cod.ch_id IN ({$in})
-          ORDER BY cod.id ASC"
-    );
+        $ids = [];
+        foreach ($invoiceIds as $id) $ids[] = "'" . addslashes($id) . "'";
+        $in = implode(',', $ids);
 
-    // baaki code same rakho...
-    $map = [];
-    foreach ($rows as $r) {
-        $qty   = (float) $r->qty;
-        $rate  = (float) $r->product_rate;
-        $free  = (float) $r->free_qty;
-        $lineTotal = round(($qty * $rate), 2);
+        $rows = DB::select(
+            "SELECT cod.ch_id, cod.product_id, cod.qty, cod.product_rate,
+                    cod.free_qty, cod.tax, cod.vat_amt, cod.taxable_amt,
+                    cod.mrp, cod.old_rate, cod.cd_amt, cod.spl_disc_amt,
+                    cod.spl_disc_val, cod.dis_amt, cod.dis_percent,
+                    cod.dis_type, cod.cd_type, cod.batch_no, cod.mfg_date,
+                    cp.name              AS product_name,
+                    cp.quantity_per_case AS qty_per_case,
+                    cp.weight            AS weight,
+                    cp.itemcode          AS itemcode,
+                    cp.hsn_code          AS hsn_code
+               FROM challan_order_details cod
+               LEFT JOIN catalog_product cp ON cp.id = cod.product_id
+              WHERE cod.ch_id IN ({$in})
+              ORDER BY cod.id ASC"
+        );
 
-        $map[$r->ch_id][] = [
-            'product_id'   => (int) $r->product_id,
-            'product_name' => $r->product_name,
-            'itemcode'     => $r->itemcode,
-            'hsn_code'     => $r->hsn_code,
-            'qty'          => $qty,
-            'free_qty'     => $free,
-            'rate'         => $rate,
-            'mrp'          => (float) $r->mrp,
-            'old_rate'     => (float) $r->old_rate,
-            'tax'          => (float) $r->tax,
-            'vat_amt'      => (float) $r->vat_amt,
-            'taxable_amt'  => (float) $r->taxable_amt,
-            'batch_no'     => $r->batch_no,
-            'mfg_date'     => $r->mfg_date,
-            'cd_amt'       => (float) $r->cd_amt,
-            'dis_amt'      => (float) $r->dis_amt,
-            'dis_percent'  => (float) $r->dis_percent,
-            'weight'       => (float) $r->weight,
-            'qty_per_case' => (int) $r->qty_per_case,
-            'line_total'   => $lineTotal,
-        ];
+        $map = [];
+        foreach ($rows as $r) {
+            $qty   = (float) $r->qty;
+            $rate  = (float) $r->product_rate;
+            $free  = (float) $r->free_qty;
+            $lineTotal = round(($qty * $rate), 2);
+
+            $map[$r->ch_id][] = [
+                'product_id'   => (int) $r->product_id,
+                'product_name' => $r->product_name,
+                'itemcode'     => $r->itemcode,
+                'hsn_code'     => $r->hsn_code,
+                'qty'          => $qty,
+                'free_qty'     => $free,
+                'rate'         => $rate,
+                'mrp'          => (float) $r->mrp,
+                'old_rate'     => (float) $r->old_rate,
+                'tax'          => (float) $r->tax,
+                'vat_amt'      => (float) $r->vat_amt,
+                'taxable_amt'  => (float) $r->taxable_amt,
+                'batch_no'     => $r->batch_no,
+                'mfg_date'     => $r->mfg_date,
+                'cd_amt'       => (float) $r->cd_amt,
+                'dis_amt'      => (float) $r->dis_amt,
+                'dis_percent'  => (float) $r->dis_percent,
+                'weight'       => (float) $r->weight,
+                'qty_per_case' => (int) $r->qty_per_case,
+                'line_total'   => $lineTotal,
+            ];
+        }
+        return $map;
     }
-    return $map;
-}
 
     private function loadClaimStatus(array $invoiceIds, int $dealerId, int $companyId): array
     {
