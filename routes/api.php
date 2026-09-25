@@ -119,7 +119,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // BALANCE STOCK  → MENU: Reports → Current Stock / Balance Stock
     // --------------------------------------------------------
     Route::get('/reports/balance-stock',                 [BalanceStockController::class, 'index']);          // main report
-    Route::get('/reports/balance-stock/catalog-options', [BalanceStockController::class, 'catalogOptions']); // product filter dropdown
     Route::get('/reports/balance-stock/filters',         [BalanceStockController::class, 'filters']);        // all filters
     Route::get('/filters/classifications',               [BalanceStockController::class, 'classifications']); // filter: class
     Route::get('/filters/categories',                    [BalanceStockController::class, 'categories']);      // filter: category
