@@ -108,19 +108,22 @@ class PurchaseOrderController extends Controller
         if (!$header) {
             return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
         }
-
         $items = DB::select(
-            "SELECT pod.*,
-                    cp.name              AS product_name,
-                    cp.itemcode          AS itemcode,
-                    cp.quantity_per_case AS quantity_per_case
-               FROM purchase_order_details pod
-               LEFT JOIN catalog_product cp ON cp.id = pod.product_id
-              WHERE pod.order_id = ?
-              ORDER BY pod.auto",
-            [$header->id]
-        );
-
+    "SELECT pod.*,
+            cp.name              AS product_name,
+            cp.itemcode          AS itemcode,
+            cp.hsn_code          AS hsn_code,
+            cp.quantity_per_case AS qty_per_case,
+            cp.weight            AS weight,
+            cp.gst_percent       AS gst_percentage,
+            g.igst               AS gst_rate
+       FROM purchase_order_details pod
+       LEFT JOIN catalog_product cp ON cp.id = pod.product_id
+       LEFT JOIN _gst g             ON g.hsn_code = cp.hsn_code
+      WHERE pod.order_id = ?
+      ORDER BY pod.auto ASC",
+    [(string) $header->id]
+);
         return response()->json([
             'status' => true,
             'data'   => [
@@ -296,26 +299,113 @@ class PurchaseOrderController extends Controller
     // Sets receive_date = NOW() and optionally updates bill/challan fields.
     // -----------------------------------------------------------------
     public function receive(Request $request, $id)
-    {
-        $user     = $request->user();
-        $dealerId = $user->dealer_id;
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
+    $personId  = (int) $user->id;
 
-        $existing = DB::selectOne(
-            "SELECT auto, id FROM purchase_order
-              WHERE (auto = ? OR id = ?) AND dealer_id = ? LIMIT 1",
-            [$id, $id, $dealerId]
-        );
-        if (!$existing) {
-            return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
+    $po = DB::selectOne(
+        "SELECT auto, id, order_id, receive_date, action, cancel_order_reason_id
+           FROM purchase_order
+          WHERE (auto = ? OR id = ?) AND dealer_id = ?
+          LIMIT 1",
+        [$id, $id, $dealerId]
+    );
+    if (!$po) {
+        return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
+    }
+    if (!empty($po->receive_date)) {
+        return response()->json(['status' => false, 'message' => 'Already received.'], 409);
+    }
+    if ((int) $po->action === 0) {
+        return response()->json(['status' => false, 'message' => 'Order is not active.'], 409);
+    }
+    if ((int) $po->cancel_order_reason_id !== 0) {
+        return response()->json(['status' => false, 'message' => 'Order is cancelled.'], 409);
+    }
+
+    $validated = $request->validate([
+        'sale_date'           => 'nullable|date',
+        'ch_date'             => 'nullable|date',
+        'challan_no'          => 'nullable|string|max:50',
+        'items'               => 'required|array|min:1',
+        'items.*.detail_id'   => 'required|string',
+        'items.*.product_id'  => 'required|integer',
+        'items.*.batch_no'    => 'required|string|max:50',
+        'items.*.mfg_date'    => 'required|date',
+        'items.*.expiry_date' => 'nullable|date',
+        'items.*.qty'         => 'required|numeric|min:0',
+        'items.*.free_qty'    => 'nullable|numeric|min:0',
+        'items.*.rate'        => 'nullable|numeric|min:0',
+        'items.*.mrp'         => 'nullable|numeric|min:0',
+        'items.*.pr_rate'     => 'nullable|numeric|min:0',
+    ]);
+
+    DB::transaction(function () use ($validated, $po, $dealerId, $companyId, $personId, $request) {
+
+        $saleDate = !empty($validated['sale_date']) ? $validated['sale_date'] : now()->format('Y-m-d');
+        $chDate   = !empty($validated['ch_date'])   ? $validated['ch_date']   : $saleDate;
+        $today    = now()->format('Y-m-d');
+
+        foreach ($validated['items'] as $row) {
+            $productId = (int)    $row['product_id'];
+            $batchNo   = (string) $row['batch_no'];
+            $mfgDate   = (string) $row['mfg_date'];
+            $expiry    = $row['expiry_date'] ?? null;
+            $qty       = (float)  $row['qty'];
+            $freeQty   = (float)  ($row['free_qty'] ?? 0);
+            $totalQty  = $qty + $freeQty;
+            $rate      = (float)  ($row['rate']    ?? 0);
+            $mrp       = (float)  ($row['mrp']     ?? 0);
+            $prRate    = (float)  ($row['pr_rate'] ?? 0);
+
+            // stock UPSERT
+            $existing = DB::selectOne(
+                "SELECT id FROM stock
+                  WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ?
+                  LIMIT 1",
+                [$dealerId, $productId, $batchNo, $mfgDate]
+            );
+
+            if ($existing) {
+                DB::update(
+                    "UPDATE stock SET qty = qty + ? WHERE id = ?",
+                    [$totalQty, $existing->id]
+                );
+            } else {
+                DB::insert(
+                    "INSERT INTO stock
+                        (dealer_id, product_id, batch_no, mfg, expire, date,
+                         qty, rate, dealer_rate, mrp, pr_rate, person_id, company_id,
+                         sync_status, update_date_time)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())",
+                    [
+                        $dealerId, $productId, $batchNo, $mfgDate, $expiry, $today,
+                        $totalQty, $rate, $rate, $mrp, $prRate, $personId, $companyId,
+                    ]
+                );
+            }
+
+            // PO detail mark
+            DB::update(
+                "UPDATE purchase_order_details
+                    SET batch_no     = ?,
+                        mfg_date     = ?,
+                        expiry_date  = COALESCE(?, expiry_date),
+                        receive_date = ?,
+                        recv_cases   = ?
+                  WHERE id = ? AND order_id = ?",
+                [
+                    $batchNo, $mfgDate, $expiry, $today,
+                    (int) $row['qty'],
+                    (string) $row['detail_id'],
+                    (string) $po->order_id,
+                ]
+            );
         }
 
-        $saleDate = $request->filled('sale_date')
-            ? $this->parseDate($request->input('sale_date'))
-            : now()->format('Y-m-d');
-        $chDate   = $request->filled('ch_date')
-            ? $this->parseDate($request->input('ch_date'))
-            : $saleDate;
-
+        // PO header
         DB::update(
             "UPDATE purchase_order
                 SET receive_date = ?,
@@ -325,16 +415,15 @@ class PurchaseOrderController extends Controller
               WHERE auto = ?",
             [
                 now()->format('Y-m-d H:i:s'),
-                $saleDate,
-                $chDate,
-                $request->input('challan_no'),
-                (int)$existing->auto,
+                $saleDate, $chDate,
+                $request->input('challan_no', ''),
+                (int) $po->auto,
             ]
         );
+    });
 
-        return response()->json(['status' => true, 'message' => 'Purchase order marked as received.']);
-    }
-
+    return response()->json(['status' => true, 'message' => 'Received, stock added.']);
+}
     // -----------------------------------------------------------------
     // GET /api/purchase-orders/form-data
     // -----------------------------------------------------------------

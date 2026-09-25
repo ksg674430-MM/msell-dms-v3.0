@@ -154,7 +154,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get ('/{id}',          [PurchaseOrderController::class, 'show']);      // PO detail
         Route::put ('/{id}',          [PurchaseOrderController::class, 'update']);    // edit PO
         Route::post('/{id}/receive',  [PurchaseOrderController::class, 'receive']);   // receive → stock in
-        Route::post('/query',         [PurchaseOrderController::class, 'query']);     // filtered search
+        // Route::post('/query',         [PurchaseOrderController::class, 'query']);     // filtered search
     });
 
     // ========================================================
