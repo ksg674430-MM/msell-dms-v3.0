@@ -34,6 +34,8 @@ use App\Http\Controllers\Api\CatalogProductController;
 
 use App\Http\Controllers\Api\DispatchController;
 
+use App\Http\Controllers\Api\SaleWiseInvoiceController;
+
 
 // ============================================================
 // PUBLIC (no auth)
@@ -194,6 +196,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);   // order detail
     Route::post('/sales-orders/query',     [SalesOrderController::class, 'query']);  // filtered search
     Route::post('/sales-orders/cancel',    [SalesOrderController::class, 'cancel']); // cancel order
+
+    Route::get ('/sale-wise-invoice/orders',      [SaleWiseInvoiceController::class, 'orders']);
+Route::get ('/sale-wise-invoice/mrp-options', [SaleWiseInvoiceController::class, 'mrpOptions']);
+Route::get ('/sale-wise-invoice/next-ch-no',  [SaleWiseInvoiceController::class, 'nextChNo']);
+Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class, 'outstanding']);
+Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class, 'save']);
 
     // --------------------------------------------------------
     // CHALLAN FROM ORDERS  → MENU: Order → Convert to Invoice
