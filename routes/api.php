@@ -128,6 +128,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/reports/balance-stock/edit', [BalanceStockController::class, 'bulkUpdate']);//  edit stock
 
     // --------------------------------------------------------
+    // IMPORT  → MENU: Stock → Import (Bulk upload)
+    // --------------------------------------------------------
+    Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);  // Excel upload → opening stock
+    Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);  // Excel upload → receive stock
+    Route::get('/opening-stocks/import-format', [StockImportController::class,'importFormat']);  // Export Excel 
+
+    // --------------------------------------------------------
     // OPENING STOCK  → MENU: Stock → Opening Stock
     // --------------------------------------------------------
     Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']); // product picker
@@ -138,11 +145,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
     Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
 
-    // --------------------------------------------------------
-    // IMPORT  → MENU: Stock → Import (Bulk upload)
-    // --------------------------------------------------------
-    Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);  // Excel upload → opening stock
-    Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);  // Excel upload → receive stock
+    
 
     // --------------------------------------------------------
     // PURCHASE ORDER / RECEIVE STOCK  → MENU: Purchase → Purchase Order, Receive Stock

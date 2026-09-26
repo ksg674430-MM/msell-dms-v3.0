@@ -23,11 +23,11 @@ class StockImportController extends Controller
         $templateId      = (int) ($user->template_id ?? 0);
         $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
 
-        $dealer = DB::selectOne(
-            "SELECT id, dealer_code, quantity_type, csa_id, ownership_type_id
-               FROM dealer WHERE id = ? LIMIT 1",
-            [$dealerId]
-        );
+       $dealer = DB::selectOne(
+    "SELECT id, dealer_code, csa_id, ownership_type_id, template_id
+       FROM dealer WHERE id = ? LIMIT 1",
+    [$dealerId]
+);
 
         if (!$dealer) {
             return response()->json(['status' => false, 'message' => 'Dealer not found'], 404);
