@@ -11,8 +11,6 @@ class StockImportController extends Controller
 {
     /**
      * GET /api/opening-stocks/import-format
-     * Returns PreviousStock.csv — mirrors legacy
-     * modules/import/export_previous_opening_stock.php
      */
     public function importFormat(Request $request)
     {
@@ -20,34 +18,33 @@ class StockImportController extends Controller
         $dealerId        = (int) $user->dealer_id;
         $companyId       = (int) ($user->company_id ?? 0);
         $stateId         = (string) ($user->state_id ?? 0);
-        $templateId      = (int) ($user->template_id ?? 0);
         $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
 
-       $dealer = DB::selectOne(
-    "SELECT id, dealer_code, csa_id, ownership_type_id, template_id
-       FROM dealer WHERE id = ? LIMIT 1",
-    [$dealerId]
-);
+        $dealer = DB::selectOne(
+            "SELECT id, dealer_code, csa_id, ownership_type_id, template_id
+               FROM dealer WHERE id = ? LIMIT 1",
+            [$dealerId]
+        );
 
         if (!$dealer) {
             return response()->json(['status' => false, 'message' => 'Dealer not found'], 404);
         }
 
-        // Fallback: agar user me ownership_type_id nahi hai to dealer se lo
         if ($ownershipTypeId === 0) {
             $ownershipTypeId = (int) ($dealer->ownership_type_id ?? 0);
         }
+        $templateId = (int) ($dealer->template_id ?? 0);
 
-        $isDepo           = ($ownershipTypeId === 245);   // DEPO login — legacy confirm
-        $isCaseDealer     = ((int) ($dealer->quantity_type ?? 0) === 1);
+        // Piece-level only (case-quantity on hold)
+        $isDepo           = ($ownershipTypeId === 245);
         $useTemplateRates = ($companyId === 213 && $templateId > 0);
 
         if ($isDepo) {
-            $rateCol = $isCaseDealer ? 'ss_case_rate' : 'ss_pcs_rate';
-            $mrpCol  = $isCaseDealer ? 'mrp'          : 'mrp_pcs';
+            $rateCol = 'ss_pcs_rate';
+            $mrpCol  = 'mrp_pcs';
         } else {
-            $rateCol = $isCaseDealer ? 'dealer_rate'  : 'dealer_pcs_rate';
-            $mrpCol  = $isCaseDealer ? 'mrp'          : 'mrp_pcs';
+            $rateCol = 'dealer_pcs_rate';
+            $mrpCol  = 'mrp_pcs';
         }
 
         $rateTable = $useTemplateRates ? 'product_rate_list_template' : 'product_rate_list';
@@ -69,9 +66,7 @@ class StockImportController extends Controller
             [$stateId, $companyId]
         );
 
-        $qtyHeader = $isCaseDealer ? 'Quantity(In CASE)' : 'Quantity(In PCS)';
-
-        $csv = "S.No,Item Code,Product Name,MRP,Rate,{$qtyHeader},Batch No,Mfg Date(dd/mm/yyyy)\n";
+        $csv = "S.No,Item Code,Product Name,MRP,Rate,Quantity(In PCS),Batch No,Mfg Date(dd/mm/yyyy)\n";
         $i = 1;
         foreach ($rows as $r) {
             $csv .= implode(',', [
@@ -94,9 +89,6 @@ class StockImportController extends Controller
 
     /**
      * POST /api/opening-stocks/import
-     * multipart/form-data with field name "excelFile" (CSV)
-     *
-     * Mirrors legacy import_os::import_opening_stock_save()
      */
     public function openingStock(Request $request): JsonResponse
     {
@@ -107,8 +99,11 @@ class StockImportController extends Controller
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) ($user->company_id ?? 0);
-        $userId    = (int) $user->getKey();
 
+        // ✅ FIX: person_id = dpId (User model ka primary key)
+        $userId = (int) ($user->dpId ?? $user->getKey() ?? 0);
+
+        // ✅ csa_id from dealer
         $csaId = (int) (DB::table('dealer')->where('id', $dealerId)->value('csa_id') ?? 0);
 
         $itemCodeMap = DB::table('catalog_product')
@@ -116,8 +111,7 @@ class StockImportController extends Controller
             ->pluck('id', 'itemcode')
             ->toArray();
 
-        $csvPath = $request->file('excelFile')->getRealPath();
-        $fh = fopen($csvPath, 'r');
+        $fh = fopen($request->file('excelFile')->getRealPath(), 'r');
         if ($fh === false) {
             return response()->json(['status' => false, 'message' => 'Unable to read uploaded file.'], 400);
         }
@@ -146,13 +140,13 @@ class StockImportController extends Controller
                 $mfgRaw   = trim($row[7]);
 
                 if (!isset($itemCodeMap[$itemCode])) {
-                    $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) not found in company {$companyId}."];
+                    $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) not found."];
                     continue;
                 }
                 $productId = (int) $itemCodeMap[$itemCode];
 
                 if ($mrp === '' || $rate === '' || $qty === '' || $batchNo === '' || $mfgRaw === '') {
-                    $errors[] = ['row' => $rowNum, 'reason' => 'Missing mandatory field (mrp / rate / qty / batch_no / mfg_date).'];
+                    $errors[] = ['row' => $rowNum, 'reason' => 'Missing mandatory field.'];
                     continue;
                 }
 
@@ -162,7 +156,6 @@ class StockImportController extends Controller
                     continue;
                 }
 
-                // opening_stocks
                 DB::insert(
                     "INSERT IGNORE INTO opening_stocks
                         (product_id, batch_no, rate, dealer_rate, mrp,
@@ -184,13 +177,10 @@ class StockImportController extends Controller
                     ]
                 );
 
-                // stock upsert
                 $existingStock = DB::selectOne(
-                    "SELECT id, qty, mfg FROM stock
-                      WHERE product_id = ?
-                        AND dealer_id  = ?
-                        AND batch_no   = ?
-                        AND mrp        = ?
+                    "SELECT id, qty FROM stock
+                      WHERE product_id = ? AND dealer_id = ? AND batch_no = ?
+                        AND mrp = ?
                         AND DATE_FORMAT(mfg, '%Y-%m') = DATE_FORMAT(?, '%Y-%m')
                       LIMIT 1",
                     [$productId, $dealerId, $batchNo, $mrp, $mfgDate]
@@ -199,21 +189,11 @@ class StockImportController extends Controller
                 if ($existingStock) {
                     DB::update(
                         "UPDATE stock
-                            SET qty              = qty + ?,
-                                dealer_rate      = ?,
-                                mrp              = ?,
-                                nonsalable_damage= 0,
-                                expire           = ?,
-                                date             = NOW(),
-                                update_date_time = NOW()
+                            SET qty = qty + ?, dealer_rate = ?, mrp = ?,
+                                nonsalable_damage = 0,
+                                expire = ?, date = NOW(), update_date_time = NOW()
                           WHERE id = ?",
-                        [
-                            (float) $qty,
-                            (float) $rate,
-                            (float) $mrp,
-                            $mfgDate,
-                            $existingStock->id,
-                        ]
+                        [(float) $qty, (float) $rate, (float) $mrp, $mfgDate, $existingStock->id]
                     );
                 } else {
                     DB::insert(
@@ -249,7 +229,6 @@ class StockImportController extends Controller
                 return response()->json([
                     'status'   => false,
                     'message'  => 'Import aborted. First error at row ' . $errors[0]['row'] . '.',
-                    'total'    => $inserted + count($errors),
                     'inserted' => 0,
                     'errors'   => $errors,
                 ], 422);
@@ -260,7 +239,6 @@ class StockImportController extends Controller
             return response()->json([
                 'status'         => true,
                 'message'        => "{$inserted} row(s) imported successfully.",
-                'total'          => $inserted,
                 'inserted'       => $inserted,
                 'imported_codes' => $importedCodes,
                 'errors'         => [],
@@ -269,19 +247,12 @@ class StockImportController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             if (is_resource($fh)) fclose($fh);
-
-            return response()->json([
-                'status'  => false,
-                'message' => 'Import failed: ' . $e->getMessage(),
-            ], 500);
+            return response()->json(['status' => false, 'message' => 'Import failed: ' . $e->getMessage()], 500);
         }
     }
 
     /**
      * POST /api/purchase-orders/import-receive
-     * multipart/form-data with field name "excelFile" (CSV)
-     *
-     * Mirrors legacy import_os::import_receive_stock_save()
      */
     public function receiveStock(Request $request): JsonResponse
     {
@@ -289,18 +260,22 @@ class StockImportController extends Controller
             'excelFile' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
         ]);
 
-        $user         = $request->user();
-        $dealerId     = (int) $user->dealer_id;
-        $companyId    = (int) ($user->company_id ?? 0);
-        $userId       = (int) $user->getKey();
-        $csaId        = (int) ($user->csa_id ?? 0);
-        $quantityType = (int) ($user->quantity_type ?? 0);
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
 
-        $mrpCol  = $quantityType === 1 ? 'mrp'         : 'mrp_pcs';
-        $rateCol = $quantityType === 1 ? 'dealer_rate' : 'dealer_pcs_rate';
+        // ✅ FIX: person_id = dpId
+        $userId = (int) ($user->dpId ?? $user->getKey() ?? 0);
+
+        // ✅ csa_id from dealer (user.csa_id was 0)
+        $csaId = (int) (DB::table('dealer')->where('id', $dealerId)->value('csa_id') ?? 0);
+
+        // Piece-level rates
+        $mrpCol  = 'mrp_pcs';
+        $rateCol = 'dealer_pcs_rate';
 
         $rateRows = DB::select(
-            "SELECT cp.id AS id, prl.{$mrpCol} AS mrp, prl.{$rateCol} AS dealer_rate
+            "SELECT cp.id, prl.{$mrpCol} AS mrp, prl.{$rateCol} AS dealer_rate
                FROM catalog_product cp
                INNER JOIN product_rate_list prl ON prl.product_id = cp.id
               WHERE cp.company_id = ?
@@ -316,8 +291,7 @@ class StockImportController extends Controller
             ];
         }
 
-        $csvPath = $request->file('excelFile')->getRealPath();
-        $fh = fopen($csvPath, 'r');
+        $fh = fopen($request->file('excelFile')->getRealPath(), 'r');
         if ($fh === false) {
             return response()->json(['status' => false, 'message' => 'Unable to read uploaded file.'], 400);
         }
@@ -359,7 +333,6 @@ class StockImportController extends Controller
                 }
 
                 $invoiceDateParsed = $this->parseDate($invoiceDate) ?: $saleDateParsed;
-
                 $finalOrderId = date('Ymd', strtotime($saleDateParsed)) . $dealerId;
                 $createdIds[$finalOrderId] = true;
 
@@ -376,8 +349,7 @@ class StockImportController extends Controller
                 if ($exists) {
                     $detail = DB::selectOne(
                         "SELECT auto, quantity FROM purchase_order_details
-                          WHERE product_id = ? AND order_id = ?
-                          LIMIT 1",
+                          WHERE product_id = ? AND order_id = ? LIMIT 1",
                         [$skuId, $finalOrderId]
                     );
 
@@ -399,8 +371,7 @@ class StockImportController extends Controller
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)",
                             [
                                 $companyId, $finalOrderId, $finalOrderId, $skuId, $mrp, $mfgDate,
-                                $rate, $skuQty, $skuQty,
-                                $totalValue, $totalValue,
+                                $rate, $skuQty, $skuQty, $totalValue, $totalValue,
                             ]
                         );
                     }
@@ -428,8 +399,7 @@ class StockImportController extends Controller
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)",
                         [
                             $companyId, $finalOrderId, $finalOrderId, $skuId, $mrp, $mfgDate,
-                            $rate, $skuQty, $skuQty,
-                            $totalValue, $totalValue,
+                            $rate, $skuQty, $skuQty, $totalValue, $totalValue,
                         ]
                     );
                 }
@@ -445,7 +415,6 @@ class StockImportController extends Controller
                 return response()->json([
                     'status'   => false,
                     'message'  => 'Import aborted. First error at row ' . $errors[0]['row'] . '.',
-                    'total'    => $inserted + count($errors),
                     'inserted' => 0,
                     'errors'   => $errors,
                 ], 422);
@@ -456,7 +425,6 @@ class StockImportController extends Controller
             return response()->json([
                 'status'         => true,
                 'message'        => "{$inserted} row(s) imported successfully.",
-                'total'          => $inserted,
                 'inserted'       => $inserted,
                 'imported_codes' => $importedCodes,
                 'orders_created' => array_keys($createdIds),
@@ -466,39 +434,26 @@ class StockImportController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             if (is_resource($fh)) fclose($fh);
-
-            return response()->json([
-                'status'  => false,
-                'message' => 'Import failed: ' . $e->getMessage(),
-            ], 500);
+            return response()->json(['status' => false, 'message' => 'Import failed: ' . $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Parse legacy "dd/mm/yyyy" or "yyyy-mm-dd" or "d-m-yyyy" → Y-m-d
-     */
     private function parseDate(string $raw): ?string
     {
         $raw = trim($raw);
         if ($raw === '') return null;
+        $n = str_replace('/', '-', $raw);
 
-        $normalized = str_replace('/', '-', $raw);
-
-        if (preg_match('/^(\d{1,2})-(\d{1,2})-(\d{4})$/', $normalized, $m)) {
+        if (preg_match('/^(\d{1,2})-(\d{1,2})-(\d{4})$/', $n, $m)) {
             return sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]);
         }
-
-        if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $normalized, $m)) {
+        if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $n, $m)) {
             return sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]);
         }
-
-        $ts = strtotime($normalized);
+        $ts = strtotime($n);
         return $ts ? date('Y-m-d', $ts) : null;
     }
 
-    /**
-     * CSV-safe string escape
-     */
     private function csvEscape($v): string
     {
         $v = (string) $v;

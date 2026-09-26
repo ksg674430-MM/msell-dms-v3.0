@@ -130,9 +130,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // --------------------------------------------------------
     // IMPORT  → MENU: Stock → Import (Bulk upload)
     // --------------------------------------------------------
+     Route::get('/opening-stocks/import-format', [StockImportController::class,'importFormat']);  // Export Excel 
     Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);  // Excel upload → opening stock
     Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);  // Excel upload → receive stock
-    Route::get('/opening-stocks/import-format', [StockImportController::class,'importFormat']);  // Export Excel 
 
     // --------------------------------------------------------
     // OPENING STOCK  → MENU: Stock → Opening Stock
