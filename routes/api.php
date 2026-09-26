@@ -32,6 +32,8 @@ use App\Http\Controllers\Api\ThresholdController;
 
 use App\Http\Controllers\Api\CatalogProductController;
 
+use App\Http\Controllers\Api\DispatchController;
+
 
 // ============================================================
 // PUBLIC (no auth)
@@ -183,6 +185,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post  ('/challans',                [ChallanController::class, 'store']);   // create direct invoice
     Route::put   ('/challans/{id}',           [ChallanController::class, 'update']);  // edit invoice
     Route::post  ('/challans/{id}/cancel',    [ChallanController::class, 'cancel']);  // cancel (move to _cancel table)
+    Route::post('/challans/process-claim', [ChallanController::class, 'takeActionOnProcessChallanClaim']);
 
     // ========================================================
     // SALES ORDER  → MENU: Order → Sales Order
@@ -224,6 +227,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post ('/dgr-claims/process',  [DgrClaimController::class, 'process']); // process claim
     Route::post ('/dgr-claims/approve',  [DgrClaimController::class, 'approve']); // approve claim
     Route::post ('/dgr-claims/query',    [DgrClaimController::class, 'query']);   // filtered search
+
+    //===================================================
+    // Dialy Dispatch
+    //===================================================
+    Route::get   ('/dispatches',            [DispatchController::class, 'index']);
+Route::get   ('/dispatches/challans',   [DispatchController::class, 'searchChallans']);
+Route::get   ('/dispatches/next-no',    [DispatchController::class, 'nextNo']);
+Route::post  ('/dispatches',            [DispatchController::class, 'store']);
+Route::get   ('/dispatches/{id}',       [DispatchController::class, 'show']);
+Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
+Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
 
     // ========================================================
     // LOOKUP  → MENU: Generic (dropdowns, autocompletes)

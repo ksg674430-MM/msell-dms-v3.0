@@ -1278,4 +1278,99 @@ class ChallanController extends Controller
     //         'meta'   => $result['meta'],
     //     ]);
     // }
+
+    /* =========================================================
+ |  CLAIM FROM PROCESSED CHALLANS
+ |  POST /api/challans/process-claim
+ | ========================================================= */
+public function takeActionOnProcessChallanClaim(Request $request): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) $user->dealer_id;
+    $companyId = (int) ($user->company_id ?? 0);
+
+    $validated = $request->validate([
+        'checkedVals'   => ['required', 'array', 'min:1'],
+        'checkedVals.*' => ['required', 'string'],
+    ]);
+
+    $loopData = $validated['checkedVals'];
+
+    // Parse + validate each entry first (fail before touching DB)
+    $parsedRows = [];
+    foreach ($loopData as $idx => $val) {
+        $parts = explode('|', $val);
+        if (count($parts) !== 6) {
+            return response()->json([
+                'status'  => false,
+                'message' => "Invalid row at position " . ($idx + 1) . ". Expected 6 pipe-separated values.",
+            ], 422);
+        }
+
+        [$chId, $productId, $challanRate, $challanQty, $purchaseRate, $claimAmount] = $parts;
+
+        if (!is_numeric($chId) || !is_numeric($productId)) {
+            return response()->json([
+                'status'  => false,
+                'message' => "Invalid challan_id or product_id at position " . ($idx + 1) . ".",
+            ], 422);
+        }
+
+        $parsedRows[] = [
+            'challan_id'     => (int) $chId,
+            'product_id'     => (int) $productId,
+            'challan_rate'   => (float) $challanRate,
+            'challan_qty'    => (float) $challanQty,
+            'purchase_rate'  => (float) $purchaseRate,
+            'claim_amount'   => (float) $claimAmount,
+        ];
+    }
+
+    // Unique order id: dealer + YmdHis + 4 random digits to avoid collision
+    $orderId   = $dealerId . date('YmdHis') . mt_rand(1000, 9999);
+    $dateTime  = now()->format('Y-m-d H:i:s');
+
+    DB::beginTransaction();
+    try {
+        // 1. Main claim header
+        DB::table('dms_challan_claim')->insert([
+            'order_id'   => $orderId,
+            'company_id' => $companyId,
+            'dealer_id'  => $dealerId,
+            'date_time'  => $dateTime,
+        ]);
+
+        // 2. Details
+        $details = [];
+        foreach ($parsedRows as $row) {
+            $details[] = [
+                'order_id'      => $orderId,
+                'challan_id'    => $row['challan_id'],
+                'product_id'    => $row['product_id'],
+                'challan_rate'  => $row['challan_rate'],
+                'challan_qty'   => $row['challan_qty'],
+                'purchase_rate' => $row['purchase_rate'],
+                'claim_amount'  => $row['claim_amount'],
+            ];
+        }
+
+        DB::table('dms_challan_claim_details')->insert($details);
+
+        DB::commit();
+
+        return response()->json([
+            'status'   => true,
+            'message'  => 'Claim saved successfully.',
+            'order_id' => $orderId,
+            'rows'     => count($details),
+        ]);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json([
+            'status'  => false,
+            'message' => 'Claim save failed: ' . $e->getMessage(),
+        ], 500);
+    }
+}
 }
