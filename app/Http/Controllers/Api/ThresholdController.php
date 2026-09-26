@@ -9,14 +9,17 @@ use Illuminate\Support\Facades\DB;
 
 class ThresholdController extends Controller
 {
+    /**
+     * GET /api/thresholds
+     * Legacy: filter by dealer only, active products only.
+     */
     public function index(Request $request): JsonResponse
     {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
+        $user     = $request->user();
+        $dealerId = (int) $user->dealer_id;
 
-        $where    = ["t.dealer_id = ?", "t.company_id = ?"];
-        $bindings = [$dealerId, $companyId];
+        $where    = ["t.dealer_id = ?", "cp.status = 1"];   // ✅ FIX #1 + #3
+        $bindings = [$dealerId];
 
         if ($request->filled('retailer_id')) {
             $where[]    = "t.retailer_id = ?";
@@ -47,6 +50,9 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'rows' => $rows]);
     }
 
+    /**
+     * GET /api/thresholds/products
+     */
     public function products(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -62,20 +68,23 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'products' => $rows]);
     }
 
+    /**
+     * GET /api/thresholds/{id}
+     */
     public function show(Request $request, int $id): JsonResponse
     {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
+        $user     = $request->user();
+        $dealerId = (int) $user->dealer_id;
 
+        // ✅ FIX #3: no company_id filter — legacy rows might have different company
         $row = DB::selectOne(
             "SELECT t.id, t.product_id, t.qty, t.max_qty, t.retailer_id,
                     cp.name AS product_name, cp.itemcode
                FROM threshold t
                LEFT JOIN catalog_product cp ON cp.id = t.product_id
-              WHERE t.id = ? AND t.dealer_id = ? AND t.company_id = ?
+              WHERE t.id = ? AND t.dealer_id = ?
               LIMIT 1",
-            [$id, $dealerId, $companyId]
+            [$id, $dealerId]
         );
 
         if (!$row) {
@@ -85,6 +94,10 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'row' => $row]);
     }
 
+    /**
+     * POST /api/thresholds
+     * Upsert on (dealer_id, product_id) — matches legacy behaviour.
+     */
     public function store(Request $request): JsonResponse
     {
         $user      = $request->user();
@@ -106,20 +119,31 @@ class ThresholdController extends Controller
             return response()->json(['status' => false, 'message' => 'Invalid product selected.'], 422);
         }
 
+        $qty        = (int) $request->qty;
+        $maxQty     = (int) ($request->max_qty ?? 0);
         $retailerId = (string) $request->input('retailer_id', '');
 
-        // ✅ FIX #2: Duplicate check
-        $dup = DB::selectOne(
+        // ✅ FIX #2: match on dealer + product only (ignore retailer_id)
+        $existing = DB::selectOne(
             "SELECT id FROM threshold
-              WHERE dealer_id = ? AND company_id = ? AND product_id = ? AND retailer_id = ?
+              WHERE dealer_id = ? AND product_id = ?
               LIMIT 1",
-            [$dealerId, $companyId, (int) $request->product_id, $retailerId]
+            [$dealerId, (int) $request->product_id]
         );
-        if ($dup) {
+
+        if ($existing) {
+            // Update qty + max_qty only — retailer_id untouched (legacy doesn't overwrite)
+            DB::update(
+                "UPDATE threshold SET qty = ?, max_qty = ? WHERE id = ?",
+                [$qty, $maxQty, (int) $existing->id]
+            );
+
             return response()->json([
-                'status'  => false,
-                'message' => 'Threshold already exists for this product and retailer.'
-            ], 422);
+                'status'  => true,
+                'message' => 'Threshold updated successfully.',
+                'id'      => (int) $existing->id,
+                'mode'    => 'update',
+            ]);
         }
 
         DB::insert(
@@ -127,10 +151,11 @@ class ThresholdController extends Controller
                 (company_id, dealer_id, product_id, qty, max_qty, retailer_id)
              VALUES (?, ?, ?, ?, ?, ?)",
             [
-                $companyId, $dealerId,
+                $companyId,
+                $dealerId,
                 (int) $request->product_id,
-                (int) $request->qty,
-                (int) ($request->max_qty ?? 0),
+                $qty,
+                $maxQty,
                 $retailerId,
             ]
         );
@@ -139,20 +164,23 @@ class ThresholdController extends Controller
             'status'  => true,
             'message' => 'Threshold saved successfully.',
             'id'      => DB::getPdo()->lastInsertId(),
+            'mode'    => 'insert',
         ]);
     }
 
+    /**
+     * PUT /api/thresholds/{id}
+     */
     public function update(Request $request, int $id): JsonResponse
     {
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) ($user->company_id ?? 0);
 
+        // ✅ FIX #3: dealer only
         $existing = DB::selectOne(
-            "SELECT id FROM threshold
-              WHERE id = ? AND dealer_id = ? AND company_id = ?
-              LIMIT 1",
-            [$id, $dealerId, $companyId]
+            "SELECT id FROM threshold WHERE id = ? AND dealer_id = ? LIMIT 1",
+            [$id, $dealerId]
         );
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
@@ -173,49 +201,50 @@ class ThresholdController extends Controller
             return response()->json(['status' => false, 'message' => 'Invalid product selected.'], 422);
         }
 
-        $retailerId = (string) $request->input('retailer_id', '');
-
-        // ✅ FIX #2: Duplicate check (exclude current)
+        // Duplicate check: another row for same dealer+product?
         $dup = DB::selectOne(
             "SELECT id FROM threshold
-              WHERE dealer_id = ? AND company_id = ? AND product_id = ? AND retailer_id = ? AND id != ?
+              WHERE dealer_id = ? AND product_id = ? AND id != ?
               LIMIT 1",
-            [$dealerId, $companyId, (int) $request->product_id, $retailerId, $id]
+            [$dealerId, (int) $request->product_id, $id]
         );
         if ($dup) {
             return response()->json([
                 'status'  => false,
-                'message' => 'Another threshold already exists for this product and retailer.'
+                'message' => 'Another threshold already exists for this product.'
             ], 422);
         }
 
-        // ✅ FIX #1: dealer_id + company_id in WHERE
-        DB::update(
-            "UPDATE threshold SET
-                product_id = ?, qty = ?, max_qty = ?, retailer_id = ?
-              WHERE id = ? AND dealer_id = ? AND company_id = ?",
-            [
-                (int) $request->product_id,
-                (int) $request->qty,
-                (int) ($request->max_qty ?? 0),
-                $retailerId,
-                $id, $dealerId, $companyId,
-            ]
-        );
+        $update = [
+            'product_id' => (int) $request->product_id,
+            'qty'        => (int) $request->qty,
+            'max_qty'    => (int) ($request->max_qty ?? 0),
+        ];
+        // Only overwrite retailer_id if explicitly provided (non-null)
+        if ($request->has('retailer_id')) {
+            $update['retailer_id'] = (string) $request->input('retailer_id');
+        }
+
+        DB::table('threshold')
+            ->where('id', $id)
+            ->where('dealer_id', $dealerId)
+            ->update($update);
 
         return response()->json(['status' => true, 'message' => 'Threshold updated successfully.']);
     }
 
+    /**
+     * DELETE /api/thresholds/{id}
+     */
     public function destroy(Request $request, int $id): JsonResponse
     {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
+        $user     = $request->user();
+        $dealerId = (int) $user->dealer_id;
 
+        // ✅ FIX #3: dealer only
         $deleted = DB::table('threshold')
             ->where('id', $id)
             ->where('dealer_id', $dealerId)
-            ->where('company_id', $companyId)
             ->delete();
 
         if (!$deleted) {
