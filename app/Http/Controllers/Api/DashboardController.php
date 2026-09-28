@@ -50,6 +50,33 @@ class DashboardController extends Controller
         ]);
     }
 
+    public function paymentCollection(Request $request): JsonResponse
+    {
+        $request->validate(['date' => ['nullable', 'date_format:Y-m']]);
+        $dealerId  = (int) $request->user()->dealer_id;
+        $month     = $request->input('date', date('Y-m'));
+        $prevMonth = date('Y-m', strtotime($month . '-01 -1 month'));
+
+        $list = fn (string $m) => DB::select(
+            "SELECT pc.id, retailer.name AS retailer_name, pc.total_amount AS amount,
+                    pc.pay_mode AS mode, DATE_FORMAT(pc.pay_date_time,'%Y-%m-%d') AS date
+               FROM payment_collection pc
+               INNER JOIN retailer ON retailer.id = pc.retailer_id
+              WHERE pc.dealer_id = ?
+                AND DATE_FORMAT(pc.pay_date_time,'%Y-%m') = ?
+              ORDER BY pc.pay_date_time DESC, pc.id DESC",
+            [$dealerId, $m]
+        );
+
+        return response()->json([
+            'status'   => true,
+            'month'    => $month,
+            'pmonth'   => $prevMonth,
+            'current'  => $list($month),
+            'previous' => $list($prevMonth),
+        ]);
+    }
+
     /* ==================== PROFILE ==================== */
 
     private function dealerProfile(int $dpId): ?object
