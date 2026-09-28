@@ -29,7 +29,7 @@ class DashboardController extends Controller
             'retailer_count'     => $this->totalRetailer($dealerId),
             'complaint_list'     => $this->complaintList($companyId),
             'receive_amount'     => $this->receiveAmount($dealerId),
-            'pending_invoice'    => $this->pendingInvoice($dealerId),
+            'pending_invoice'    => $this->pendingInvoice($dealerId, $companyId),
             'invoice_amount'     => $this->invoiceAmount($dealerId),
             'target_vs_achieved' => $this->targetVsAchieved($dealerId, date('Y-m')),
             'invoice_details'    => $this->invoiceDetails($dealerId),
@@ -274,14 +274,19 @@ class DashboardController extends Controller
         ];
     }
 
-    private function pendingInvoice(int $dealerId): int
+    private function pendingInvoice(int $dealerId, int $companyId): int
     {
         $row = DB::selectOne(
-            "SELECT COUNT(*) AS cnt
-               FROM challan_order
-              WHERE ch_dealer_id = ?
-                AND payment_status = '0'",
-            [$dealerId]
+            "SELECT COUNT(DISTINCT uso.order_id) AS cnt
+               FROM user_sales_order uso
+               INNER JOIN user_sales_order_details usod ON usod.order_id = uso.order_id
+              WHERE uso.dealer_id = ?
+                AND uso.company_id = ?
+                AND usod.status != 2
+                AND uso.order_status IN ('0', '7')
+                AND DATE_FORMAT(uso.date,'%Y%m%d') >= ?
+                AND DATE_FORMAT(uso.date,'%Y%m%d') <= ?",
+            [$dealerId, $companyId, date('Ym01'), date('Ymd')]
         );
 
         return (int) ($row->cnt ?? 0);
