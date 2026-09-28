@@ -26,7 +26,7 @@ class SalesOrderController extends Controller
             "uso.dealer_id = ?",
             "uso.company_id = ?",
             "usod.status != 2",
-            "uso.order_status != 8",
+            "uso.order_status != '8'",
             "DATE_FORMAT(uso.date,'%Y%m%d') >= ?",
             "DATE_FORMAT(uso.date,'%Y%m%d') <= ?",
         ];

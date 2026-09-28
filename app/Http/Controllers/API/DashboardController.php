@@ -29,7 +29,7 @@ class DashboardController extends Controller
             'retailer_count'     => $this->totalRetailer($dealerId),
             'complaint_list'     => $this->complaintList($companyId),
             'receive_amount'     => $this->receiveAmount($dealerId),
-            'pending_invoice'    => $this->pendingInvoice($dealerId),
+            'pending_invoice'    => $this->pendingInvoice($dealerId, $companyId),
             'invoice_amount'     => $this->invoiceAmount($dealerId),
             'target_vs_achieved' => $this->targetVsAchieved($dealerId, date('Y-m')),
             'invoice_details'    => $this->invoiceDetails($dealerId),
@@ -47,6 +47,33 @@ class DashboardController extends Controller
             'status' => true,
             'month'  => $month,
             'data'   => $this->mtdReport($dealerId, $month),
+        ]);
+    }
+
+    public function paymentCollection(Request $request): JsonResponse
+    {
+        $request->validate(['date' => ['nullable', 'date_format:Y-m']]);
+        $dealerId  = (int) $request->user()->dealer_id;
+        $month     = $request->input('date', date('Y-m'));
+        $prevMonth = date('Y-m', strtotime($month . '-01 -1 month'));
+
+        $list = fn (string $m) => DB::select(
+            "SELECT pc.id, retailer.name AS retailer_name, pc.total_amount AS amount,
+                    pc.pay_mode AS mode, DATE_FORMAT(pc.pay_date_time,'%Y-%m-%d') AS date
+               FROM payment_collection pc
+               INNER JOIN retailer ON retailer.id = pc.retailer_id
+              WHERE pc.dealer_id = ?
+                AND DATE_FORMAT(pc.pay_date_time,'%Y-%m') = ?
+              ORDER BY pc.pay_date_time DESC, pc.id DESC",
+            [$dealerId, $m]
+        );
+
+        return response()->json([
+            'status'   => true,
+            'month'    => $month,
+            'pmonth'   => $prevMonth,
+            'current'  => $list($month),
+            'previous' => $list($prevMonth),
         ]);
     }
 
@@ -274,14 +301,19 @@ class DashboardController extends Controller
         ];
     }
 
-    private function pendingInvoice(int $dealerId): int
+    private function pendingInvoice(int $dealerId, int $companyId): int
     {
         $row = DB::selectOne(
-            "SELECT COUNT(*) AS cnt
-               FROM challan_order
-              WHERE ch_dealer_id = ?
-                AND payment_status = '0'",
-            [$dealerId]
+            "SELECT COUNT(DISTINCT uso.order_id) AS cnt
+               FROM user_sales_order uso
+               INNER JOIN user_sales_order_details usod ON usod.order_id = uso.order_id
+              WHERE uso.dealer_id = ?
+                AND uso.company_id = ?
+                AND usod.status != 2
+                AND uso.order_status IN ('0', '7')
+                AND DATE_FORMAT(uso.date,'%Y%m%d') >= ?
+                AND DATE_FORMAT(uso.date,'%Y%m%d') <= ?",
+            [$dealerId, $companyId, date('Ym01'), date('Ymd')]
         );
 
         return (int) ($row->cnt ?? 0);

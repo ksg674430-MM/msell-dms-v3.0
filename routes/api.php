@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\CatalogProductController;
 use App\Http\Controllers\Api\DispatchController;
 
 use App\Http\Controllers\Api\SaleWiseInvoiceController;
+use App\Http\Controllers\Api\QuickOrderController;
 
 
 // ============================================================
@@ -249,6 +250,7 @@ Route::get   ('/dispatches/{id}',       [DispatchController::class, 'show']);
 Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
 Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
 
+
     // ========================================================
     // LOOKUP  → MENU: Generic (dropdowns, autocompletes)
     // ========================================================
@@ -257,4 +259,44 @@ Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
         Route::get ('/{entity}/schema', [LookupController::class, 'schema']);    // column definitions
         Route::post('/',                [LookupController::class, 'run']);       // run dynamic query
     });
+});
+
+
+
+Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
+
+    // ---------- CORE ----------
+    Route::get   ('/',                [QuickOrderController::class, 'index']);            // order list
+    Route::get   ('/create-data',     [QuickOrderController::class, 'createData']);       // create screen data
+    Route::post  ('/store',           [QuickOrderController::class, 'store']);            // add to cart
+    Route::post  ('/store-final',     [QuickOrderController::class, 'storeFinal']);       // cart → demand_order
+    Route::post  ('/cart-data',       [QuickOrderController::class, 'cartDataForModal']); // cart modal
+    Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
+    Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);             // perfoma / view order
+    Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
+    Route::post  ('/send-to-erp',     [QuickOrderController::class, 'sendToErp']);        // mark for ERP
+
+    // ---------- HELPERS ----------
+    Route::get   ('/helpers/product-rate',       [QuickOrderController::class, 'productRate']);
+    Route::post  ('/helpers/check-scheme',       [QuickOrderController::class, 'checkScheme']);
+    Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
+
+    // ---------- REPORTS ----------
+    Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
+    Route::get('/reports/ot2',                    [QuickOrderController::class, 'ot2']);
+    Route::get('/reports/ethical',                [QuickOrderController::class, 'ethical']);
+    Route::get('/reports/fmcg',                   [QuickOrderController::class, 'fmcg']);
+    Route::get('/reports/jps',                    [QuickOrderController::class, 'jps']);
+    Route::get('/reports/jp2',                    [QuickOrderController::class, 'jp2']);
+    Route::get('/reports/sale-statement',         [QuickOrderController::class, 'saleStatement']);
+    Route::get('/reports/sale-statement-ethical', [QuickOrderController::class, 'saleStatementEthical']);
+    Route::get('/reports/dms-to-tally',           [QuickOrderController::class, 'dmsToTally']);
+    Route::get('/reports/invoice-summary',        [QuickOrderController::class, 'invoiceSummary']);
+    Route::get('/reports/purchase',               [QuickOrderController::class, 'purchaseReport']);
+    Route::get('/reports/dealer-dashboard',       [QuickOrderController::class, 'dealerDashboard']);
+    Route::post('/reports/common',                [QuickOrderController::class, 'commonReportSection']);
+
+    // ---------- CSV FORMATS ----------
+    Route::get('/formats/order',        [QuickOrderController::class, 'orderFormat']);
+    Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
 });
