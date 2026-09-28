@@ -249,16 +249,21 @@ class ChallanController extends Controller
             'ch_date'                     => ['required', 'string'],
             'retailer_id'                 => ['required', 'integer'],
             'remark'                      => ['nullable', 'string', 'max:255'],
+            'crdr_status'                 => ['nullable', 'in:0,1,2'],
+            'user_id'                     => ['nullable', 'integer'],
             'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
             'items'                       => ['required', 'array', 'min:1'],
             'items.*.product_id'          => ['required', 'integer'],
             'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
-            'items.*.rate'                => ['required', 'numeric', 'min:0'],
+            'items.*.rate'                => ['required', 'numeric', 'gt:0'],
             'items.*.mrp'                 => ['nullable', 'numeric'],
             'items.*.vat'                 => ['nullable', 'numeric'],
             'items.*.vat_amt'             => ['nullable', 'numeric'],
             'items.*.taxable_amt'         => ['nullable', 'numeric'],
-            'items.*.amount'              => ['nullable', 'numeric'],
+            'items.*.amount'              => ['nullable', 'numeric', 'gt:0'],
+        ], [
+            'items.*.rate.gt'   => 'Every item needs a rate above 0.',
+            'items.*.amount.gt' => 'Every item needs an amount above 0. A 0 amount invoice cannot be saved.',
         ]);
         if ($v->fails()) {
             return response()->json([
@@ -363,23 +368,23 @@ class ChallanController extends Controller
                 $amount   = round($taxable + $vatAmt, 2);
 
                 // Product name + HSN lookup (single query)
-$cp = DB::selectOne(
-    "SELECT name, hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
-    [$productId]
-);
-$productName = (string) ($cp->name ?? ('Product #' . $productId));
+                $cp = DB::selectOne(
+                    "SELECT name, hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
+                    [$productId]
+                );
+                $productName = (string) ($cp->name ?? ('Product #' . $productId));
 
-$hsn = (string) ($it['hsn_code'] ?? '');
-if ($hsn === '') {
-    $hsn = (string) ($cp->hsn_code ?? '');
-}
+                $hsn = (string) ($it['hsn_code'] ?? '');
+                if ($hsn === '') {
+                    $hsn = (string) ($cp->hsn_code ?? '');
+                }
 
                 $normalizedItems[] = compact(
-    'productId', 'productName', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
-    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
-    'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
-    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
-);
+                    'productId', 'productName', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
+                    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
+                    'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
+                    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
+                );
                 $subTotal += $amount;
             }
 
@@ -392,23 +397,23 @@ if ($hsn === '') {
             // generateChNo()'s `book_status = '0'` lookup.
             DB::insert(
                 "INSERT INTO challan_order
-                    (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id,
+                    (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id, ch_user_id,
                      ch_date, date_added, company_id, sesId,
-                     invoice_type, remark, book_status,
+                     invoice_type, remark, book_status, crdr_status,
                      dispatch_status, payment_status, sync_status,
                      isclaim, istarget_claim,
                      discount_per, discount_amt, amount, remaining, amount_round)
                  VALUES
-                    (?, ?, ?, ?, ?,
+                    (?, ?, ?, ?, ?, ?,
                      ?, NOW(), ?, ?,
-                     '1', ?, 0,
+                     '1', ?, 0, ?,
                      0, '0', 1,
                      0, 0,
                      ?, ?, ?, ?, ?)",
                 [
-                    $chId, $chNo, $dpId, $dealerId, $retailerId,
+                    $chId, $chNo, $dpId, $dealerId, $retailerId, (int) $request->input('user_id', 0),
                     $chDate, $companyId, $sesId,
-                    $remark,
+                    $remark, (int) $request->input('crdr_status', 0),
                     $discountPer, $discountAmt, $finalAmount, $finalAmount, $amountRound,
                 ]
             );
@@ -447,40 +452,33 @@ if ($hsn === '') {
                     ]
                 );
 
-               $requiredQty = $l['qty'] + $l['freeQty'];
-try {
-    $this->reduceStock($dealerId, $l['productId'], $requiredQty);
-} catch (\Throwable $e) {
-    // Try to read the actual available qty from your stock table.
-    // Adjust table/column names to match your schema.
-    $availableQty = null;
-    try {
-        $row = DB::selectOne(
-            "SELECT qty FROM catalog_product_stock
-              WHERE dealer_id = ? AND product_id = ? LIMIT 1",
-            [$dealerId, $l['productId']]
-        );
-        $availableQty = $row ? (float) $row->qty : null;
-    } catch (\Throwable $ignore) {
-        // ignore – we'll still show required qty
-    }
-
-    throw new \RuntimeException(sprintf(
-        'Insufficient stock for product "%s". Required qty: %s, Available qty: %s.',
-        $l['productName'],
-        $this->formatQty($requiredQty),
-        $availableQty === null ? 'unknown' : $this->formatQty($availableQty)
-    ), 0, $e);
-}
-
-                if ($l['orderId'] !== '') {
-                    DB::update(
-                        "UPDATE user_sales_order_details
-                            SET status = 2
-                          WHERE order_id = ? AND product_id = ?",
-                        [$l['orderId'], $l['productId']]
+                $requiredQty = $l['qty'] + $l['freeQty'];
+                try {
+                    $this->reduceStock($dealerId, $l['productId'], $requiredQty);
+                } catch (\RuntimeException $e) {
+                    $row = DB::selectOne(
+                        "SELECT COALESCE(SUM(remaining), 0) AS qty FROM stock
+                          WHERE dealer_id = ? AND product_id = ? AND remaining > 0",
+                        [$dealerId, $l['productId']]
                     );
+
+                    throw new \RuntimeException(sprintf(
+                        'Insufficient stock for product "%s". Required qty: %s, Available qty: %s.',
+                        $l['productName'],
+                        $this->formatQty($requiredQty),
+                        $this->formatQty((float) $row->qty)
+                    ), 0, $e);
                 }
+            }
+
+            $invoicedByOrder = [];
+            foreach ($normalizedItems as $l) {
+                if ($l['orderId'] !== '') {
+                    $invoicedByOrder[$l['orderId']][$l['productId']] = ($invoicedByOrder[$l['orderId']][$l['productId']] ?? 0) + $l['qty'];
+                }
+            }
+            foreach ($invoicedByOrder as $sfaOrderId => $invoiced) {
+                $this->fulfilSalesOrder($dealerId, (string) $sfaOrderId, $invoiced);
             }
 
             DB::commit();
@@ -496,6 +494,12 @@ try {
                 'items_count'  => count($normalizedItems),
             ], 201);
 
+        } catch (\RuntimeException $e) {
+            DB::rollBack();
+            return response()->json([
+                'status'  => false,
+                'message' => $e->getMessage(),
+            ], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
@@ -506,9 +510,10 @@ try {
     }
 
     private function formatQty(float $qty): string
-{
-    return rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.') ?: '0';
-}
+    {
+        return rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.') ?: '0';
+    }
+
     /* =========================================================
      |  FROM ORDERS
      |  POST /api/challans/from-orders
@@ -773,11 +778,14 @@ try {
             'ch_date'                     => ['required', 'string'],
             'retailer_id'                 => ['required', 'integer'],
             'remark'                      => ['nullable', 'string', 'max:255'],
+            'crdr_status'                 => ['nullable', 'in:0,1,2'],
             'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
             'items'                       => ['required', 'array', 'min:1'],
             'items.*.product_id'          => ['required', 'integer'],
             'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
-            'items.*.rate'                => ['required', 'numeric', 'min:0'],
+            'items.*.rate'                => ['required', 'numeric', 'gt:0'],
+        ], [
+            'items.*.rate.gt' => 'Every item needs a rate above 0.',
         ]);
         if ($v->fails()) {
             return response()->json([
@@ -923,6 +931,7 @@ try {
                     SET ch_retailer_id = ?,
                         ch_date        = ?,
                         remark         = ?,
+                        crdr_status    = ?,
                         discount_per   = ?,
                         discount_amt   = ?,
                         amount         = ?,
@@ -930,7 +939,7 @@ try {
                         amount_round   = ?
                   WHERE id = ? AND ch_dealer_id = ?",
                 [
-                    $retailerId, $chDate, $remark,
+                    $retailerId, $chDate, $remark, (int) $request->input('crdr_status', 0),
                     $discountPer, $discountAmt,
                     $finalAmount, $finalAmount, $amountRound,
                     $id, $dealerId,
@@ -1192,6 +1201,45 @@ try {
      * the caller's transaction rolls back instead of silently allowing
      * negative / missing stock.
      */
+    private function fulfilSalesOrder(int $dealerId, string $orderId, array $invoicedQty): void
+    {
+        $order = DB::selectOne(
+            "SELECT order_status FROM user_sales_order WHERE order_id = ? AND dealer_id = ? LIMIT 1 FOR UPDATE",
+            [$orderId, $dealerId]
+        );
+        if (!$order || !in_array((string) $order->order_status, ['0', '7'], true)) {
+            throw new \RuntimeException("Order {$orderId} is not open for invoicing.");
+        }
+        $partial = (string) $order->order_status === '7';
+
+        foreach ($invoicedQty as $productId => $qty) {
+            $line = DB::selectOne(
+                "SELECT id, quantity, remaining_qty FROM user_sales_order_details
+                  WHERE order_id = ? AND product_id = ? AND status != 2 LIMIT 1",
+                [$orderId, $productId]
+            );
+            if (!$line) {
+                continue;
+            }
+            $open = $partial && (float) $line->remaining_qty > 0 ? (float) $line->remaining_qty : (float) $line->quantity;
+            $left = max(0, $open - (float) $qty);
+            if ($left > 0) {
+                DB::update("UPDATE user_sales_order_details SET remaining_qty = ? WHERE id = ?", [$left, $line->id]);
+            } else {
+                DB::update("UPDATE user_sales_order_details SET status = 2, remaining_qty = 0 WHERE id = ?", [$line->id]);
+            }
+        }
+
+        $stillOpen = DB::selectOne(
+            "SELECT COUNT(*) AS n FROM user_sales_order_details WHERE order_id = ? AND status != 2",
+            [$orderId]
+        );
+        DB::update(
+            "UPDATE user_sales_order SET order_status = ? WHERE order_id = ?",
+            [(int) $stillOpen->n > 0 ? '7' : '1', $orderId]
+        );
+    }
+
     private function reduceStock(int $dealerId, int $productId, float $qty): void
     {
         if ($qty <= 0) return;
@@ -1324,86 +1372,72 @@ public function takeActionOnProcessChallanClaim(Request $request): JsonResponse
 
     $validated = $request->validate([
         'checkedVals'   => ['required', 'array', 'min:1'],
-        'checkedVals.*' => ['required', 'string'],
+        'checkedVals.*' => ['required', 'string', 'regex:/^\d+\|\d+$/'],
+    ], [
+        'checkedVals.required' => 'Select Check Box First!!',
     ]);
 
-    $loopData = $validated['checkedVals'];
+    $details = [];
+    $loopData = [];
+    foreach (array_unique($validated['checkedVals']) as $val) {
+        [$chId, $productId] = array_map('intval', explode('|', $val));
 
-    // Parse + validate each entry first (fail before touching DB)
-    $parsedRows = [];
-    foreach ($loopData as $idx => $val) {
-        $parts = explode('|', $val);
-        if (count($parts) !== 6) {
-            return response()->json([
-                'status'  => false,
-                'message' => "Invalid row at position " . ($idx + 1) . ". Expected 6 pipe-separated values.",
-            ], 422);
+        $lines = DB::select(
+            "SELECT cod.qty, cod.product_rate, cod.old_rate
+               FROM challan_order_details cod
+               JOIN challan_order co ON co.id = cod.ch_id
+              WHERE cod.ch_id = ? AND cod.product_id = ? AND co.ch_dealer_id = ?
+                AND NOT EXISTS (SELECT 1 FROM dms_challan_claim_details d WHERE d.challan_id = cod.ch_id AND d.product_id = cod.product_id)",
+            [$chId, $productId, $dealerId]
+        );
+
+        foreach ($lines as $line) {
+            $qty   = (float) $line->qty;
+            $rate  = (float) $line->product_rate;
+            $old   = (float) $line->old_rate;
+            $claim = round($old * $qty - $rate * $qty, 2);
+            if ($claim <= 0) continue;
+            $details[] = [
+                'challan_id'    => $chId,
+                'product_id'    => $productId,
+                'challan_rate'  => $rate,
+                'challan_qty'   => $qty,
+                'purchase_rate' => $old,
+                'claim_amount'  => $claim,
+            ];
+            $loopData[$val] = true;
         }
-
-        [$chId, $productId, $challanRate, $challanQty, $purchaseRate, $claimAmount] = $parts;
-
-        if (!is_numeric($chId) || !is_numeric($productId)) {
-            return response()->json([
-                'status'  => false,
-                'message' => "Invalid challan_id or product_id at position " . ($idx + 1) . ".",
-            ], 422);
-        }
-
-        $parsedRows[] = [
-            'challan_id'     => (int) $chId,
-            'product_id'     => (int) $productId,
-            'challan_rate'   => (float) $challanRate,
-            'challan_qty'    => (float) $challanQty,
-            'purchase_rate'  => (float) $purchaseRate,
-            'claim_amount'   => (float) $claimAmount,
-        ];
     }
 
-    // Unique order id: dealer + YmdHis + 4 random digits to avoid collision
-    $orderId   = $dealerId . date('YmdHis') . mt_rand(1000, 9999);
-    $dateTime  = now()->format('Y-m-d H:i:s');
+    if (!$details) {
+        return response()->json(['status' => false, 'message' => 'Selected items have no pending claim.'], 422);
+    }
+
+    $orderId  = $dealerId . date('YmdHis') . mt_rand(1000, 9999);
 
     DB::beginTransaction();
     try {
-        // 1. Main claim header
         DB::table('dms_challan_claim')->insert([
-            'order_id'   => $orderId,
-            'company_id' => $companyId,
-            'dealer_id'  => $dealerId,
-            'date_time'  => $dateTime,
+            'order_id'        => $orderId,
+            'company_id'      => $companyId,
+            'dealer_id'       => $dealerId,
+            'date_time'       => now()->format('Y-m-d H:i:s'),
+            'credit_note_pdf' => '',
+            'credit_note_no'  => '',
         ]);
-
-        // 2. Details
-        $details = [];
-        foreach ($parsedRows as $row) {
-            $details[] = [
-                'order_id'      => $orderId,
-                'challan_id'    => $row['challan_id'],
-                'product_id'    => $row['product_id'],
-                'challan_rate'  => $row['challan_rate'],
-                'challan_qty'   => $row['challan_qty'],
-                'purchase_rate' => $row['purchase_rate'],
-                'claim_amount'  => $row['claim_amount'],
-            ];
-        }
-
-        DB::table('dms_challan_claim_details')->insert($details);
-
+        DB::table('dms_challan_claim_details')->insert(array_map(fn ($d) => ['order_id' => $orderId] + $d, $details));
         DB::commit();
 
         return response()->json([
-            'status'   => true,
-            'message'  => 'Claim saved successfully.',
-            'order_id' => $orderId,
-            'rows'     => count($details),
+            'status'    => true,
+            'message'   => 'Done!',
+            'order_id'  => $orderId,
+            'loop_data' => array_keys($loopData),
         ]);
-
     } catch (\Throwable $e) {
         DB::rollBack();
-        return response()->json([
-            'status'  => false,
-            'message' => 'Claim save failed: ' . $e->getMessage(),
-        ], 500);
+        report($e);
+        return response()->json(['status' => false, 'message' => 'Could not process the claim.'], 500);
     }
 }
 }

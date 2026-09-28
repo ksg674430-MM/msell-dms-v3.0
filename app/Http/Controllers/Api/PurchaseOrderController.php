@@ -116,10 +116,9 @@ class PurchaseOrderController extends Controller
             cp.quantity_per_case AS qty_per_case,
             cp.weight            AS weight,
             cp.gst_percent       AS gst_percentage,
-            g.igst               AS gst_rate
+            (SELECT g.igst FROM _gst g WHERE g.hsn_code = cp.hsn_code LIMIT 1) AS gst_rate
        FROM purchase_order_details pod
        LEFT JOIN catalog_product cp ON cp.id = pod.product_id
-       LEFT JOIN _gst g             ON g.hsn_code = cp.hsn_code
       WHERE pod.order_id = ?
       ORDER BY pod.auto ASC",
     [(string) $header->id]
@@ -146,16 +145,26 @@ class PurchaseOrderController extends Controller
             'firm_name'  => 'required|string|max:200',
             'order_no'   => 'required|string|max:50',
             'order_date' => 'required|string',
-            'challan_no' => 'nullable|string|max:50',
-            'ch_date'    => 'nullable|string',
+            'challan_no' => 'required|string|max:50',
+            'ch_date'    => 'required|string',
             'items'      => 'required|array|min:1',
-            'items.*.product_id' => 'required',
+            'items.*.product_id' => 'required|integer',
+            'items.*.quantity'   => 'required|numeric|gt:0',
+            'items.*.batch_no'   => 'required|string|max:50',
+            'items.*.mfg_date'   => 'required|string',
         ]);
         if ($v->fails()) {
             return response()->json(['status' => false, 'errors' => $v->errors()], 422);
         }
 
         $orderIdStr = strtoupper(trim($request->input('order_no')));
+        $duplicate = DB::selectOne(
+            "SELECT auto FROM purchase_order WHERE dealer_id = ? AND (order_id = ? OR id = ?) LIMIT 1",
+            [$dealerId, $orderIdStr, $orderIdStr]
+        );
+        if ($duplicate) {
+            return response()->json(['status' => false, 'message' => "Order Number {$orderIdStr} already exists."], 422);
+        }
         $orderDate  = $this->parseDate($request->input('order_date'));
         $chDate     = $request->filled('ch_date') ? $this->parseDate($request->input('ch_date')) : null;
         $challanNo  = $request->input('challan_no') ?: '0';
@@ -171,21 +180,23 @@ class PurchaseOrderController extends Controller
                 DB::insert(
                     "INSERT INTO purchase_order
                         (id, order_id, dealer_id, created_date, created_person_id,
-                         sale_date, date_time, company_id,
-                         ch_date, challan_no, csa_id, firm_name, order_date)
-                     VALUES (?,?,?,?,?, ?,?,?, ?,?,?,?,?)",
+                         sale_date, receive_date, date_time, company_id,
+                         ch_date, challan_no, csa_id, depo_code, firm_name, order_date)
+                     VALUES (?,?,?,?,?, ?,?,?,?, ?,?,?,?,?,?)",
                     [
                         $businessId,
                         $orderIdStr,
                         $dealerId,
                         now()->format('Y-m-d H:i:s'),
                         $user->getKey(),
-                        $orderDate,                       // sale_date (NOT NULL)
-                        now()->format('Y-m-d H:i:s'),     // date_time (NOT NULL)
+                        $orderDate,
+                        now()->format('Y-m-d H:i:s'),
+                        now()->format('Y-m-d H:i:s'),
                         (int)$request->input('company_id'),
                         $chDate,
                         $challanNo,
                         (int)($request->input('csa_id') ?: 0),
+                        '0',
                         $request->input('firm_name'),
                         $orderDate,
                     ]
@@ -194,7 +205,17 @@ class PurchaseOrderController extends Controller
                 $row = DB::selectOne("SELECT LAST_INSERT_ID() AS auto_id");
                 $headerAuto = $row ? (int)$row->auto_id : 0;
 
-                $this->insertItems($businessId, (int)$request->input('company_id'), $request->input('items'));
+                $companyId = (int)$request->input('company_id');
+                $this->insertItems($businessId, $companyId, $request->input('items'), now()->format('Y-m-d'));
+
+                foreach ($request->input('items') as $it) {
+                    $this->addStock(
+                        (int) $dealerId, $companyId, (int)($request->input('csa_id') ?: 0), (int) $user->getKey(),
+                        (int) $it['product_id'], (string) $it['batch_no'], (string) $this->parseDate($it['mfg_date']),
+                        (float) ($it['mrp'] ?? 0), (float) ($it['rate'] ?? 0),
+                        (float) $it['quantity'] + (float) ($it['scheme_qty'] ?? 0)
+                    );
+                }
 
                 return $headerAuto;
             });
@@ -207,7 +228,7 @@ class PurchaseOrderController extends Controller
 
         return response()->json([
             'status'  => true,
-            'message' => 'Purchase order saved.',
+            'message' => 'Purchase order saved and stock received.',
             'auto'    => $newAuto,
             'id'      => $businessId,
         ]);
@@ -299,131 +320,142 @@ class PurchaseOrderController extends Controller
     // Sets receive_date = NOW() and optionally updates bill/challan fields.
     // -----------------------------------------------------------------
     public function receive(Request $request, $id)
-{
-    $user      = $request->user();
-    $dealerId  = (int) $user->dealer_id;
-    $companyId = (int) ($user->company_id ?? 0);
-    $personId  = (int) $user->id;
+    {
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
+        $personId  = (int) $user->getKey();
 
-    $po = DB::selectOne(
-        "SELECT auto, id, order_id, receive_date, action, cancel_order_reason_id
-           FROM purchase_order
-          WHERE (auto = ? OR id = ?) AND dealer_id = ?
-          LIMIT 1",
-        [$id, $id, $dealerId]
-    );
-    if (!$po) {
-        return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
-    }
-    if (!empty($po->receive_date)) {
-        return response()->json(['status' => false, 'message' => 'Already received.'], 409);
-    }
-    if ((int) $po->action === 0) {
-        return response()->json(['status' => false, 'message' => 'Order is not active.'], 409);
-    }
-    if ((int) $po->cancel_order_reason_id !== 0) {
-        return response()->json(['status' => false, 'message' => 'Order is cancelled.'], 409);
-    }
+        $po = DB::selectOne(
+            "SELECT auto, id, order_id, receive_date, action, cancel_order_reason_id
+               FROM purchase_order
+              WHERE (auto = ? OR id = ?) AND dealer_id = ?
+              LIMIT 1",
+            [$id, $id, $dealerId]
+        );
+        if (!$po) {
+            return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
+        }
+        if (!empty($po->receive_date) && !str_starts_with((string) $po->receive_date, '0000')) {
+            return response()->json(['status' => false, 'message' => 'Already received.'], 409);
+        }
+        if ((int) $po->action === 0) {
+            return response()->json(['status' => false, 'message' => 'Order is not active.'], 409);
+        }
+        if ((int) $po->cancel_order_reason_id !== 0) {
+            return response()->json(['status' => false, 'message' => 'Order is cancelled.'], 409);
+        }
 
-    $validated = $request->validate([
-        'sale_date'           => 'nullable|date',
-        'ch_date'             => 'nullable|date',
-        'challan_no'          => 'nullable|string|max:50',
-        'items'               => 'required|array|min:1',
-        'items.*.detail_id'   => 'required|string',
-        'items.*.product_id'  => 'required|integer',
-        'items.*.batch_no'    => 'required|string|max:50',
-        'items.*.mfg_date'    => 'required|date',
-        'items.*.expiry_date' => 'nullable|date',
-        'items.*.qty'         => 'required|numeric|min:0',
-        'items.*.free_qty'    => 'nullable|numeric|min:0',
-        'items.*.rate'        => 'nullable|numeric|min:0',
-        'items.*.mrp'         => 'nullable|numeric|min:0',
-        'items.*.pr_rate'     => 'nullable|numeric|min:0',
-    ]);
+        $validated = $request->validate([
+            'ch_date'             => 'required|date',
+            'challan_no'          => 'required|string|max:50',
+            'csa_id'              => 'nullable|integer',
+            'items'               => 'required|array|min:1',
+            'items.*.detail_auto' => 'required|integer',
+            'items.*.mrp'         => 'required|numeric|min:0',
+            'items.*.rate'        => 'required|numeric|min:0',
+            'items.*.qty'         => 'required|numeric|min:0',
+            'items.*.free_qty'    => 'nullable|numeric|min:0',
+            'items.*.batch_no'    => 'required|string|max:50',
+            'items.*.mfg_date'    => 'required|date',
+            'items.*.expiry_date' => 'nullable|date',
+        ]);
 
-    DB::transaction(function () use ($validated, $po, $dealerId, $companyId, $personId, $request) {
-
-        $saleDate = !empty($validated['sale_date']) ? $validated['sale_date'] : now()->format('Y-m-d');
-        $chDate   = !empty($validated['ch_date'])   ? $validated['ch_date']   : $saleDate;
-        $today    = now()->format('Y-m-d');
+        $details = collect(DB::select(
+            "SELECT * FROM purchase_order_details WHERE order_id = ?",
+            [(string) $po->id]
+        ))->keyBy('auto');
 
         foreach ($validated['items'] as $row) {
-            $productId = (int)    $row['product_id'];
-            $batchNo   = (string) $row['batch_no'];
-            $mfgDate   = (string) $row['mfg_date'];
-            $expiry    = $row['expiry_date'] ?? null;
-            $qty       = (float)  $row['qty'];
-            $freeQty   = (float)  ($row['free_qty'] ?? 0);
-            $totalQty  = $qty + $freeQty;
-            $rate      = (float)  ($row['rate']    ?? 0);
-            $mrp       = (float)  ($row['mrp']     ?? 0);
-            $prRate    = (float)  ($row['pr_rate'] ?? 0);
+            if (!$details->has($row['detail_auto'])) {
+                return response()->json(['status' => false, 'message' => 'Order line not found.'], 422);
+            }
+        }
 
-            // stock UPSERT
-            $existing = DB::selectOne(
-                "SELECT id FROM stock
-                  WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ?
-                  LIMIT 1",
-                [$dealerId, $productId, $batchNo, $mfgDate]
-            );
+        $csaId = (int) ($validated['csa_id'] ?? 0);
 
-            if ($existing) {
+        DB::transaction(function () use ($validated, $po, $details, $dealerId, $companyId, $personId, $csaId) {
+            $today = now()->format('Y-m-d');
+
+            foreach ($validated['items'] as $row) {
+                $d       = $details[$row['detail_auto']];
+                $qty     = (float) $row['qty'];
+                $freeQty = (float) ($row['free_qty'] ?? 0);
+                $rate    = (float) $row['rate'];
+                $mrp     = (float) $row['mrp'];
+                $gross   = round($rate * $qty, 2);
+                $disc    = abs((float) $d->td_amount) + abs((float) $d->cd_amount) + abs((float) $d->sch_amt)
+                         + abs((float) $d->spl_amt) + abs((float) $d->atd_amt);
+                $taxable = round($gross - $disc, 2);
+                $total   = round($taxable + (float) $d->cgst_amount + (float) $d->sgst_amount + (float) $d->igst_amount, 2);
+
                 DB::update(
-                    "UPDATE stock SET qty = qty + ? WHERE id = ?",
-                    [$totalQty, $existing->id]
-                );
-            } else {
-                DB::insert(
-                    "INSERT INTO stock
-                        (dealer_id, product_id, batch_no, mfg, expire, date,
-                         qty, rate, dealer_rate, mrp, pr_rate, person_id, company_id,
-                         sync_status, update_date_time)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())",
+                    "UPDATE purchase_order_details
+                        SET mrp = ?, rate = ?, pr_rate = ?, quantity = ?, scheme_qty = ?,
+                            gross_amt = ?, taxable_amount = ?, total_amount = ?,
+                            batch_no = ?, mfg_date = ?, expiry_date = ?,
+                            receive_date = ?, recv_cases = ?
+                      WHERE auto = ?",
                     [
-                        $dealerId, $productId, $batchNo, $mfgDate, $expiry, $today,
-                        $totalQty, $rate, $rate, $mrp, $prRate, $personId, $companyId,
+                        $mrp, $rate, $rate, $qty, $freeQty,
+                        $gross, $taxable, $total,
+                        $row['batch_no'], $row['mfg_date'], $row['expiry_date'] ?? null,
+                        $today, (int) $qty,
+                        (int) $d->auto,
                     ]
+                );
+
+                $this->addStock(
+                    $dealerId, $companyId, $csaId, $personId,
+                    (int) $d->product_id, (string) $row['batch_no'], (string) $row['mfg_date'],
+                    $mrp, $rate, $qty + $freeQty, $row['expiry_date'] ?? null
                 );
             }
 
-            // PO detail mark
             DB::update(
-                "UPDATE purchase_order_details
-                    SET batch_no     = ?,
-                        mfg_date     = ?,
-                        expiry_date  = COALESCE(?, expiry_date),
-                        receive_date = ?,
-                        recv_cases   = ?
-                  WHERE id = ? AND order_id = ?",
-                [
-                    $batchNo, $mfgDate, $expiry, $today,
-                    (int) $row['qty'],
-                    (string) $row['detail_id'],
-                    (string) $po->order_id,
-                ]
+                "UPDATE purchase_order
+                    SET receive_date = ?, ch_date = ?, challan_no = ?, csa_id = ?
+                  WHERE auto = ?",
+                [now()->format('Y-m-d H:i:s'), $validated['ch_date'], $validated['challan_no'], $csaId, (int) $po->auto]
             );
-        }
+        });
 
-        // PO header
-        DB::update(
-            "UPDATE purchase_order
-                SET receive_date = ?,
-                    sale_date    = ?,
-                    ch_date      = ?,
-                    challan_no   = COALESCE(NULLIF(?, ''), challan_no)
-              WHERE auto = ?",
+        return response()->json(['status' => true, 'message' => 'Stock received successfully.']);
+    }
+
+    private function addStock(
+        int $dealerId, int $companyId, int $csaId, int $personId,
+        int $productId, string $batchNo, string $mfg, float $mrp, float $rate, float $qty, ?string $expiry = null
+    ): void {
+        if ($qty <= 0) {
+            return;
+        }
+        $existing = DB::selectOne(
+            "SELECT id FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ? AND ROUND(mrp, 2) = ROUND(?, 2)
+              LIMIT 1",
+            [$dealerId, $productId, $batchNo, $mfg, $mrp]
+        );
+        if ($existing) {
+            DB::update(
+                "UPDATE stock SET qty = qty + ?, remaining = remaining + ?, date = CURDATE(), update_date_time = NOW() WHERE id = ?",
+                [$qty, $qty, $existing->id]
+            );
+            return;
+        }
+        DB::insert(
+            "INSERT INTO stock
+                (product_id, batch_no, rate, dealer_rate, mrp, person_id, csa_id, dealer_id,
+                 qty, salable_damage, nonsalable_damage, remaining, mfg, expire, date,
+                 pr_rate, company_id, action, sync_status, update_date_time)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, CURDATE(), ?, ?, 1, 1, NOW())",
             [
-                now()->format('Y-m-d H:i:s'),
-                $saleDate, $chDate,
-                $request->input('challan_no', ''),
-                (int) $po->auto,
+                $productId, $batchNo, $rate, $rate, $mrp, $personId, $csaId, $dealerId,
+                $qty, $qty, $mfg, $expiry, $rate, $companyId,
             ]
         );
-    });
+    }
 
-    return response()->json(['status' => true, 'message' => 'Received, stock added.']);
-}
     // -----------------------------------------------------------------
     // GET /api/purchase-orders/form-data
     // -----------------------------------------------------------------
@@ -454,9 +486,17 @@ class PurchaseOrderController extends Controller
             [$companyId]
         );
 
+        $csas = DB::select(
+            "SELECT c.c_id AS id, c.csa_name AS name
+               FROM csa c
+               INNER JOIN dealer d ON FIND_IN_SET(c.c_id, d.csa_id)
+              WHERE d.id = ?",
+            [(int) $user->dealer_id]
+        );
+
         return response()->json([
             'status' => true,
-            'data'   => ['brands' => $brands, 'products' => $products],
+            'data'   => ['brands' => $brands, 'products' => $products, 'csas' => $csas],
         ]);
     }
 
@@ -468,7 +508,7 @@ class PurchaseOrderController extends Controller
      * Insert item rows. Writes to both `id` and `order_id` on the detail
      * table so any legacy join works.
      */
-    private function insertItems(string $headerBusinessId, int $companyId, array $items): void
+    private function insertItems(string $headerBusinessId, int $companyId, array $items, ?string $receiveDate = null): void
     {
         foreach ($items as $it) {
             $qty       = (int)($it['quantity'] ?? 0);
@@ -477,16 +517,17 @@ class PurchaseOrderController extends Controller
             $rate      = (string)($it['rate'] ?? $it['dealer_rate'] ?? '0');
             $prRate    = (string)($it['pr_rate'] ?? $it['rate'] ?? $it['dealer_rate'] ?? '0');
 
-            $grossAmt  = (string)($it['gross_amt']    ?? round($qty * (float)$rate, 2));
-            $tdAmt     = (string)($it['td_amount']    ?? $it['trade_price'] ?? '0');
-            $cdAmt     = (string)($it['cd_amount']    ?? $it['cash_amt']    ?? '0');
-            $schAmt    = (string)($it['sch_amt']      ?? $it['scheme_amt']  ?? '0');
-            $splAmt    = (string)($it['spl_amt']      ?? '0');
-            $cgst      = (string)($it['cgst_amount']  ?? '0');
-            $sgst      = (string)($it['sgst_amount']  ?? '0');
-            $igst      = (string)($it['igst_amount']  ?? '0');
-            $totalAmt  = (string)($it['total_amount'] ?? $it['total_amt'] ?? '0');
-            $taxable   = (string)($it['taxable_amount'] ?? '0');
+            $grossAmt  = round($qty * (float)$rate, 2);
+            $tdAmt     = (float)($it['td_amount']    ?? $it['trade_price'] ?? 0);
+            $cdAmt     = (float)($it['cd_amount']    ?? $it['cash_amt']    ?? 0);
+            $schAmt    = (float)($it['sch_amt']      ?? $it['scheme_amt']  ?? 0);
+            $splAmt    = (float)($it['spl_amt']      ?? 0);
+            $atdAmt    = (float)($it['atd_amt']      ?? 0);
+            $cgst      = (float)($it['cgst_amount']  ?? 0);
+            $sgst      = (float)($it['sgst_amount']  ?? 0);
+            $igst      = (float)($it['igst_amount']  ?? 0);
+            $taxable   = round($grossAmt - $tdAmt - $cdAmt - $schAmt - $splAmt - $atdAmt, 2);
+            $totalAmt  = round($taxable + $cgst + $sgst + $igst, 2);
 
             DB::insert(
                 "INSERT INTO purchase_order_details
@@ -497,8 +538,8 @@ class PurchaseOrderController extends Controller
                      cgst_amount, sgst_amount, igst_amount,
                      total_amount, pr_rate, cases, pcs,
                      batch_no, purchase_inv,
-                     mfg_date, expiry_date)
-                 VALUES (?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?,?, ?,?, ?,?)",
+                     mfg_date, expiry_date, receive_date)
+                 VALUES (?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?, ?,?,?,?, ?,?, ?,?,?)",
                 [
                     $headerBusinessId,
                     $headerBusinessId,
@@ -514,7 +555,7 @@ class PurchaseOrderController extends Controller
                     $schAmt,
                     $splAmt,
                     $cdAmt,
-                    (string)($it['atd_amt'] ?? '0'),
+                    $atdAmt,
                     $cgst,
                     $sgst,
                     $igst,
@@ -526,6 +567,7 @@ class PurchaseOrderController extends Controller
                     $it['purchase_inv'] ?? null,
                     $this->parseDate($it['mfg_date'] ?? null),
                     $this->parseDate($it['expiry_date'] ?? null),
+                    $receiveDate,
                 ]
             );
         }

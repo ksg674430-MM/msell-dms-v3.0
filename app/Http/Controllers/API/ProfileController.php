@@ -9,73 +9,57 @@ use Illuminate\Support\Facades\DB;
 
 class ProfileController extends Controller
 {
-    /**
-     * GET /api/profile
-     */
     public function show(Request $request): JsonResponse
-{
-    $user = $request->user();
-    $dpId = (int) $user->getKey();   // ← the fix
+    {
+        $profile = DB::selectOne(
+            "SELECT name, landline, other_numbers, email, address, pin_no, tin_no, pan_no,
+                    over_due_amount, over_due_days
+               FROM dealer
+              WHERE id = ?
+              LIMIT 1",
+            [(int) $request->user()->dealer_id]
+        );
 
-    $profile = DB::selectOne(
-        "SELECT dpId, person_name, uname, email, phone, profile_pic,
-                dealer_id, company_id, state_id, regis_status
-           FROM dealer_person_login
-          WHERE dpId = ?
-          LIMIT 1",
-        [$dpId]
-    );
-
-    return response()->json([
-        'status'  => true,
-        'profile' => $profile,
-    ]);
-}
-
-    /**
-     * POST /api/profile
-     * Body (multipart/form-data if uploading image, else JSON):
-     *   full_name, email_id, phone
-     *   image (optional file)
-     */
-public function update(Request $request): JsonResponse
-{
-    $request->validate([
-        'full_name' => ['required', 'string', 'max:150'],
-        'email_id'  => ['required', 'email', 'max:150'],
-        'phone'     => ['required', 'string', 'max:20'],
-        'image'     => ['nullable', 'image', 'max:5120'],
-    ]);
-
-    $user = $request->user();
-    $dpId = (int) $user->getKey();   // ← the fix
-
-    $update = [
-        'person_name' => $request->input('full_name'),
-        'email'       => $request->input('email_id'),
-        'phone'       => $request->input('phone'),
-    ];
-
-    if ($request->hasFile('image')) {
-        $file = $request->file('image');
-        $name = 'user_' . $dpId . '_' . time() . '.' . $file->getClientOriginalExtension();
-        $dir  = public_path('myuploads/profile_images');
-
-        if (!is_dir($dir)) {
-            mkdir($dir, 0775, true);
+        if (!$profile) {
+            return response()->json(['status' => false, 'message' => 'Distributor not found.'], 404);
         }
 
-        $file->move($dir, $name);
-        $update['profile_pic'] = $name;
+        return response()->json(['status' => true, 'profile' => $profile]);
     }
 
-    DB::table('dealer_person_login')
-        ->where('dpId', $dpId)
-        ->update($update);
+    public function update(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'            => ['required', 'string', 'max:255'],
+            'landline'        => ['nullable', 'string', 'max:50'],
+            'other_numbers'   => ['nullable', 'digits:10'],
+            'email'           => ['nullable', 'email', 'max:50'],
+            'address'         => ['nullable', 'string', 'max:200'],
+            'pin_no'          => ['nullable', 'digits:6'],
+            'tin_no'          => ['nullable', 'string', 'max:15'],
+            'pan_no'          => ['nullable', 'string', 'max:15'],
+            'over_due_amount' => ['nullable', 'numeric', 'min:0'],
+            'over_due_days'   => ['nullable', 'integer', 'min:0'],
+        ], [
+            'other_numbers.digits' => 'Mobile No. must be 10 digits.',
+            'pin_no.digits'        => 'Pin Code must be 6 digits.',
+        ]);
 
-    return response()->json([
-        'status'  => true,
-        'message' => 'Profile updated successfully.',
-    ]);
-}
+        DB::table('dealer')
+            ->where('id', (int) $request->user()->dealer_id)
+            ->update([
+                'name'            => trim($validated['name']),
+                'landline'        => $validated['landline'] ?? '',
+                'other_numbers'   => $validated['other_numbers'] ?? '',
+                'email'           => $validated['email'] ?? '',
+                'address'         => $validated['address'] ?? '',
+                'pin_no'          => $validated['pin_no'] ?? '0',
+                'tin_no'          => strtoupper($validated['tin_no'] ?? '') ?: '0',
+                'pan_no'          => strtoupper($validated['pan_no'] ?? ''),
+                'over_due_amount' => (string) ($validated['over_due_amount'] ?? 0),
+                'over_due_days'   => (string) ($validated['over_due_days'] ?? 0),
+            ]);
+
+        return response()->json(['status' => true, 'message' => 'Profile successfully Updated.']);
+    }
 }

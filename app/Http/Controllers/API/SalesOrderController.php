@@ -207,13 +207,24 @@ try {
 //     ]);
 // }
     
+    public function cancelReasons(Request $request): JsonResponse
+    {
+        $rows = DB::select(
+            "SELECT id, name FROM reasons WHERE company_id = ? ORDER BY name",
+            [(int) $request->user()->company_id]
+        );
+        return response()->json(['status' => true, 'reasons' => $rows]);
+    }
+
     public function cancel(Request $request): JsonResponse
     {
         $request->validate([
             'orders'             => ['required', 'array', 'min:1'],
             'orders.*.order_id'  => ['required', 'string'],
             'orders.*.remark'    => ['nullable', 'string', 'max:500'],
-            'orders.*.reason'    => ['nullable', 'string', 'max:500'],
+            'orders.*.reason'    => ['required'],
+        ], [
+            'orders.*.reason.required' => 'Select a Reason For Cancellation for every order.',
         ]);
 
         $user     = $request->user();
@@ -230,22 +241,34 @@ try {
                 // Verify ownership
                 $exists = DB::selectOne(
                     "SELECT order_id FROM user_sales_order
-                      WHERE order_id = ? AND dealer_id = ? LIMIT 1",
+                      WHERE order_id = ? AND dealer_id = ? AND order_status IN ('0','7') LIMIT 1",
                     [$orderId, $dealerId]
                 );
-                if (!$exists) continue;
+                if (!$exists) {
+                    throw new \RuntimeException("Order {$orderId} cannot be cancelled.");
+                }
 
                 // 1. Copy header into cancel_order
                 DB::statement(
                     "INSERT INTO cancel_order
-                        SELECT * FROM user_sales_order WHERE order_id = ?",
+                        (order_id, user_id, dealer_id, location_id, retailer_id, company_id, call_status,
+                         total_sale_value, discount, amount, total_sale_qty, total_dispatch_qty, lat_lng,
+                         mccmnclatcellid, track_address, date, time, image_name, override_status,
+                         order_status, remarks, sync_status)
+                     SELECT order_id, user_id, dealer_id, location_id, retailer_id, company_id, call_status,
+                            total_sale_value, discount, amount, total_sale_qty, total_dispatch_qty, lat_lng,
+                            mccmnclatcellid, track_address, date, time, image_name, override_status,
+                            order_status, remarks, sync_status
+                       FROM user_sales_order WHERE order_id = ?",
                     [$orderId]
                 );
 
                 // 2. Copy items into cancel_order_details
                 DB::statement(
                     "INSERT INTO cancel_order_details
-                        SELECT * FROM user_sales_order_details WHERE order_id = ?",
+                        (order_id, product_id, rate, quantity, remaining_qty, scheme_qty, status, sync_status)
+                     SELECT order_id, product_id, rate, quantity, remaining_qty, scheme_qty, status, sync_status
+                       FROM user_sales_order_details WHERE order_id = ?",
                     [$orderId]
                 );
 

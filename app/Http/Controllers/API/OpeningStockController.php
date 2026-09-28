@@ -214,8 +214,9 @@ class OpeningStockController extends Controller
                     DB::update(
                         "UPDATE stock
                             SET qty              = ?,
-                                salable_damage   = ?,
-                                nonsalable_damage = ?,
+                                remaining        = remaining + ?,
+                                salable_damage   = salable_damage + ?,
+                                nonsalable_damage = nonsalable_damage + ?,
                                 dealer_rate      = ?,
                                 mrp              = ?,
                                 date             = NOW(),
@@ -223,6 +224,7 @@ class OpeningStockController extends Controller
                           WHERE id = ?",
                         [
                             $existing->qty + $qty,
+                            $qty,
                             $salableQty,
                             $nsQty,
                             $rate,
@@ -394,16 +396,30 @@ class OpeningStockController extends Controller
 {
     $user      = $request->user();
     $companyId = (int) ($user->company_id ?? 0);
+    $stateId   = (string) ($user->state_id ?? '');
+
+    $useSsRate = $user->rolename === 'DEPO'
+        || ($user->rolename === 'DISTRIBUTOR' && (int) $user->ownership_type_id === 245 && $companyId === 213);
+    $pcs       = (string) $user->quantity_type === '0';
+    $rateCol   = $useSsRate ? ($pcs ? 'ss_pcs_rate' : 'ss_case_rate') : ($pcs ? 'dealer_pcs_rate' : 'dealer_rate');
+    $mrpCol    = $pcs ? 'mrp_pcs' : 'mrp';
+    $label     = $companyId === 213
+        ? "CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']')"
+        : "CONCAT_WS(' ', cp.itemcode, '-', cp.name, '[', c2.name, ']')";
 
     $rows = DB::select(
         "SELECT cp.id,
-                CONCAT(cp.name, '[', cp.quantity_per_case, ']') AS name
+                {$label} AS name,
+                CAST(MAX(prl.{$mrpCol}) AS DECIMAL(10,2)) AS mrp,
+                MAX(prl.{$rateCol}) AS dealer_rate
            FROM catalog_product cp
            INNER JOIN catalog_2 c2 ON c2.id = cp.catalog_id
+           LEFT JOIN product_rate_list prl ON prl.product_id = cp.id AND prl.state_id = ?
           WHERE cp.company_id = ?
             AND cp.status = 1
+          GROUP BY cp.id, cp.name, cp.itemcode, cp.quantity_per_case, c2.name
           ORDER BY cp.name ASC",
-        [$companyId]
+        [$stateId, $companyId]
     );
 
     return response()->json([

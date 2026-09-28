@@ -90,6 +90,12 @@ class BalanceStockController extends Controller
             $qty  = (float) ($r->qty ?? 0);
             $non  = (float) ($r->nonsale ?? 0);
             $intr = (float) ($intransit[$r->pid] ?? 0);
+            if (!$r->stock_mrp) {
+                $rates = $this->ratesFromMrp((float) ($r->product_mrp ?? 0), $r->product_gst, $r->division, $stateId);
+                if ($rates['dealer_rate'] !== null) {
+                    $r->default_dealer_rate = $rates['dealer_rate'];
+                }
+            }
             $rate = (float) ($r->stock_mrp ? $r->stock_dealer_rate : $r->default_dealer_rate);
 
             $r->intransit   = $intr;
@@ -324,6 +330,18 @@ class BalanceStockController extends Controller
         }
         return $map;
     }
+    private function ratesFromMrp(float $mrp, $gst, $division, string $stateId): array
+    {
+        $rate       = round($mrp - ($mrp * ((float) $gst ? 25 : 18) / 100), 2);
+        $dealerRate = null;
+        if (in_array($stateId, ['1', '2', '3', '4', '5', '6'], true) || (int) $division === 1) {
+            $dealerRate = round($rate - ($rate * 9 / 100), 2);
+        } elseif ((int) $division === 2) {
+            $dealerRate = round($rate - ($rate * 7 / 100), 2);
+        }
+        return ['rate' => $rate, 'dealer_rate' => $dealerRate];
+    }
+
     public function destroy(Request $request, string $id): JsonResponse
 {
     $user      = $request->user();
@@ -386,15 +404,18 @@ class BalanceStockController extends Controller
         'rows.*.nonsale'   => 'nullable|numeric|min:0',
         'rows.*.batch_no'  => 'nullable|string|max:11',
         'rows.*.mfg'       => 'nullable|date',
-        'rows.*.intransit' => 'nullable|numeric|min:0',
+        'rows.*.mrp'       => 'nullable|numeric|min:0',
     ]);
 
-    DB::transaction(function () use ($validated, $dealerId) {
+    $stateId = (string) ($user->state_id ?? '');
+
+    DB::transaction(function () use ($validated, $dealerId, $companyId, $stateId) {
 
         foreach ($validated['rows'] as $row) {
             $existing = DB::selectOne(
-                "SELECT id FROM stock
-                  WHERE id = ? AND dealer_id = ?
+                "SELECT s.*, cp.division, cp.gst_percent FROM stock s
+                   LEFT JOIN catalog_product cp ON cp.id = s.product_id
+                  WHERE s.id = ? AND s.dealer_id = ?
                   LIMIT 1",
                 [(int) $row['id'], $dealerId]
             );
@@ -403,10 +424,39 @@ class BalanceStockController extends Controller
             }
 
             $update = ['qty' => (float) $row['qty']];
-            if (array_key_exists('nonsale', $row))   $update['nonsale']   = (float) $row['nonsale'];
-            if (array_key_exists('batch_no', $row))  $update['batch_no']  = (string) $row['batch_no'];
-            if (array_key_exists('mfg', $row))       $update['mfg']       = (string) $row['mfg'];
-            if (array_key_exists('intransit', $row)) $update['intransit'] = (float) $row['intransit'];
+            if (array_key_exists('nonsale', $row))   $update['nonsalable_damage'] = (int) $row['nonsale'];
+            if (array_key_exists('batch_no', $row))  $update['batch_no']          = (string) $row['batch_no'];
+            if (array_key_exists('mfg', $row))       $update['mfg']               = (string) $row['mfg'];
+
+            if (array_key_exists('mrp', $row) && $row['mrp'] !== null) {
+                $mrp   = (float) $row['mrp'];
+                $rates = $this->ratesFromMrp($mrp, $existing->gst_percent, $existing->division, $stateId);
+                $update['mrp']         = $mrp;
+                $update['rate']        = $rates['rate'];
+                $update['dealer_rate'] = $rates['dealer_rate'] ?? (float) $existing->dealer_rate;
+                $update['date']        = now();
+
+                if ((float) $existing->mrp > 0 && $mrp != (float) $existing->mrp) {
+                    DB::table('stock')->insert($update + [
+                        'product_id'        => $existing->product_id,
+                        'batch_no'          => $existing->batch_no,
+                        'mfg'               => $existing->mfg,
+                        'nonsalable_damage' => (int) $existing->nonsalable_damage,
+                        'csa_id'            => $existing->csa_id,
+                        'dealer_id'         => $dealerId,
+                        'salable_damage'    => 0,
+                        'remaining'         => 0,
+                        'expire'            => date('Y-m-d', strtotime('+1 years')),
+                        'pr_rate'           => 0,
+                        'company_id'        => $companyId,
+                    ]);
+                    DB::table('stock')
+                        ->where('id', $existing->id)
+                        ->where('dealer_id', $dealerId)
+                        ->update(['qty' => 0, 'nonsalable_damage' => 0, 'date' => now()]);
+                    continue;
+                }
+            }
 
             DB::table('stock')
                 ->where('id', $row['id'])

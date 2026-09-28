@@ -274,11 +274,12 @@ class InvoiceController extends Controller
             'remark'             => 'sometimes|nullable|string|max:255',
             'edited_remarks'     => 'sometimes|nullable|string|max:255',   // FIX #3
             'discount_per'       => 'sometimes|numeric|min:0|max:100',
+            'crdr_status'        => 'sometimes|integer|in:0,1,2',
             'items'              => 'required|array|min:1',
             'items.*.product_id' => 'required|integer',
             'items.*.mrp'        => 'required|numeric',
             'items.*.qty'        => 'required|numeric|min:0.001',
-            'items.*.rate'       => 'required|numeric|min:0',
+            'items.*.rate'       => 'required|numeric|gt:0',
             'items.*.free_qty'   => 'nullable|numeric|min:0',
             'items.*.cd_type'    => 'nullable|integer|in:1,2',
             'items.*.cd'         => 'nullable|numeric|min:0',
@@ -288,10 +289,11 @@ class InvoiceController extends Controller
             'items.*.mfg_date'   => 'nullable|date',
         ]);
 
+        try {
         DB::transaction(function () use ($id, $invoice, $validated, $dealerId) {
 
             $oldItems = DB::select(
-                "SELECT product_id, qty, free_qty, batch_no, mfg_date
+                "SELECT product_id, qty, free_qty, batch_no, mfg_date, tax, old_rate
                    FROM challan_order_details WHERE ch_id = ?",
                 [$id]
             );
@@ -304,6 +306,8 @@ class InvoiceController extends Controller
                     'product_id' => (int) $o->product_id,
                     'batch_no'   => (string) $o->batch_no,
                     'mfg_date'   => (string) $o->mfg_date,
+                    'tax'        => (float) $o->tax,
+                    'old_rate'   => $o->old_rate,
                 ];
             }
 
@@ -330,7 +334,8 @@ class InvoiceController extends Controller
                 $mfgDate   = (string) ($row['mfg_date'] ?? '1970-01-01');
                 $gross     = $qty * $rate;
 
-                $taxPercent = (float) $product->gst_percent;
+                $key = $this->lineKey((int) $row['product_id'], $batchNo, $mfgDate);
+                $taxPercent = isset($oldMap[$key]) ? $oldMap[$key]['tax'] : (float) $product->gst_percent;
 
                 // Trade discount — on gross
                 $disType = (int)   ($row['dis_type'] ?? 1);
@@ -386,7 +391,7 @@ class InvoiceController extends Controller
                     'mfg_date'      => $mfgDate,
                     'user_id'       => (int) ($validated['user_id'] ?? $invoice->ch_user_id),
                     'sync_status'   => 1,
-                    'old_rate'      => null,
+                    'old_rate'      => $oldMap[$key]['old_rate'] ?? null,
                 ];
 
                 $totalTaxable += $taxable;
@@ -419,6 +424,7 @@ class InvoiceController extends Controller
             if (isset($validated['ch_date']))           $headerUpdate['ch_date']        = $validated['ch_date'];
             if (isset($validated['retailer_id']))       $headerUpdate['ch_retailer_id'] = (string) $validated['retailer_id'];
             if (isset($validated['user_id']))           $headerUpdate['ch_user_id']     = (int) $validated['user_id'];
+            if (isset($validated['crdr_status']))       $headerUpdate['crdr_status']    = (int) $validated['crdr_status'];
             if (array_key_exists('remark', $validated)) $headerUpdate['remark']         = $validated['remark'] ?? '';
             // FIX #3: persist edited_remarks
             if (array_key_exists('edited_remarks', $validated)) {
@@ -430,6 +436,9 @@ class InvoiceController extends Controller
                 ->where('ch_dealer_id', $dealerId)
                 ->update($headerUpdate);
         });
+        } catch (\RuntimeException $e) {
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return $this->show($request, $id);
     }
@@ -460,7 +469,12 @@ class InvoiceController extends Controller
             return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
+        try {
         DB::transaction(function () use ($id, $invoice, $user, $reason, $dealerId) {
+
+            foreach (DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date FROM challan_order_details WHERE ch_id = ?", [$id]) as $l) {
+                $this->adjustStockQty($dealerId, (int) $l->product_id, (string) $l->batch_no, (string) $l->mfg_date, (float) $l->qty + (float) $l->free_qty);
+            }
 
             $detailRows = DB::select("SELECT * FROM challan_order_details WHERE ch_id = ?", [$id]);
             foreach ($detailRows as $r) {
@@ -485,6 +499,9 @@ class InvoiceController extends Controller
             DB::table('challan_order_cancel')->insert($h);
             DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
         });
+        } catch (\RuntimeException $e) {
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'status'  => true,
@@ -528,7 +545,12 @@ class InvoiceController extends Controller
             return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
+        try {
         DB::transaction(function () use ($id, $invoice, $user, $dealerId) {
+
+            foreach (DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date FROM challan_order_details WHERE ch_id = ?", [$id]) as $l) {
+                $this->adjustStockQty($dealerId, (int) $l->product_id, (string) $l->batch_no, (string) $l->mfg_date, (float) $l->qty + (float) $l->free_qty);
+            }
 
             $detailRows = DB::select("SELECT * FROM challan_order_details WHERE ch_id = ?", [$id]);
             foreach ($detailRows as $r) {
@@ -553,6 +575,9 @@ class InvoiceController extends Controller
             DB::table('challan_order_cancel')->insert($h);
             DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
         });
+        } catch (\RuntimeException $e) {
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'status'  => true,
@@ -582,7 +607,8 @@ class InvoiceController extends Controller
                     cp.quantity_per_case AS qty_per_case,
                     cp.weight            AS weight,
                     cp.itemcode          AS itemcode,
-                    cp.hsn_code          AS hsn_code
+                    cp.hsn_code          AS hsn_code,
+                    EXISTS (SELECT 1 FROM dms_challan_claim_details dcd WHERE dcd.challan_id = cod.ch_id AND dcd.product_id = cod.product_id) AS claimed
                FROM challan_order_details cod
                LEFT JOIN catalog_product cp ON cp.id = cod.product_id
               WHERE cod.ch_id IN ({$in})
@@ -606,6 +632,7 @@ class InvoiceController extends Controller
                 'rate'         => $rate,
                 'mrp'          => (float) $r->mrp,
                 'old_rate'     => (float) $r->old_rate,
+                'claimed'      => (bool) $r->claimed,
                 'tax'          => (float) $r->tax,
                 'vat_amt'      => (float) $r->vat_amt,
                 'taxable_amt'  => (float) $r->taxable_amt,
@@ -688,21 +715,78 @@ class InvoiceController extends Controller
         string $mfgDate,
         float $delta
     ): void {
-        $op  = $delta >= 0 ? '+' : '-';
         $abs = abs($delta);
         if ($abs <= 0) return;
 
-        DB::update(
-            "UPDATE stock
-                SET qty = qty {$op} ?
-              WHERE dealer_id  = ?
-                AND product_id = ?
-                AND batch_no   = ?
-                AND mfg        = ?
+        if ($delta < 0) {
+            $done = DB::update(
+                "UPDATE stock SET remaining = remaining - ?
+                  WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ? AND remaining >= ?
+                  LIMIT 1",
+                [$abs, $dealerId, $productId, $batchNo, $mfgDate, $abs]
+            );
+            if (!$done) {
+                throw new \RuntimeException("Insufficient stock for product {$productId} (batch {$batchNo}).");
+            }
+            return;
+        }
+
+        $done = DB::update(
+            "UPDATE stock SET remaining = remaining + ?
+              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ?
               LIMIT 1",
             [$abs, $dealerId, $productId, $batchNo, $mfgDate]
+        ) ?: DB::update(
+            "UPDATE stock SET remaining = remaining + ?
+              WHERE dealer_id = ? AND product_id = ?
+              ORDER BY mfg DESC LIMIT 1",
+            [$abs, $dealerId, $productId]
         );
+        if (!$done) {
+            throw new \RuntimeException("Cannot restore stock: no stock row for product {$productId}.");
+        }
     }
+    public function claimDetails(Request $request, string $id): JsonResponse
+    {
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
+
+        $invoice = DB::selectOne(
+            "SELECT co.id AS order_id, co.ch_no AS invoice_no,
+                    DATE_FORMAT(co.ch_date, '%d-%m-%Y') AS invoice_date,
+                    co.amount AS invoice_amount,
+                    r.name AS retailer_name, roc.outlet_category AS retailer_category,
+                    d.name AS dealer_name, l6.name AS town_name
+               FROM challan_order co
+               LEFT JOIN retailer r ON r.id = co.ch_retailer_id
+               LEFT JOIN _retailer_outlet_category roc ON roc.id = r.class
+               LEFT JOIN dealer d ON d.id = co.ch_dealer_id
+               LEFT JOIN location_6 l6 ON l6.id = d.town_id
+              WHERE co.id = ? AND co.ch_dealer_id = ?
+              LIMIT 1",
+            [$id, $dealerId]
+        );
+        if (!$invoice) {
+            return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+        }
+
+        $claim = DB::selectOne(
+            "SELECT claim_status FROM dms_retailer_images_amount_claim
+              WHERE order_id = ? AND dealer_id = ? AND company_id = ?
+              LIMIT 1",
+            [(string) $id, $dealerId, $companyId]
+        );
+
+        return response()->json([
+            'status' => true,
+            'data'   => array_merge((array) $invoice, [
+                'claim_exists' => $claim !== null,
+                'claim_status' => $claim ? (int) $claim->claim_status : null,
+            ]),
+        ]);
+    }
+
     public function storeClaim(Request $request, string $id): JsonResponse
 {
     $user      = $request->user();

@@ -58,14 +58,13 @@ class VanController extends Controller
     {
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
 
         $row = DB::selectOne(
             "SELECT id, vanId, van_no, driver_name, mobile, license_no,
                     vtype, capacity, status, address
                FROM van
-              WHERE id = ? AND dealer_id = ? AND company_id = ? LIMIT 1",
-            [$id, $dealerId, $companyId]
+              WHERE id = ? AND dealer_id = ? LIMIT 1",
+            [$id, $dealerId]
         );
 
         if (!$row) {
@@ -170,9 +169,9 @@ class VanController extends Controller
 
         $existing = DB::selectOne(
             "SELECT id FROM van
-              WHERE id = ? AND dealer_id = ? AND company_id = ?
+              WHERE id = ? AND dealer_id = ?
               LIMIT 1",
-            [$id, $dealerId, $companyId]
+            [$id, $dealerId]
         );
         if (!$existing) {
             return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
@@ -206,7 +205,7 @@ class VanController extends Controller
             "UPDATE van SET
                 van_no = ?, driver_name = ?, mobile = ?, license_no = ?,
                 vtype = ?, capacity = ?, status = ?, address = ?
-             WHERE id = ? AND dealer_id = ? AND company_id = ?",
+             WHERE id = ? AND dealer_id = ?",
             [
                 $request->van_no,
                 $request->driver_name,
@@ -218,7 +217,6 @@ class VanController extends Controller
                 $request->address,
                 $id,
                 $dealerId,
-                $companyId,
             ]
         );
 
@@ -233,13 +231,12 @@ class VanController extends Controller
     {
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
 
         $exists = DB::selectOne(
             "SELECT id FROM van
-              WHERE id = ? AND dealer_id = ? AND company_id = ?
+              WHERE id = ? AND dealer_id = ?
               LIMIT 1",
-            [$id, $dealerId, $companyId]
+            [$id, $dealerId]
         );
         if (!$exists) {
             return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
@@ -247,8 +244,8 @@ class VanController extends Controller
 
         DB::update(
             "UPDATE van SET status = 0
-              WHERE id = ? AND dealer_id = ? AND company_id = ?",
-            [$id, $dealerId, $companyId]
+              WHERE id = ? AND dealer_id = ?",
+            [$id, $dealerId]
         );
 
         return response()->json(['status' => true, 'message' => 'Van deleted successfully.']);

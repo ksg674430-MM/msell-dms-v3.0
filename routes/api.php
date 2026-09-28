@@ -193,6 +193,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // SALES ORDER  → MENU: Order → Sales Order
     // ========================================================
     Route::get ('/sales-orders',           [SalesOrderController::class, 'index']);  // order list
+    Route::get ('/sales-orders/cancel-reasons', [SalesOrderController::class, 'cancelReasons']); // cancel reason list
     Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);   // order detail
     Route::post('/sales-orders/query',     [SalesOrderController::class, 'query']);  // filtered search
     Route::post('/sales-orders/cancel',    [SalesOrderController::class, 'cancel']); // cancel order
@@ -218,6 +219,7 @@ Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class,
     Route::match(['PUT','PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']); // edit invoice
     Route::post  ('invoices/{id}/cancel',   [InvoiceController::class, 'cancel']);  // cancel (challan_order → _cancel)
     Route::delete('invoices/{id}',          [InvoiceController::class, 'destroy']); // delete (challan_order → _cancel with DELETE)
+    Route::get('/invoices/{id}/displayclaim', [InvoiceController::class, 'claimDetails']);
     Route::post('/invoices/{id}/displayclaim', [InvoiceController::class, 'storeClaim']);
 
     // ========================================================

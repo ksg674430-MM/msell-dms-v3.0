@@ -123,21 +123,24 @@ class StockImportController extends Controller
 
         DB::beginTransaction();
         try {
-            fgetcsv($fh, 1000, ',');
+            fgetcsv($fh, 0, ',');
 
-            while (($row = fgetcsv($fh, 1000, ',')) !== false) {
+            while (($row = fgetcsv($fh, 0, ',')) !== false) {
                 $rowNum++;
 
-                if (count($row) < 8 || (trim($row[0]) === '' && trim($row[1]) === '')) {
+                $row = array_pad(array_map(fn ($v) => trim((string) $v), $row), 8, '');
+                $num = fn ($v) => str_replace(',', '', $v);
+
+                $itemCode = $row[1];
+                $mrp      = $num($row[3]);
+                $rate     = $num($row[4]);
+                $qty      = $num($row[5]);
+                $batchNo  = $row[6];
+                $mfgRaw   = $row[7];
+
+                if ($itemCode === '' || $qty === '' || (is_numeric($qty) && (float) $qty == 0)) {
                     continue;
                 }
-
-                $itemCode = trim($row[1]);
-                $mrp      = trim($row[3]);
-                $rate     = trim($row[4]);
-                $qty      = trim($row[5]);
-                $batchNo  = trim($row[6]);
-                $mfgRaw   = trim($row[7]);
 
                 if (!isset($itemCodeMap[$itemCode])) {
                     $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) not found."];
@@ -145,8 +148,20 @@ class StockImportController extends Controller
                 }
                 $productId = (int) $itemCodeMap[$itemCode];
 
-                if ($mrp === '' || $rate === '' || $qty === '' || $batchNo === '' || $mfgRaw === '') {
-                    $errors[] = ['row' => $rowNum, 'reason' => 'Missing mandatory field.'];
+                if (!is_numeric($qty) || (float) $qty < 0) {
+                    $errors[] = ['row' => $rowNum, 'reason' => "Invalid quantity: {$qty}"];
+                    continue;
+                }
+                if (!is_numeric($mrp) || !is_numeric($rate)) {
+                    $errors[] = ['row' => $rowNum, 'reason' => 'MRP and Rate must be numbers.'];
+                    continue;
+                }
+                if ($batchNo === '') {
+                    $errors[] = ['row' => $rowNum, 'reason' => 'Batch No is required (use BD123 if you have none).'];
+                    continue;
+                }
+                if ($mfgRaw === '') {
+                    $errors[] = ['row' => $rowNum, 'reason' => 'Mfg Date is required (dd/mm/yyyy).'];
                     continue;
                 }
 
@@ -189,11 +204,10 @@ class StockImportController extends Controller
                 if ($existingStock) {
                     DB::update(
                         "UPDATE stock
-                            SET qty = qty + ?, dealer_rate = ?, mrp = ?,
-                                nonsalable_damage = 0,
+                            SET qty = qty + ?, remaining = remaining + ?, dealer_rate = ?, mrp = ?,
                                 expire = ?, date = NOW(), update_date_time = NOW()
                           WHERE id = ?",
-                        [(float) $qty, (float) $rate, (float) $mrp, $mfgDate, $existingStock->id]
+                        [(float) $qty, (float) $qty, (float) $rate, (float) $mrp, $mfgDate, $existingStock->id]
                     );
                 } else {
                     DB::insert(
@@ -234,6 +248,15 @@ class StockImportController extends Controller
                 ], 422);
             }
 
+            if ($inserted === 0) {
+                DB::rollBack();
+                return response()->json([
+                    'status'  => false,
+                    'message' => 'No rows to import. Fill Quantity for the products you want to add.',
+                    'errors'  => [],
+                ], 422);
+            }
+
             DB::commit();
 
             return response()->json([
@@ -270,9 +293,9 @@ class StockImportController extends Controller
         // ✅ csa_id from dealer (user.csa_id was 0)
         $csaId = (int) (DB::table('dealer')->where('id', $dealerId)->value('csa_id') ?? 0);
 
-        // Piece-level rates
-        $mrpCol  = 'mrp_pcs';
-        $rateCol = 'dealer_pcs_rate';
+        $pcs     = (string) $user->quantity_type !== '1';
+        $mrpCol  = $pcs ? 'mrp_pcs' : 'mrp';
+        $rateCol = $pcs ? 'dealer_pcs_rate' : 'dealer_rate';
 
         $rateRows = DB::select(
             "SELECT cp.id, prl.{$mrpCol} AS mrp, prl.{$rateCol} AS dealer_rate
@@ -304,25 +327,36 @@ class StockImportController extends Controller
 
         DB::beginTransaction();
         try {
-            fgetcsv($fh, 1000, ',');
+            fgetcsv($fh, 0, ',');
 
-            while (($row = fgetcsv($fh, 1000, ',')) !== false) {
+            while (($row = fgetcsv($fh, 0, ',')) !== false) {
                 $rowNum++;
 
-                if (count($row) < 8 || (trim($row[0]) === '' && trim($row[2]) === '')) {
+                $row = array_pad(array_map(fn ($v) => trim((string) $v), $row), 8, '');
+
+                $invoiceDate = $row[1];
+                $invoiceNo   = $row[2];
+                $skuCode     = $row[3];
+                $skuId       = (int) $row[4];
+                $qtyRaw      = str_replace(',', '', $row[5]);
+                $saleDate    = $row[6];
+                $remarks     = $row[7];
+
+                if ($qtyRaw === '' || (is_numeric($qtyRaw) && (float) $qtyRaw == 0)) {
                     continue;
                 }
+                $skuQty = (float) $qtyRaw;
 
-                $invoiceDate = trim($row[1]);
-                $invoiceNo   = trim($row[2]);
-                $skuCode     = trim($row[3]);
-                $skuId       = (int) trim($row[4]);
-                $skuQty      = (float) trim($row[5]);
-                $saleDate    = trim($row[6]);
-                $remarks     = trim($row[7]);
-
-                if ($skuId <= 0 || $skuQty <= 0 || $saleDate === '') {
-                    $errors[] = ['row' => $rowNum, 'reason' => 'Missing sku_id / qty / sale_date.'];
+                if (!is_numeric($qtyRaw) || $skuQty < 0) {
+                    $errors[] = ['row' => $rowNum, 'reason' => "Invalid Qty: {$qtyRaw}"];
+                    continue;
+                }
+                if ($skuId <= 0 || !isset($rateMap[$skuId])) {
+                    $errors[] = ['row' => $rowNum, 'reason' => "SKU Id ({$row[4]}) not found or has no rate."];
+                    continue;
+                }
+                if ($saleDate === '') {
+                    $errors[] = ['row' => $rowNum, 'reason' => 'Sale Date is required (YYYY-mm-dd).'];
                     continue;
                 }
 
@@ -341,12 +375,17 @@ class StockImportController extends Controller
                 $mfgDate = date('Y-m-d');
                 $totalValue = $rate * $skuQty;
 
-                $exists = DB::table('purchase_order')
+                $existingPo = DB::table('purchase_order')
                     ->where('dealer_id', $dealerId)
                     ->where('order_id', $finalOrderId)
-                    ->exists();
+                    ->first();
 
-                if ($exists) {
+                if ($existingPo && !empty($existingPo->receive_date)) {
+                    $errors[] = ['row' => $rowNum, 'reason' => "Order {$finalOrderId} for {$saleDateParsed} is already received."];
+                    continue;
+                }
+
+                if ($existingPo) {
                     $detail = DB::selectOne(
                         "SELECT auto, quantity FROM purchase_order_details
                           WHERE product_id = ? AND order_id = ? LIMIT 1",
@@ -420,6 +459,15 @@ class StockImportController extends Controller
                 ], 422);
             }
 
+            if ($inserted === 0) {
+                DB::rollBack();
+                return response()->json([
+                    'status'  => false,
+                    'message' => 'No rows to import. Fill Qty for the products you want to add.',
+                    'errors'  => [],
+                ], 422);
+            }
+
             DB::commit();
 
             return response()->json([
@@ -445,10 +493,10 @@ class StockImportController extends Controller
         $n = str_replace('/', '-', $raw);
 
         if (preg_match('/^(\d{1,2})-(\d{1,2})-(\d{4})$/', $n, $m)) {
-            return sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]);
+            return checkdate((int) $m[2], (int) $m[1], (int) $m[3]) ? sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]) : null;
         }
         if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $n, $m)) {
-            return sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]);
+            return checkdate((int) $m[2], (int) $m[3], (int) $m[1]) ? sprintf('%04d-%02d-%02d', $m[1], $m[2], $m[3]) : null;
         }
         $ts = strtotime($n);
         return $ts ? date('Y-m-d', $ts) : null;
