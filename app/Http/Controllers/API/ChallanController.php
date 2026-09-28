@@ -362,19 +362,24 @@ class ChallanController extends Controller
                     : round($taxable * $tax / 100, 2);
                 $amount   = round($taxable + $vatAmt, 2);
 
-                // HSN lookup
-                $hsn = (string) ($it['hsn_code'] ?? '');
-                if ($hsn === '') {
-                    $cp  = DB::selectOne("SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1", [$productId]);
-                    $hsn = (string) ($cp->hsn_code ?? '');
-                }
+                // Product name + HSN lookup (single query)
+$cp = DB::selectOne(
+    "SELECT name, hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
+    [$productId]
+);
+$productName = (string) ($cp->name ?? ('Product #' . $productId));
+
+$hsn = (string) ($it['hsn_code'] ?? '');
+if ($hsn === '') {
+    $hsn = (string) ($cp->hsn_code ?? '');
+}
 
                 $normalizedItems[] = compact(
-                    'productId', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
-                    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
-                    'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
-                    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
-                );
+    'productId', 'productName', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
+    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
+    'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
+    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
+);
                 $subTotal += $amount;
             }
 
@@ -442,7 +447,31 @@ class ChallanController extends Controller
                     ]
                 );
 
-                $this->reduceStock($dealerId, $l['productId'], $l['qty'] + $l['freeQty']);
+               $requiredQty = $l['qty'] + $l['freeQty'];
+try {
+    $this->reduceStock($dealerId, $l['productId'], $requiredQty);
+} catch (\Throwable $e) {
+    // Try to read the actual available qty from your stock table.
+    // Adjust table/column names to match your schema.
+    $availableQty = null;
+    try {
+        $row = DB::selectOne(
+            "SELECT qty FROM catalog_product_stock
+              WHERE dealer_id = ? AND product_id = ? LIMIT 1",
+            [$dealerId, $l['productId']]
+        );
+        $availableQty = $row ? (float) $row->qty : null;
+    } catch (\Throwable $ignore) {
+        // ignore – we'll still show required qty
+    }
+
+    throw new \RuntimeException(sprintf(
+        'Insufficient stock for product "%s". Required qty: %s, Available qty: %s.',
+        $l['productName'],
+        $this->formatQty($requiredQty),
+        $availableQty === null ? 'unknown' : $this->formatQty($availableQty)
+    ), 0, $e);
+}
 
                 if ($l['orderId'] !== '') {
                     DB::update(
@@ -476,6 +505,10 @@ class ChallanController extends Controller
         }
     }
 
+    private function formatQty(float $qty): string
+{
+    return rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.') ?: '0';
+}
     /* =========================================================
      |  FROM ORDERS
      |  POST /api/challans/from-orders
