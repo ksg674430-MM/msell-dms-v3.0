@@ -1846,79 +1846,46 @@ if (!empty($invalid)) {
             ],
         ]);
     }
+//---Dealer Dashboard
+public function dealerDashboard(Request $request)
+{
+    $ctx = $this->context($request);
 
-    /* ---------- Dealer Dashboard ---------- */
-    public function dealerDashboard(Request $request)
-    {
-        $ctx = $this->context($request);
+    $dealer_code = $ctx['dealer_code'];
+    $dealer_id   = $ctx['dealer_id'];
+    $company_id  = $ctx['company_id'];
 
-        $dealer_code = $ctx['dealer_code'];
-        $dealer_id   = $ctx['dealer_id'];
-        $company_id  = $ctx['company_id'];
+    $div_entry = DB::table('ACC_MAST')->where('ACC_CODE', $dealer_code)->first();
+    $login     = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
+    $div_code  = $div_entry->DIV_CODE ?? ($login->div_code_main ?? '0');
 
-        $div_entry = DB::table('ACC_MAST')->where('ACC_CODE', $dealer_code)->first();
-        $login     = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
-        $div_code  = $div_entry->DIV_CODE ?? ($login->div_code_main ?? '0');
+    $month_from = date('Y-m') . '-01';
+    $month_to   = date('Y-m-t');
+    $sale_from  = date('Y') . '-04-01';
+    $sale_to    = (date('Y') + 1) . '-03-31';
 
-        $month_from = date('Y-m') . '-01';
-        $month_to   = date('Y-m-t');
-        $sale_from  = date('Y') . '-04-01';
-        $sale_to    = (date('Y') + 1) . '-03-31';
+    $image_dyn = DB::table('image_mast')
+        ->where('img_locn', 'Dashboard')
+        ->where('company_id', $company_id)
+        ->orderBy('id', 'DESC')
+        ->get();
 
-        $image_dyn = DB::table('image_mast')
-            ->where('img_locn', 'Dashboard')
-            ->where('company_id', $company_id)
-            ->orderBy('id', 'DESC')->get();
+    $mktg_catg_array = ["ASV","CLA","GEN","GLD","OTC","OT2","JPS","FMC","JP2"];
+    $mktg_catg_wise_targets     = [];
+    $mktg_catg_wise_sales       = [];
+    $month_mktg_catg_wise_sales = [];
 
-        $mktg_catg_array = ["ASV","CLA","GEN","GLD","OTC","OT2","JPS","FMC","JP2"];
-        $mktg_catg_wise_targets = [];
-        $mktg_catg_wise_sales   = [];
-        $month_mktg_catg_wise_sales = [];
-
-        foreach ($mktg_catg_array as $catg) {
-            $mktg_catg_wise_targets[$catg] = DB::table('DEALER_TARGET_MAST')
-                ->where('MKTG_CATG', $catg)
-                ->where('ACC_CODE', $dealer_code)
-                ->whereRaw("DATE_FORMAT(FROM_DATE_FILTER,'%Y-%m-%d') = '$sale_from'")
-                ->whereRaw("DATE_FORMAT(TO_DATE_FILTER,'%Y-%m-%d')   = '$sale_to'")
-                ->sum('TARGET_AMT');
-
-            $mktg_catg_wise_sales[$catg] = DB::table('ITEMTRAN_BODY')
-                ->join('ITEMTRAN_HEAD','ITEMTRAN_HEAD.VRNO','=','ITEMTRAN_BODY.VRNO')
-                ->join('ITEM_MAST','ITEM_MAST.ITEM_CODE','=','ITEMTRAN_BODY.ITEM_CODE')
-                ->join('PROD_MAST','PROD_MAST.PROD_CODE','=','ITEM_MAST.PROD_CODE')
-                ->join('MKTG_CATG_MAST','MKTG_CATG_MAST.MKTG_CATG','=','PROD_MAST.MKTG_CATG')
-                ->where('MKTG_CATG_MAST.MKTG_CATG', $catg)
-                ->where('ITEMTRAN_BODY.DIV_CODE', $div_code)
-                ->where('ITEMTRAN_HEAD.DIV_CODE', $div_code)
-                ->where('ITEMTRAN_HEAD.ACC_CODE', $dealer_code)
-                ->whereRaw("date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d')>='$sale_from' and date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d')<='$sale_to'")
-                ->sum('ITEMTRAN_BODY.VALISSUED');
-
-            $month_mktg_catg_wise_sales[$catg] = DB::table('ITEMTRAN_BODY')
-                ->join('ITEMTRAN_HEAD','ITEMTRAN_HEAD.VRNO','=','ITEMTRAN_BODY.VRNO')
-                ->join('ITEM_MAST','ITEM_MAST.ITEM_CODE','=','ITEMTRAN_BODY.ITEM_CODE')
-                ->join('PROD_MAST','PROD_MAST.PROD_CODE','=','ITEM_MAST.PROD_CODE')
-                ->join('MKTG_CATG_MAST','MKTG_CATG_MAST.MKTG_CATG','=','PROD_MAST.MKTG_CATG')
-                ->where('MKTG_CATG_MAST.MKTG_CATG', $catg)
-                ->where('ITEMTRAN_BODY.DIV_CODE', $div_code)
-                ->where('ITEMTRAN_HEAD.DIV_CODE', $div_code)
-                ->where('ITEMTRAN_HEAD.ACC_CODE', $dealer_code)
-                ->whereRaw("date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d')>='$month_from' and date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d')<='$month_to'")
-                ->sum('ITEMTRAN_BODY.VALISSUED');
-        }
-
-        return response()->json([
-            'status'  => true,
-            'message' => 'Dealer dashboard',
-            'data'    => [
-                'image_dyn'                  => $image_dyn,
-                'mktg_catg_wise_targets'     => $mktg_catg_wise_targets,
-                'mktg_catg_wise_sales'       => $mktg_catg_wise_sales,
-                'month_mktg_catg_wise_sales' => $month_mktg_catg_wise_sales,
-            ],
-        ]);
-    }
+    return response()->json([
+        'status'  => true,
+        'message' => 'Dealer dashboard',
+        'data'    => [
+            'image_dyn'                  => $image_dyn,
+            'mktg_catg_wise_targets'     => $mktg_catg_wise_targets,
+            'mktg_catg_wise_sales'       => $mktg_catg_wise_sales,
+            'month_mktg_catg_wise_sales' => $month_mktg_catg_wise_sales,
+        ],
+    ]);
+}
 
     /* ---------- Common Report dispatcher ---------- */
     public function commonReportSection(Request $request)
