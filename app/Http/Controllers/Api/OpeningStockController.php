@@ -69,20 +69,20 @@ class OpeningStockController extends Controller
 
         // company_id_cus == 213 → name includes [qty_per_case]
         $nameSql = $companyId === 213
-            ? "CONCAT(cv.product_name, '[', cv.qty_per_case, ']')"
-            : "cv.product_name";
+            ? "CONCAT(cp.name, '[', cp.quantity_per_case, ']')"
+            : "cp.name";
 
         $rows = DB::select(
             "SELECT
                 os.*,
                 os.id               AS id,
                 {$nameSql}          AS product_name,
-                cv.itemcode         AS item_code,
-                cv.qty_per_case     AS quantity_per_case
+                cp.itemcode         AS item_code,
+                cp.quantity_per_case AS quantity_per_case
                FROM opening_stocks os
-               INNER JOIN catalog_view cv ON cv.product_id = os.product_id
+               INNER JOIN catalog_product cp ON cp.id = os.product_id
               WHERE {$whereSql}
-              ORDER BY cv.product_name ASC",
+              ORDER BY cp.name ASC",
             $bindings
         );
 
@@ -102,10 +102,10 @@ class OpeningStockController extends Controller
 
         $row = DB::selectOne(
             "SELECT os.*, os.id AS id,
-                    cv.product_name, cv.itemcode AS item_code,
-                    cv.qty_per_case AS quantity_per_case
+                    cp.name AS product_name, cp.itemcode AS item_code,
+                    cp.quantity_per_case AS quantity_per_case
                FROM opening_stocks os
-               INNER JOIN catalog_view cv ON cv.product_id = os.product_id
+               INNER JOIN catalog_product cp ON cp.id = os.product_id
               WHERE os.id = ? AND os.dealer_id = ?
               LIMIT 1",
             [$id, $dealerId]
