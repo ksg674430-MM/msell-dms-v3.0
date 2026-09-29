@@ -226,7 +226,7 @@ return [
         ],
     ],
     [
-        'slug'=>'dashboard', 'label'=>'Dealer Details'
+        'slug'=>'dashboard', 'label'=>'Dealer Dashboard'
     ],
 
     // ============================================================
