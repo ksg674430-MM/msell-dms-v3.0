@@ -37,6 +37,12 @@ use App\Http\Controllers\Api\DispatchController;
 use App\Http\Controllers\Api\SaleWiseInvoiceController;
 use App\Http\Controllers\Api\QuickOrderController;
 
+use App\Http\Controllers\Api\DealerPaymentController;
+
+use App\Http\Controllers\Api\DamageInvoiceController;
+use App\Http\Controllers\Api\DamageLookupController;
+
+
 
 // ============================================================
 // PUBLIC (no auth)
@@ -258,6 +264,46 @@ Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
         Route::get ('/',                [LookupController::class, 'directory']); // all entities list
         Route::get ('/{entity}/schema', [LookupController::class, 'schema']);    // column definitions
         Route::post('/',                [LookupController::class, 'run']);       // run dynamic query
+    });
+// Old Dues
+Route::get ('dealer/old-payment/retailers', [DealerPaymentController::class, 'oldPaymentRetailers']);
+Route::get ('dealer/old-payment/list',      [DealerPaymentController::class, 'oldPaymentList']);
+Route::post('dealer/old-payment/save',      [DealerPaymentController::class, 'oldPaymentSave']);
+
+// Payment Collection
+Route::get ('dealer/payment-collection/beats', [DealerPaymentController::class, 'paymentCollectionBeats']);
+Route::get ('dealer/payment-collection/list',  [DealerPaymentController::class, 'paymentCollectionList']);
+Route::get ('dealer/payment-collection/dues',  [DealerPaymentController::class, 'paymentCollectionRetailerDues']);
+Route::get('dealer/payment-collection/dues/{retailer_id}', [DealerPaymentController::class, 'paymentCollectionRetailerDues']);
+Route::post('dealer/payment-collection/save',  [DealerPaymentController::class, 'paymentCollectionSave']);
+
+// Challan Payment Reports
+Route::get ('dealer/challan-payment/list',      [DealerPaymentController::class, 'challanPaymentList']);
+Route::get ('dealer/challan-payment/paid-list', [DealerPaymentController::class, 'paidChallanList']);
+
+Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::class, 'paymentCollectionSaveLegacy']);
+
+
+
+  /* ------------- Damage Invoices ------------- */
+    Route::get   ('damage-invoices/next-number', [DamageInvoiceController::class, 'nextNumber']);
+    Route::post  ('damage-invoices/calculate',   [DamageInvoiceController::class, 'calculate']);
+    Route::get   ('damage-invoices',             [DamageInvoiceController::class, 'index']);
+    Route::post  ('damage-invoices',             [DamageInvoiceController::class, 'store']);
+    Route::get   ('damage-invoices/{id}',        [DamageInvoiceController::class, 'show']);
+    Route::put   ('damage-invoices/{id}',        [DamageInvoiceController::class, 'update']);
+    Route::delete('damage-invoices/{id}',        [DamageInvoiceController::class, 'destroy']);
+
+    /* ------------- Lookups ------------- */
+    Route::prefix('damage-lookups')->group(function () {
+        Route::get('retailers',                        [DamageLookupController::class, 'retailers']);
+        Route::get('retailers/{id}/location',          [DamageLookupController::class, 'retailerLocation']);
+        Route::get('products',                         [DamageLookupController::class, 'products']);
+        Route::get('products/{id}/mrp',                [DamageLookupController::class, 'productMrp']);
+        Route::get('products/{id}/rate-stock',         [DamageLookupController::class, 'productRateStock']);
+        Route::get('products/{id}/dealer-rate',        [DamageLookupController::class, 'productDealerRate']);
+        Route::get('products/{id}/gst',                [DamageLookupController::class, 'productGst']);
+        Route::get('saleable-non-saleable',            [DamageLookupController::class, 'saleableNonSaleable']);
     });
 });
 
