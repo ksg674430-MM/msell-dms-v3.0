@@ -43,6 +43,10 @@ use App\Http\Controllers\Api\DamageInvoiceController;
 use App\Http\Controllers\Api\DamageLookupController;
 
 
+use App\Http\Controllers\Api\DepotDamageInvoiceController;
+
+use App\Http\Controllers\Api\DepotDamageLookupController;
+
 
 // ============================================================
 // PUBLIC (no auth)
@@ -304,6 +308,27 @@ Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::c
         Route::get('products/{id}/dealer-rate',        [DamageLookupController::class, 'productDealerRate']);
         Route::get('products/{id}/gst',                [DamageLookupController::class, 'productGst']);
         Route::get('saleable-non-saleable',            [DamageLookupController::class, 'saleableNonSaleable']);
+    });
+
+
+     /* ------------- Depot Damage Invoices ------------- */
+    Route::get   ('depot-damage-invoices/next-number', [DepotDamageInvoiceController::class, 'nextNumber']);
+    Route::post  ('depot-damage-invoices/calculate',   [DepotDamageInvoiceController::class, 'calculate']);
+    Route::get   ('depot-damage-invoices',             [DepotDamageInvoiceController::class, 'index']);
+    Route::post  ('depot-damage-invoices',             [DepotDamageInvoiceController::class, 'store']);
+    Route::get   ('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'show']);
+    Route::put   ('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'update']);
+    Route::delete('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'destroy']);
+
+    /* ------------- Depot Lookups ------------- */
+    Route::prefix('depot-damage-lookups')->group(function () {
+        Route::get('csas',                          [DepotDamageLookupController::class, 'csas']);
+        Route::get('products',                      [DepotDamageLookupController::class, 'products']);
+        Route::get('products/{id}/mrp',             [DepotDamageLookupController::class, 'productMrp']);
+        Route::get('products/{id}/rate-stock',      [DepotDamageLookupController::class, 'productRateStock']);
+        Route::get('products/{id}/dealer-rate',     [DepotDamageLookupController::class, 'productDealerRate']);
+        Route::get('products/{id}/gst',             [DepotDamageLookupController::class, 'productGst']);
+        Route::get('saleable-non-saleable',         [DepotDamageLookupController::class, 'saleableNonSaleable']);
     });
 });
 

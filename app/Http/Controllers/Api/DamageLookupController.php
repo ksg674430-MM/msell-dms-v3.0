@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Services\DamageInvoiceService;
 use Illuminate\Support\Facades\DB;
 
 class DamageLookupController extends Controller
@@ -40,9 +39,9 @@ class DamageLookupController extends Controller
     {
         $u = $request->user();
 
-        if (DamageInvoiceService::companyId($u) === 213) {
+        if ((int) $u->company_id === 213) {
             $rows = DB::table('catalog_product as cp')
-                ->where('cp.company_id', DamageInvoiceService::companyId($u))
+                ->where('cp.company_id', $u->company_id)
                 ->groupBy('cp.id')
                 ->orderBy('cp.id')
                 ->get([
@@ -73,7 +72,7 @@ class DamageLookupController extends Controller
     {
         $u = $request->user();
         $dealerId     = (int) $u->dealer_id;
-        $companyIdCus = DamageInvoiceService::companyId($u);
+        $companyIdCus = (int) $u->company_id;
         $stateId      = (string) ($u->state_id ?? 0);
         $templateId   = (int) ($u->template_id ?? 0);
         $qtyType      = (string) ($u->quantity_type ?? '1');
@@ -129,54 +128,70 @@ class DamageLookupController extends Controller
     {
         $u = $request->user();
         $dealerId     = (int) $u->dealer_id;
-        $companyIdCus = DamageInvoiceService::companyId($u);
+        $companyIdCus = (int) $u->company_id;
         $stateId      = (string) ($u->state_id ?? 0);
         $templateId   = (int) ($u->template_id ?? 0);
         $qtyType      = (string) ($u->quantity_type ?? '1');
+        $role         = strtoupper((string) ($u->rolename ?? ''));
 
         $mrp     = $request->query('mrp');
         $batchNo = $request->query('batch_no');
-        $mfgDate = $request->query('mfg_date');
-        $forDepot = $request->query('for') === 'depot';
+        $mfgDate = $request->query('mfg_date'); // e.g. '01-Jan-2024'
 
-        $stockQ = DB::table('stock')
-            ->where('product_id', $id)
-            ->where('dealer_id', $dealerId);
-        if ($companyIdCus !== 213 && $mrp !== null && $mrp !== '') {
-            $stockQ->where('mrp', $mrp);
+        // Choose rate column by role + quantity_type (from rateNstockDamage)
+        if ($role === 'DEPO') {
+            $rateCol = $qtyType === '0' ? 'dealer_pcs_rate' : 'dealer_rate';
+        } elseif ($role === 'DISTRIBUTOR') {
+            $rateCol = $qtyType === '0' ? 'retailer_pcs_rate' : 'retailer_rate';
+        } else {
+            $rateCol = $qtyType === '0' ? 'ss_pcs_rate' : 'ss_case_rate';
         }
-        if (!empty($batchNo)) {
-            $stockQ->where('batch_no', $batchNo);
-        }
-        if (!empty($mfgDate) && ($ts = strtotime(str_replace('/', '-', $mfgDate)))) {
-            $stockQ->whereDate('mfg', date('Y-m-d', $ts));
-        }
-        $qty = (float) $stockQ->sum('qty');
 
-        $igst = (float) DB::table('catalog_product as p')
+        $stockQ = DB::table('stock as s')
+            ->join('catalog_product as p', 's.product_id', '=', 'p.id')
             ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
-            ->where('p.id', $id)
-            ->value(DB::raw('COALESCE(t.igst, 0)'));
+            ->where('s.product_id', $id)
+            ->where('s.batch_no', $batchNo)
+            ->whereRaw("DATE_FORMAT(s.mfg, '%d-%b-%Y') = ?", [$mfgDate]);
 
         if ($companyIdCus === 213) {
-            $rateCol = $forDepot
-                ? ($qtyType === '0' ? 'dealer_pcs_rate' : 'dealer_rate')
-                : ($qtyType === '0' ? 'retailer_pcs_rate' : 'retailer_rate');
-            $rateQ = $templateId > 0
-                ? DB::table('product_rate_list_template')->where('template_type', (string) $templateId)
-                : DB::table('product_rate_list')->where('state_id', $stateId);
-            $rawRate = (float) $rateQ->where('product_id', $id)->value($rateCol);
-            $beforeGst = round($rawRate - ($rawRate * (100 / (100 + $igst))), 3);
-            $rate = round($rawRate - $beforeGst, 2);
+            // MRP 213 has numeric(16,2) — cast on both sides
+            $stockQ->whereRaw("ROUND(s.mrp,1) = ROUND(CAST(? AS DECIMAL(16,2)),1)", [(float) $mrp]);
+
+            $rateTable = $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
+            $stockQ->join("$rateTable as prl", 'prl.product_id', '=', 'p.id');
+
+            if ($templateId > 0) {
+                $stockQ->where('prl.template_type', (string) $templateId);
+            } else {
+                $stockQ->where('prl.state_id', $stateId);
+            }
+            $stockQ->where('s.dealer_id', $dealerId);
         } else {
-            $rate = round((float) ($mrp ?? 0), 2);
+            $stockQ->where('s.mrp', $mrp)->where('s.dealer_id', $dealerId);
+            $stockQ->leftJoin('product_rate_list as prl', 'prl.product_id', '=', 'p.id');
         }
 
+        $row = $stockQ->first([
+            's.product_id',
+            's.qty',
+            DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
+            DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
+        ]);
+
+        if (!$row) {
+            return response()->json(['data' => null]);
+        }
+
+        // For company 213 & most, strip GST from the rate (mirrors JS/PHP)
+        $beforeGst = round($row->raw_rate - ($row->raw_rate * (100 / (100 + (float) $row->igst))), 3);
+        $netRate   = round($row->raw_rate - $beforeGst, 2);
+
         return response()->json(['data' => [
-            'product_id' => $id,
-            'qty'        => $qty,
-            'igst'       => $igst,
-            'rate'       => $rate,
+            'product_id' => $row->product_id,
+            'qty'        => $row->qty,
+            'igst'       => $row->igst,
+            'rate'       => $netRate,
         ]]);
     }
 
@@ -225,7 +240,7 @@ class DamageLookupController extends Controller
     {
         $u = $request->user();
         $rows = DB::table('saleable_non_saleable')
-            ->orderBy('id')
+            ->where('company_id', $u->company_id)
             ->get(['id', 'name']);
 
         return response()->json(['data' => $rows]);

@@ -466,7 +466,8 @@ class DgrClaimController extends Controller
     private function uploadDocs(Request $request, string $type, string $orderId): array
     {
         $doc = array_fill_keys(array_map(fn($i) => "doc_{$i}", range(1, 17)), '');
-        $dir = public_path('myuploads/dgr_claims');
+        $dir = public_path('myupload/claim');// my path to save claims
+        //'/var/www/www-demo-msell-in/public_html/client/myuploads/dgr_claims/'; old path
         if (!is_dir($dir)) mkdir($dir, 0775, true);
 
         $put = function ($file, $prefix) use ($dir) {
