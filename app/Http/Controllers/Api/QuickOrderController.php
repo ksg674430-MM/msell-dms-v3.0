@@ -64,6 +64,21 @@ class QuickOrderController extends Controller
         return $allowed ? $requested : null;
     }
 
+    private function canAccessOrder(array $ctx, $order): bool
+    {
+        if (!$order || (int) $order->company_id !== (int) $ctx['company_id']) {
+            return false;
+        }
+        $role_id = (int) $ctx['role_id'];
+        if ($role_id === 1 || (int) $order->dealer_id === (int) $ctx['dealer_id']) {
+            return true;
+        }
+        if (in_array($role_id, [37, 823], true)) {
+            return (string) $order->sale_div_code === (string) $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']);
+        }
+        return false;
+    }
+
     private function dealerRate(array $ctx, $itemCode, $mode = 0)
     {
         $company_id = $ctx['company_id'];
@@ -1119,6 +1134,10 @@ class QuickOrderController extends Controller
         // encrypted id from UI → decrypt
         try { $uid = Crypt::decryptString($id); } catch (\Throwable $e) { $uid = (int) $id; }
 
+        if (!$this->canAccessOrder($ctx, DB::table('demand_order')->where('id', $uid)->first())) {
+            return response()->json(['status' => false, 'message' => 'Order not found'], 404);
+        }
+
         $converstion_unit_item_code = DB::table('catalog_product')
             ->where('company_id', $company_id)
             ->groupBy('id')
@@ -1222,7 +1241,7 @@ class QuickOrderController extends Controller
             ->where('demand_order.order_id', $uid)
             ->first();
 
-        if (!$head) {
+        if (!$head || !$this->canAccessOrder($ctx, DB::table('demand_order')->where('order_id', $uid)->first())) {
             return response()->json(['status' => false, 'message' => 'Order not found'], 404);
         }
 
@@ -1303,9 +1322,20 @@ class QuickOrderController extends Controller
     public function sendToErp(Request $request)
     {
         $ctx = $this->context($request);
+        if ((int) $ctx['role_id'] !== 37) {
+            return response()->json(['status' => false, 'message' => 'Only a depot can send orders to ERP.'], 403);
+        }
 
-        $ids       = (array) $request->order_no;
-        $unchecked = (array) $request->checkbox_uncheck;
+        $scope = fn (array $ids) => DB::table('demand_order')
+            ->whereIn('id', $ids)
+            ->where('company_id', $ctx['company_id'])
+            ->where('sale_div_code', $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']))
+            ->where('dealer_id', '<>', $ctx['dealer_id'])
+            ->pluck('id')
+            ->all();
+
+        $ids       = $scope((array) $request->order_no);
+        $unchecked = $scope((array) $request->checkbox_uncheck);
 
         if ($unchecked) {
             DB::table('demand_order')->whereIn('id', $unchecked)->update([
@@ -1320,7 +1350,7 @@ class QuickOrderController extends Controller
             ]);
         }
 
-        return response()->json(['status' => true, 'message' => 'ERP flag updated']);
+        return response()->json(['status' => true, 'message' => count($ids) . ' order(s) sent to ERP.']);
     }
 
     /* ============================================================
