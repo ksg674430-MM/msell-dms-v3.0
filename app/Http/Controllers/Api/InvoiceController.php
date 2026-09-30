@@ -285,6 +285,8 @@ class InvoiceController extends Controller
             'items.*.cd'         => 'nullable|numeric|min:0',
             'items.*.dis_type'   => 'nullable|integer|in:1,2',
             'items.*.dis_amt'    => 'nullable|numeric|min:0',
+            'items.*.spl_disc_amt' => 'nullable|numeric|min:0',
+            'items.*.cash_amt'   => 'nullable|numeric|min:0',
             'items.*.batch_no'   => 'nullable|string|max:11',
             'items.*.mfg_date'   => 'nullable|date',
         ]);
@@ -343,12 +345,14 @@ class InvoiceController extends Controller
                 $disAmt  = $disType === 1 ? round($gross * $disVal / 100, 2) : round($disVal, 2);
 
                 // FIX #2: ATD % applied on amount AFTER trade discount
-                $afterTrade = $gross - $disAmt;
+                $splAmt  = round((float) ($row['spl_disc_amt'] ?? 0), 2);
+                $cashAmt = round((float) ($row['cash_amt'] ?? 0), 2);
+                $afterTrade = $gross - $disAmt - $splAmt - $cashAmt;
                 $cdType = (int)   ($row['cd_type'] ?? 1);
                 $cdVal  = (float) ($row['cd'] ?? 0);
                 $cdAmt  = $cdType === 1 ? round($afterTrade * $cdVal / 100, 2) : round($cdVal, 2);
 
-                $taxable = round($gross - $cdAmt - $disAmt, 2);
+                $taxable = round($afterTrade - $cdAmt, 2);
                 $vatAmt  = round($taxable * $taxPercent / 100, 2);
 
                 // FIX #1: legacy stores GST-inclusive line total
@@ -387,6 +391,8 @@ class InvoiceController extends Controller
                     'dis_type'      => $disType,
                     'dis_amt'       => $disAmt,
                     'dis_percent'   => $disType === 1 ? $disVal : 0,
+                    'spl_disc_amt'  => $splAmt,
+                    'cash_amt'      => $cashAmt,
                     'batch_no'      => $batchNo,
                     'mfg_date'      => $mfgDate,
                     'user_id'       => (int) ($validated['user_id'] ?? $invoice->ch_user_id),
