@@ -105,6 +105,9 @@ class DealerPaymentController extends Controller
             ->where('old_payment_dues.ch_dealer_id', $dealer_id)
             ->where('old_payment_dues.payment_status', '0');
 
+        if ($request->filled('retailer_id')) {
+            $query->where('old_payment_dues.ch_retailer_id', (string) $request->retailer_id);
+        }
         if ($request->filled('name')) {
             $query->where('retailer.name', 'LIKE', '%' . $request->name . '%');
         }
@@ -132,8 +135,24 @@ class DealerPaymentController extends Controller
             'retailer_id'   => 'required|array|min:1',
             'retailer_id.*' => 'required',
             'amount'        => 'required|array|min:1',
-            'amount.*'      => 'required|numeric|min:0',
+            'amount.*'      => 'required|numeric|gt:0',
+        ], [
+            'amount.*.gt' => 'Every row needs an amount greater than 0.',
         ]);
+
+        $retailer_ids = array_map('strval', $request->retailer_id);
+        $own = DB::table('retailer')
+            ->where('dealer_id', $dealer_id)
+            ->whereIn('id', $retailer_ids)
+            ->pluck('id')
+            ->map(fn ($v) => (string) $v)
+            ->all();
+        if (array_diff($retailer_ids, $own)) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Select retailers from your own retailer list.',
+            ], 422);
+        }
 
         DB::beginTransaction();
 
@@ -144,8 +163,9 @@ class DealerPaymentController extends Controller
                 $amount = $request->amount[$k] ?? 0;
 
                 $lastId = DB::table('old_payment_dues')->insertGetId([
+                    'company_id'     => $ctx['company_id'],
                     'ch_dealer_id'   => $dealer_id,
-                    'ch_retailer_id' => $retailer_id,
+                    'ch_retailer_id' => (string) $retailer_id,
                     'amount'         => $amount,
                     'remaining'      => $amount,
                     'payment_status' => '0',
