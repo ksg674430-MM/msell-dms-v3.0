@@ -48,6 +48,9 @@ use App\Http\Controllers\Api\DepotDamageInvoiceController;
 use App\Http\Controllers\Api\DepotDamageLookupController;
 
 
+use App\Http\Controllers\Api\ChangePasswordController;
+
+
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -61,6 +64,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ========================================================
     Route::get('/me',      [AuthController::class, 'me']);       // app load pe user info
     Route::post('/logout', [AuthController::class, 'logout']);   // MENU: Logout button
+    Route::post('/change-password', [ChangePasswordController::class, 'update']);
 
     // ========================================================
     // MENU  → MENU: Sidebar / Hamburger
