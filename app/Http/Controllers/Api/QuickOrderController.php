@@ -41,6 +41,124 @@ class QuickOrderController extends Controller
         ];
     }
 
+    private function allowedDealerId(array $ctx, $requested)
+    {
+        $own = (int) $ctx['dealer_id'];
+        $requested = (int) $requested;
+        if (!$requested || $requested === $own) {
+            return $own;
+        }
+        if ((int) ($ctx['dealer']->is_depo ?? 0) !== 1) {
+            return null;
+        }
+        $login = DB::table('dealer_person_login')
+            ->where('dealer_id', $own)
+            ->where('company_id', $ctx['company_id'])
+            ->first();
+        $allowed = $login && DB::table('dealer')
+            ->where('id', $requested)
+            ->where('company_id', $ctx['company_id'])
+            ->where('csa_id', $login->csa_id)
+            ->where('dealer_status', 1)
+            ->exists();
+        return $allowed ? $requested : null;
+    }
+
+    private function dealerRate(array $ctx, $itemCode, $mode = 0)
+    {
+        $company_id = $ctx['company_id'];
+        $state_id   = $ctx['dealer']->state_id ?? 0;
+        if (empty($state_id)) {
+            $csa_data = DB::table('csa')->where('c_id', $ctx['dealer']->csa_id ?? 0)->first();
+            $state_id = $csa_data->state_id ?? 0;
+        }
+
+        $rate = DB::table('product_rate_list')
+            ->where('product_id', $itemCode)
+            ->where('state_id', $state_id)
+            ->where('company_id', $company_id)
+            ->first()
+            ?: DB::table('product_rate_list')
+                ->where('product_id', $itemCode)
+                ->where('company_id', $company_id)
+                ->first();
+
+        if (!$rate) {
+            return null;
+        }
+
+        $login = DB::table('dealer_person_login')
+            ->where('company_id', $company_id)
+            ->where('dealer_id', $ctx['dealer_id'])
+            ->first();
+        $qtyType = $login->order_quantity_type ?? 0;
+
+        if ($company_id == 44) {
+            $result = $rate->dealer_rate;
+        } elseif ($company_id == 206) {
+            $result = $rate->dealer_pcs_rate;
+        } elseif ($qtyType == 1) {
+            $result = ((int) $mode === 1) ? $rate->ss_case_rate : $rate->dealer_rate;
+        } else {
+            $result = ((int) $mode === 1) ? $rate->ss_pcs_rate : $rate->dealer_pcs_rate;
+        }
+
+        $um = 'PCS';
+        if (in_array($company_id, [243, 213, 331], true)) {
+            $um = $qtyType == 1 ? 'BOX' : 'PCS';
+        }
+
+        return ['rate' => (float) $result, 'um' => $um];
+    }
+
+    private function dealerScheme(array $ctx, $productId, float $qty, float $rate): array
+    {
+        $none   = ['rate' => $rate, 'percent' => 0.0];
+        $dealer = $ctx['dealer'];
+        if (empty($dealer->state_id) || $qty <= 0 || $rate <= 0) {
+            return $none;
+        }
+
+        $today = date('Y-m-d');
+        $q = DB::table('product_wise_scheme_plan_details')
+            ->where('product_id', $productId)
+            ->where('state_id', $dealer->state_id)
+            ->where('company_id', $ctx['company_id'])
+            ->whereDate('valid_from_date', '<=', $today)
+            ->whereDate('valid_to_date', '>=', $today);
+        if (!empty($dealer->ownership_type_id)) {
+            $q->where('ownership_type', $dealer->ownership_type_id);
+        }
+        $s = $q->first();
+        if (!$s) {
+            return $none;
+        }
+
+        $last = trim((string) $s->sale_value_range_last);
+        if ($qty < (float) $s->sale_value_range_first || ($last !== '~' && $qty > (float) $last)) {
+            return $none;
+        }
+
+        $value = (float) $s->value_amount_percentage;
+        if ((int) $s->sale_unit === 5) {
+            if ((int) $s->incentive_type === 1) {
+                return ['rate' => round($rate - ($rate * $value / 100), 2), 'percent' => 0.0];
+            }
+            if ((int) $s->incentive_type === 2 && $value > 0) {
+                return ['rate' => $value, 'percent' => 0.0];
+            }
+            return $none;
+        }
+
+        return (int) $s->incentive_type === 1 ? ['rate' => $rate, 'percent' => $value] : $none;
+    }
+
+    private function lineTotal(float $rate, float $qty, float $percent): float
+    {
+        $gross = $rate * $qty;
+        return round($gross - ($gross * $percent / 100), 2);
+    }
+
     /** Resolve division code (used across listing + store). */
     private function resolveDivCode($dealer_id, $dealer_code)
     {
@@ -236,7 +354,6 @@ class QuickOrderController extends Controller
         // ---------- Already-in-cart products ----------
         $record_product_id = DB::table('demand_order_cart')
             ->join('demand_order_details_cart', 'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
-            ->join('WWW_WEB_ITEM_DISPLAY', 'WWW_WEB_ITEM_DISPLAY.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
             ->where('demand_order_cart.dealer_id', $dealer_id)
             ->groupBy('demand_order_details_cart.product_id')
             ->pluck('product_id')->toArray();
@@ -258,7 +375,7 @@ class QuickOrderController extends Controller
         $catalog_product_details = DB::table('catalog_product')
             ->select('id', 'itemcode', 'name', 'catalog_id', 'quantity_per_case', 'gst_percent',
                 DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
-            ->whereNotIn('itemcode', $record_product_id)
+            ->whereNotIn('id', $record_product_id)
             ->where('status', '=', '1')
             ->where('catalog_product.company_id', $company_id)
             ->orderBy('itemcode', 'ASC')
@@ -333,13 +450,36 @@ class QuickOrderController extends Controller
             $orderDate = $request->order_date ?: date('Y-m-d');
 
             // ---- Resolve dealer ----
-            $dealer_id_cus = ($request->dealer_id_cus_select == '1')
-                ? $dealer_id
-                : ($request->dealer_id_cus ?: $dealer_id);
+            $dealer_id_cus = $this->allowedDealerId(
+                $ctx,
+                $request->dealer_id_cus_select == '1' ? $dealer_id : $request->dealer_id_cus
+            );
+            if (!$dealer_id_cus) {
+                DB::rollBack();
+                return response()->json(['status' => false, 'message' => 'You cannot place an order for this distributor.'], 403);
+            }
 
             // ---- Excel import path ----
-            if ($request->filled('uploadExcelData')) {
+            if ($request->hasFile('uploadExcelData')) {
                 return $this->importFromCsv($request, $orderDate, $dealer_id_cus, $ctx);
+            }
+
+            $item_code = array_values(array_filter((array) ($request->item_code ?? []), fn ($v) => $v !== null && $v !== ''));
+            $valid_ids = DB::table('catalog_product')
+                ->whereIn('id', $item_code)
+                ->where('company_id', $company_id)
+                ->where('status', 1)
+                ->pluck('id')
+                ->map(fn ($v) => (string) $v)
+                ->toArray();
+            $invalid = array_values(array_diff(array_map('strval', $item_code), $valid_ids));
+            if (!empty($invalid)) {
+                DB::rollBack();
+                return response()->json([
+                    'status'  => false,
+                    'message' => 'Invalid product id(s): ' . implode(', ', $invalid),
+                    'data'    => ['invalid_ids' => $invalid],
+                ], 422);
             }
 
             // ---- Determine sale_div_code / status ----
@@ -367,6 +507,9 @@ class QuickOrderController extends Controller
                 $order_id   = $check->order_id;
                 $uid        = $check->id;
                 $order_date = $check->order_date;
+                if (filled($request->final_remarks)) {
+                    DB::table('demand_order_cart')->where('id', $uid)->update(['order_remark' => mb_substr((string) $request->final_remarks, 0, 150)]);
+                }
             } else {
                 $insert = DB::table('demand_order_cart')->insertGetId([
                     'order_id'          => $order_id,
@@ -378,8 +521,8 @@ class QuickOrderController extends Controller
                     'company_id'        => $company_id,
                     'sale_div_code'     => $sale_div_code,
                     'csa_id'            => $ctx['csa_id'],
-                    'order_remark'      => $request->final_remarks ?? '',
-                    'total_value'       => is_array($request->total_rs) ? array_sum($request->total_rs) : 0,
+                    'order_remark'      => mb_substr((string) ($request->final_remarks ?? ''), 0, 150),
+                    'total_value'       => 0,
                     'vr_no_define'      => $depo_dealer_status,
                 ]);
                 $uid = $insert;
@@ -387,31 +530,65 @@ class QuickOrderController extends Controller
 
             // ---- Update-in-place of a single row ----
             if ($request->update_qty_status == '1') {
-                DB::table('demand_order_details_cart')
+                $update_qty = (float) $request->update_qty;
+                $line = DB::table('demand_order_details_cart')
                     ->where('product_id', $request->update_product_id)
-                    ->where('order_id', $request->update_order_id_c)
+                    ->where('order_id', $order_id)
+                    ->first();
+                if (!$line || $update_qty <= 0) {
+                    DB::rollBack();
+                    return response()->json(['status' => false, 'message' => $line ? 'Quantity must be greater than 0.' : 'Item not found in your cart.'], 422);
+                }
+                $base = $this->dealerRate($ctx, $line->product_id, $request->for_self_for_db);
+                $baseRate = $base['rate'] ?? (float) $line->rate;
+                $scheme = $this->dealerScheme($ctx, $line->product_id, $update_qty, $baseRate);
+                $total = $this->lineTotal($scheme['rate'], $update_qty, $scheme['percent']);
+                $discount = $this->commonDiscountFunction($dealer_id, $line->product_id, $total);
+                DB::table('demand_order_details_cart')
+                    ->where('id', $line->id)
                     ->update([
-                        'quantity' => $request->update_qty,
-                        'free_qty' => $request->update_free_qty,
-                        'total_rs' => $request->update_total_rs,
+                        'rate'     => $scheme['rate'],
+                        'quantity' => $update_qty,
+                        'free_qty' => 0,
+                        'total_rs' => $total,
+                        'order_converstion_unit' => $line->order_unit === 'PCS' ? $update_qty : $line->order_converstion_unit,
+                        't1_rate'  => $discount[1] ?? '0',
+                        'atd_rate' => $discount[0] ?? '0',
+                        't1_rate_perc' => $discount[2] ?? '0',
                     ]);
             }
 
             // ---- Insert new rows ----
-            $item_code           = $request->item_code           ?? [];
-            $product_rate        = $request->product_rate        ?? [];
-            $unit_configuration  = $request->unit_configuration  ?? [];
-            $qty                 = $request->qty                 ?? [];
-            $free_qty            = $request->free_qty            ?? [];
-            $total_rs            = $request->total_rs            ?? [];
-            $scheme_qty_w_free   = $request->scheme_qty_with_free_qty ?? [];
-            $remarks             = $request->remarks             ?? [];
+            $raw_items = (array) ($request->item_code ?? []);
+            $qty       = array_values((array) ($request->qty ?? []));
+            $remarks   = array_values((array) ($request->remarks ?? []));
+            $raw_items = array_values($raw_items);
+
+            $in_cart = DB::table('demand_order_details_cart')
+                ->where('order_id', $order_id)
+                ->pluck('product_id')
+                ->map(fn ($v) => (string) $v)
+                ->toArray();
 
             $rows = [];
-            foreach ($item_code as $k => $value) {
-                if (empty($value) || empty($qty[$k]) || empty($total_rs[$k])) {
+            foreach ($raw_items as $k => $value) {
+                $line_qty = (float) ($qty[$k] ?? 0);
+                if ($value === null || $value === '' || $line_qty <= 0) {
                     continue;
                 }
+                if (in_array((string) $value, $in_cart, true)) {
+                    DB::rollBack();
+                    return response()->json(['status' => false, 'message' => "Product {$value} is already in your cart."], 422);
+                }
+                $in_cart[] = (string) $value;
+
+                $base = $this->dealerRate($ctx, $value, $request->for_self_for_db);
+                if (!$base || $base['rate'] <= 0) {
+                    DB::rollBack();
+                    return response()->json(['status' => false, 'message' => "Rate not found for product {$value}."], 422);
+                }
+                $scheme   = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
+                $line_total = $this->lineTotal($scheme['rate'], $line_qty, $scheme['percent']);
 
                 $mrp_details = DB::table('product_rate_list')
                     ->where('product_id', $value)
@@ -419,24 +596,24 @@ class QuickOrderController extends Controller
                     ->where('company_id', $company_id)
                     ->first();
 
-                if (($unit_configuration[$k] ?? 'PCS') === 'PCS') {
-                    $order_conv = $qty[$k];
+                if ($base['um'] === 'PCS') {
+                    $order_conv = $line_qty;
                 } else {
                     $cd         = DB::table('ITEM_AUM_MAST')->where('ITEM_CODE', $value)->first();
-                    $order_conv = ($cd->UMTOAUM ?? 0) * $qty[$k];
+                    $order_conv = ($cd->UMTOAUM ?? 0) * $line_qty;
                 }
 
-                $discount = $this->commonDiscountFunction($dealer_id, $value, $total_rs[$k]);
+                $discount = $this->commonDiscountFunction($dealer_id, $value, $line_total);
 
                 $rows[] = [
                     'order_id'                  => $order_id,
                     'product_id'                => $value,
-                    'rate'                      => $product_rate[$k] ?? '',
+                    'rate'                      => $scheme['rate'],
                     'mrp'                       => $mrp_details->mrp ?? '0',
-                    'quantity'                  => $qty[$k],
+                    'quantity'                  => $line_qty,
                     'scheme_qty'                => 0,
-                    'free_qty'                  => $free_qty[$k] ?? '',
-                    'order_unit'                => $unit_configuration[$k] ?? '',
+                    'free_qty'                  => 0,
+                    'order_unit'                => $base['um'],
                     'order_converstion_unit'    => $order_conv,
                     'purchase_inv'              => '',
                     'mfg_date'                  => '0000-00-00',
@@ -446,9 +623,9 @@ class QuickOrderController extends Controller
                     'pr_rate'                   => '',
                     'gst'                       => '',
                     'cases'                     => '',
-                    'total_rs'                  => $total_rs[$k],
-                    'remarks'                   => $remarks[$k] ?? '',
-                    'scheme_qty_with_free_qty'  => $scheme_qty_w_free[$k] ?? '0',
+                    'total_rs'                  => $line_total,
+                    'remarks'                   => mb_substr((string) ($remarks[$k] ?? ''), 0, 25),
+                    'scheme_qty_with_free_qty'  => '0',
                     't1_rate'                   => $discount[1] ?? '0',
                     'atd_rate'                  => $discount[0] ?? '0',
                     't1_rate_perc'              => $discount[2] ?? '0',
@@ -457,30 +634,10 @@ class QuickOrderController extends Controller
 
             if ($rows) {
                 DB::table('demand_order_details_cart')->insert($rows);
+                DB::table('demand_order_cart')->where('id', $uid)->update([
+                    'total_value' => DB::table('demand_order_details_cart')->where('order_id', $order_id)->sum('total_rs'),
+                ]);
             }
-
-            $item_code = $request->item_code ?? [];
-
-$valid_ids = DB::table('catalog_product')
-    ->whereIn('id', $item_code)
-    ->where('company_id', $company_id)
-    ->where('status', 1)
-    ->pluck('id')
-    ->toArray();
-
-$invalid = array_values(array_diff($item_code, $valid_ids));
-
-if (!empty($invalid)) {
-    DB::rollBack();
-    return response()->json([
-        'status'  => false,
-        'message' => 'Invalid product id(s): ' . implode(', ', $invalid),
-        'data'    => [
-            'invalid_ids' => $invalid,
-            'hint'        => 'Send catalog_product.id, not itemcode. Call GET /quick-orders/create-data for valid ids.',
-        ],
-    ], 422);
-}
 
             DB::commit();
 
@@ -518,36 +675,56 @@ if (!empty($invalid)) {
             return response()->json(['status' => false, 'message' => 'Invalid CSV file'], 422);
         }
 
-        $order_id     = date('YmdHi') . $ctx['dealer_id'];
-        $total_amount = [];
+        $company_id = $ctx['company_id'];
+        $order_id   = date('YmdHis') . $ctx['dealer_id'];
+        $lines      = [];
+        $line_no    = 1;
 
-        fgetcsv($fh, 1000, ","); // skip header
+        fgetcsv($fh, 1000, ",");
         while (($row = fgetcsv($fh, 1000, ",")) !== false) {
-            if (count($row) !== 3) {
-                DB::rollBack();
-                return response()->json(['status' => false, 'message' => 'Bad CSV format'], 422);
+            $line_no++;
+            if (count(array_filter($row, fn ($c) => trim((string) $c) !== '')) === 0) {
+                continue;
             }
-            [, $product_id, $quantity] = $row;
+            if (count($row) !== 3) {
+                fclose($fh);
+                DB::rollBack();
+                return response()->json(['status' => false, 'message' => "Row {$line_no}: expected 3 columns (SNO, Product Id, Quantity)."], 422);
+            }
+            $product_id = trim((string) $row[1]);
+            $quantity   = (float) str_replace(',', '', trim((string) $row[2]));
 
-            $prod = DB::table('product_rate_list')
-                ->select('ss_case_rate as rate', 'mrp')
-                ->where('product_id', $product_id)->first();
+            $valid = DB::table('catalog_product')
+                ->where('id', $product_id)
+                ->where('company_id', $company_id)
+                ->where('status', 1)
+                ->exists();
+            if (!$valid || $quantity <= 0) {
+                fclose($fh);
+                DB::rollBack();
+                return response()->json(['status' => false, 'message' => "Row {$line_no}: " . (!$valid ? "product {$product_id} not found." : 'quantity must be greater than 0.')], 422);
+            }
 
-            $rate  = $prod->rate ?? 0;
-            $mrp   = $prod->mrp  ?? 0;
-            $total = $rate * $quantity;
-            $total_amount[] = $total;
+            $base = $this->dealerRate($ctx, $product_id);
+            if (!$base || $base['rate'] <= 0) {
+                fclose($fh);
+                DB::rollBack();
+                return response()->json(['status' => false, 'message' => "Row {$line_no}: rate not found for product {$product_id}."], 422);
+            }
+            $scheme = $this->dealerScheme($ctx, $product_id, $quantity, $base['rate']);
+            $total  = $this->lineTotal($scheme['rate'], $quantity, $scheme['percent']);
+            $mrp    = DB::table('product_rate_list')->where('product_id', $product_id)->where('company_id', $company_id)->value('mrp');
 
-            DB::table('demand_order_details')->insert([
+            $lines[] = [
                 'order_id'                  => $order_id,
                 'product_id'                => $product_id,
-                'rate'                      => $rate,
-                'mrp'                       => $mrp,
+                'rate'                      => $scheme['rate'],
+                'mrp'                       => $mrp ?? 0,
                 'quantity'                  => $quantity,
                 'scheme_qty'                => 0,
                 'free_qty'                  => '0',
-                'order_unit'                => 'PCS',
-                'order_converstion_unit'    => '0',
+                'order_unit'                => $base['um'],
+                'order_converstion_unit'    => $base['um'] === 'PCS' ? $quantity : 0,
                 'purchase_inv'              => '',
                 'mfg_date'                  => '0000-00-00',
                 'expiry_date'               => '0000-00-00',
@@ -562,14 +739,33 @@ if (!empty($invalid)) {
                 't1_rate'                   => '0',
                 'atd_rate'                  => '0',
                 't1_rate_perc'              => '0',
-            ]);
+            ];
         }
         fclose($fh);
 
+        if (!$lines) {
+            DB::rollBack();
+            return response()->json(['status' => false, 'message' => 'The file has no order rows.'], 422);
+        }
+
+        DB::table('demand_order_details')->insert($lines);
+        DB::table('purchase_order_details')->insert(array_map(fn ($l) => [
+            'id'         => $order_id,
+            'order_id'   => $order_id,
+            'product_id' => $l['product_id'],
+            'rate'       => $l['rate'],
+            'quantity'   => $l['quantity'],
+            'scheme_qty' => 0,
+            'cases'      => 0,
+            'pcs'        => 0,
+            'pr_rate'    => 0,
+            'company_id' => $company_id,
+        ], $lines));
+
         DB::table('demand_order')->insert([
             'order_id'          => $order_id,
-            'dealer_id'         => $ctx['dealer_id'],
-            'company_id'        => $ctx['company_id'],
+            'dealer_id'         => $dealer_id_cus,
+            'company_id'        => $company_id,
             'created_date'      => $orderDate . ' ' . date('H:i:s'),
             'order_date'        => $orderDate,
             'created_person_id' => $ctx['dealer_id'],
@@ -577,15 +773,32 @@ if (!empty($invalid)) {
             'sale_div_code'     => 'JH',
             'csa_id'            => $ctx['csa_id'],
             'order_remark'      => '',
-            'total_value'       => array_sum($total_amount),
+            'total_value'       => array_sum(array_column($lines, 'total_rs')),
             'vr_no_define'      => '',
+        ]);
+
+        DB::table('purchase_order')->insert([
+            'id'                       => $order_id,
+            'order_id'                 => $order_id,
+            'dealer_id'                => $dealer_id_cus,
+            'created_date'             => $orderDate . ' ' . date('H:i:s'),
+            'created_person_id'        => $ctx['dealer_id'],
+            'sale_date'                => $orderDate,
+            'receive_date'             => null,
+            'date_time'                => $orderDate . ' ' . date('H:i:s'),
+            'company_id'               => $company_id,
+            'vehicle_id'               => 11,
+            'dms_manual_order_status'  => 0,
+            'dms_order_reason_id'      => 2,
+            'd_palnt_id'               => 0,
+            'dms_order_confirm_remaks' => 'NA',
         ]);
 
         DB::commit();
 
         return response()->json([
             'status'  => true,
-            'message' => 'Imported successfully',
+            'message' => 'Order uploaded successfully (' . count($lines) . ' items).',
             'data'    => ['order_id' => $order_id],
         ]);
     }
@@ -602,13 +815,13 @@ if (!empty($invalid)) {
         $role_id    = $ctx['role_id'];
         $csa_id     = $ctx['csa_id'];
 
-        $order_date       = date('Y-m-d', strtotime($request->order_date));
         $order_id_for_use = $request->order_id_for_use;
 
         $head = DB::table('demand_order_cart')->where('id', $order_id_for_use)->first();
-        if (!$head) {
+        if (!$head || $this->allowedDealerId($ctx, $head->dealer_id) !== (int) $head->dealer_id) {
             return response()->json(['status' => false, 'message' => 'Cart not found'], 404);
         }
+        $order_date = date('Y-m-d', strtotime($request->order_date ?: $head->order_date));
 
         $lines = DB::table('demand_order_details_cart')
             ->join('demand_order_cart', 'demand_order_cart.order_id', '=', 'demand_order_details_cart.order_id')
@@ -750,11 +963,14 @@ if (!empty($invalid)) {
     {
         $ctx           = $this->context($request);
         $company_id    = $ctx['company_id'];
-        $dealer_id_cus = $request->dealer_id_cus ?: $ctx['dealer_id'];
+        $dealer_id_cus = $this->allowedDealerId($ctx, $request->dealer_id_cus);
+        if (!$dealer_id_cus) {
+            return response()->json(['status' => false, 'message' => 'You cannot view this distributor\'s cart.'], 403);
+        }
 
         $head = DB::table('demand_order_cart')
             ->join('dealer', 'dealer.id', '=', 'demand_order_cart.dealer_id')
-            ->select('dealer.*', 'demand_order_cart.id as ppid')
+            ->select('dealer.*', 'demand_order_cart.id as ppid', 'demand_order_cart.order_remark as cart_remark')
             ->where('demand_order_cart.dealer_id', $dealer_id_cus)
             ->first();
 
@@ -775,6 +991,7 @@ if (!empty($invalid)) {
                 'order_id'    => 'B-' . $uid,
                 'order_date'  => $order_date,
                 'party_name'  => $head->name ?? '',
+                'order_remark' => $head->cart_remark ?? '',
                 'final_out'   => $final_out,
                 'dealer_id_cus' => $dealer_id_cus,
             ],
@@ -860,12 +1077,21 @@ if (!empty($invalid)) {
 
         $ctx = $this->context($request);
 
+        $cart = DB::table('demand_order_cart')->where('id', $request->order_id)->first();
+        if (!$cart || $this->allowedDealerId($ctx, $cart->dealer_id) !== (int) $cart->dealer_id) {
+            return response()->json(['status' => false, 'message' => 'Cart not found'], 404);
+        }
+
         DB::table('demand_order_details_cart')
             ->where('product_id', $request->product_id)
             ->where('id', $request->id)
+            ->where('order_id', $cart->order_id)
             ->delete();
+        DB::table('demand_order_cart')->where('id', $cart->id)->update([
+            'total_value' => DB::table('demand_order_details_cart')->where('order_id', $cart->order_id)->sum('total_rs'),
+        ]);
 
-        $final_out  = $this->buildCartPayload($ctx['dealer_id'], $request->order_id, $ctx['company_id'], $order_date);
+        $final_out  = $this->buildCartPayload($cart->dealer_id, $request->order_id, $ctx['company_id'], $order_date);
         $head       = DB::table('demand_order_cart')->where('id', $request->order_id)->first();
 
         return response()->json([
@@ -1106,32 +1332,10 @@ if (!empty($invalid)) {
         $ctx        = $this->context($request);
         $company_id = $ctx['company_id'];
 
-        $item_code     = $request->item_code;
-        $dealer_id     = $request->auth_id     ?: $ctx['dealer_id'];
-        $dealer_id_cus = $request->dealer_id_cus ?: $ctx['dealer_id'];
-        $catg          = $request->catg;
+        $item_code      = $request->item_code;
+        $dealer_id_cus  = $this->allowedDealerId($ctx, $request->dealer_id_cus) ?? $ctx['dealer_id'];
+        $catg           = $request->catg;
         $item_codes_str = array_filter(explode(',', (string) $request->item_codes_str));
-
-        $get_state = DB::table('dealer')->where('id', $dealer_id)->first();
-        $state_id  = $get_state->state_id ?? 0;
-        if (empty($state_id)) {
-            $csa_id   = $get_state->csa_id ?? 0;
-            $csa_data = DB::table('csa')->where('c_id', $csa_id)->first();
-            $state_id = $csa_data->state_id ?? 0;
-        }
-
-        $rate = DB::table('product_rate_list')
-            ->where('product_id', $item_code)
-            ->where('state_id', $state_id)
-            ->where('company_id', $company_id)
-            ->first();
-
-        if (!$rate) {
-            $rate = DB::table('product_rate_list')
-                ->where('product_id', $item_code)
-                ->where('company_id', $company_id)
-                ->first();
-        }
 
         $blocked = DB::table('demand_order_cart')
             ->join('demand_order_details_cart', 'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
@@ -1150,13 +1354,9 @@ if (!empty($invalid)) {
         $products = $productsQ->groupBy('id')->orderBy('id', 'ASC')->get(['id', 'itemcode', 'name']);
 
         $item_mast = DB::table('catalog_product')->where('company_id', $company_id)->where('id', $item_code)->first();
+        $base      = $item_mast ? $this->dealerRate($ctx, $item_code, $request->for_self_for_db) : null;
 
-        $login = DB::table('dealer_person_login')
-            ->where('company_id', $company_id)
-            ->where('dealer_id', $ctx['dealer_id'])
-            ->first();
-
-        if (!$rate) {
+        if (!$base) {
             return response()->json([
                 'status'  => false,
                 'code'    => 401,
@@ -1165,37 +1365,22 @@ if (!empty($invalid)) {
             ]);
         }
 
-        // Rate selection rules (same logic as original, trimmed)
-        if ($company_id == 44) {
-            $result = $rate->dealer_rate;
-        } elseif ($company_id == 206) {
-            $result = $rate->dealer_pcs_rate;
-        } else {
-            $qtyType = $login->order_quantity_type ?? 0;
-            $mode    = (int) ($request->for_self_for_db ?? 0);
-
-            if ($qtyType == 1) {
-                $result = match ($mode) { 1 => $rate->ss_case_rate, 2 => $rate->dealer_rate, default => $rate->dealer_rate };
-            } else {
-                $result = match ($mode) { 1 => $rate->ss_pcs_rate, 2 => $rate->dealer_pcs_rate, default => $rate->dealer_pcs_rate };
-            }
-        }
-
-        $selection_um = 'PCS';
-        if (in_array($company_id, [243, 213, 331], true)) {
-            $qtyType = $login->order_quantity_type ?? 0;
-            $selection_um = $qtyType == 1 ? 'BOX' : 'PCS';
-        }
+        $qty    = (float) $request->input('qty', 0);
+        $scheme = $this->dealerScheme($ctx, $item_code, $qty, $base['rate']);
 
         return response()->json([
             'status'  => true,
             'code'    => 200,
             'message' => 'success',
             'data'    => [
-                'result'           => $result,
-                'item_mast_name'   => $item_mast->name ?? '',
+                'result'              => $base['rate'],
+                'item_mast_name'      => $item_mast->name ?? '',
                 'item_aum_mast_array' => $products,
-                'selection_size_um'=> $selection_um,
+                'selection_size_um'   => $base['um'],
+                'case_size'           => $item_mast->quantity_per_case ?? null,
+                'scheme_rate'         => $scheme['rate'],
+                'scheme_percent'      => $scheme['percent'],
+                'line_total'          => $this->lineTotal($scheme['rate'], $qty, $scheme['percent']),
             ],
         ]);
     }

@@ -519,12 +519,15 @@ class DispatchController extends Controller
     }
 
     /**
-     * Next dispatch sequence number (global count + 1).
+     * Next dispatch sequence number (highest used + 1).
      */
     private function nextDispatchNum(): int
     {
-        $row = DB::selectOne("SELECT COUNT(dispatch_no) AS total FROM daily_dispatch");
-        return ((int) ($row->total ?? 0)) + 1;
+        $row = DB::selectOne(
+            "SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(dispatch_no, '/', -1) AS UNSIGNED)), 0) AS last_num
+               FROM daily_dispatch"
+        );
+        return ((int) ($row->last_num ?? 0)) + 1;
     }
 
     /**
