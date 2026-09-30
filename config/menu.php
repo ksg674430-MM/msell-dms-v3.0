@@ -220,7 +220,7 @@ return [
             ['slug' => 'quick_order',     'label' => 'Quick Order',     'icon' => 'fa-caret-right', 'route' => '/orders/create'],
             ['slug' => 'order_history',   'label' => 'Order History',   'icon' => 'fa-caret-right', 'route' => '/orders'],
             ['slug' => 'order_status',    'label' => 'Order Status',    'icon' => 'fa-caret-right', 'route' => '/orders/status'],
-            ['slug' => 'invoice_details', 'label' => 'Invoice Details', 'icon' => 'fa-caret-right', 'route' => '/invoices'],
+            ['slug' => 'invoice_details', 'label' => 'Invoice Details', 'icon' => 'fa-caret-right', 'route' => '/orders/invoice-details'],
             // ['slug' => 'make_payment',    'label' => 'Make a Payment',  'icon' => 'fa-caret-right', 'route' => '/payments/create', 'exclude_companies' => [213]],
             // ['slug' => 'payment_history', 'label' => 'Payment History', 'icon' => 'fa-caret-right', 'route' => '/payments',        'exclude_companies' => [213]],
         ],

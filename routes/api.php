@@ -318,6 +318,7 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::post  ('/store-final',     [QuickOrderController::class, 'storeFinal']);       // cart → demand_order
     Route::post  ('/cart-data',       [QuickOrderController::class, 'cartDataForModal']); // cart modal
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
+    Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
     Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);             // perfoma / view order
     Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
     Route::post  ('/send-to-erp',     [QuickOrderController::class, 'sendToErp']);        // mark for ERP

@@ -907,6 +907,22 @@ class QuickOrderController extends Controller
             return response()->json(['status' => false, 'message' => 'Empty cart'], 422);
         }
 
+        $available = DB::table('catalog_product')
+            ->whereIn('id', $lines->pluck('product_id')->all())
+            ->where('company_id', $company_id)
+            ->where('status', 1)
+            ->pluck('id')
+            ->map(fn ($v) => (string) $v)
+            ->all();
+        $unavailable = $lines->reject(fn ($v) => in_array((string) $v->product_id, $available, true))->pluck('product_id')->all();
+        if ($unavailable) {
+            $names = DB::table('catalog_product')->whereIn('id', $unavailable)->pluck('name')->all() ?: $unavailable;
+            return response()->json([
+                'status'  => false,
+                'message' => 'Remove items that are not available for your company before processing: ' . implode(', ', $names),
+            ], 422);
+        }
+
         DB::beginTransaction();
         try {
             DB::table('demand_order_details')->insert($detailRows);
@@ -1031,12 +1047,7 @@ class QuickOrderController extends Controller
             'demand_order_cart.order_date   as cart_order_date',
             'demand_order_details_cart.*',
             'demand_order_details_cart.id   as pid',
-            'catalog_product.id             as cp_id',
-            'catalog_product.name           as cp_name',
-            'catalog_product.quantity_per_case as cp_qty_per_case',
-            'catalog_product.gst_percent    as cp_gst',
-            'catalog_2.id                   as cat2_id',
-            'catalog_2.name                 as cat2_name'
+            ...$this->orderLineColumns()
         )
         ->where('demand_order_cart.dealer_id', $dealer_id_cus)
         ->where('demand_order_cart.id', $uid)
@@ -1045,10 +1056,27 @@ class QuickOrderController extends Controller
         ->get();
 
     // 2) Group on the basis of catalog_2 
+    $order_date = $rows->first()->cart_order_date ?? $order_date;
+
+    return $this->groupOrderLines($rows);
+}
+
+    private function orderLineColumns(): array
+    {
+        return [
+            'catalog_product.id                as cp_id',
+            'catalog_product.name              as cp_name',
+            'catalog_product.quantity_per_case as cp_qty_per_case',
+            'catalog_product.gst_percent       as cp_gst',
+            'catalog_2.id                      as cat2_id',
+            'catalog_2.name                    as cat2_name',
+        ];
+    }
+
+    private function groupOrderLines($rows): array
+{
     $final_out = [];
     foreach ($rows as $v) {
-        $order_date = $v->cart_order_date;
-
         $catId   = $v->cat2_id   ?: 'uncategorized';
         $catName = $v->cat2_name ?: 'Uncategorized';
 
@@ -1061,8 +1089,8 @@ class QuickOrderController extends Controller
             'pid'                    => $v->pid,
             'order_id'               => $v->cart_order_id,
             'order_converstion_unit' => $v->order_converstion_unit,
-            'ITEM_CODE'              => $v->cp_id,
-            'ITEM_NAME'              => $v->cp_name,
+            'ITEM_CODE'              => $v->cp_id ?? $v->product_id,
+            'ITEM_NAME'              => $v->cp_name ?? ('Product #' . $v->product_id),
             'rate'                   => $v->rate,
             'order_unit'             => $v->order_unit,
             'quantity'               => $v->quantity,
@@ -1143,59 +1171,21 @@ class QuickOrderController extends Controller
             ->groupBy('id')
             ->pluck('quantity_per_case', 'id');
 
-        $product_ids = DB::table('demand_order')
-            ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
-            ->where('demand_order.company_id', $company_id)
-            ->where('demand_order.id', $uid)
-            ->groupBy('demand_order_details.product_id')
-            ->pluck('product_id')->toArray();
+        $order = DB::table('demand_order')->where('id', $uid)->first();
+        $head  = DB::table('dealer')->where('id', $order->dealer_id)->first();
 
-        $mktg_cat_array = DB::table('catalog_2')
-            ->join('catalog_product', 'catalog_product.catalog_id', '=', 'catalog_2.id')
-            ->whereIn('catalog_product.id', $product_ids)
-            ->where('catalog_2.company_id', $company_id)
-            ->orderBy('catalog_2.id', 'ASC')
-            ->pluck('catalog_2.name', 'catalog_2.id');
+        $rows = DB::table('demand_order_details')
+            ->leftJoin('catalog_product', 'catalog_product.id', '=', 'demand_order_details.product_id')
+            ->leftJoin('catalog_2', 'catalog_2.id', '=', 'catalog_product.catalog_id')
+            ->select('demand_order_details.*', 'demand_order_details.id as pid', 'demand_order_details.order_id as cart_order_id', ...$this->orderLineColumns())
+            ->where('demand_order_details.order_id', (string) $order->order_id)
+            ->orderBy('catalog_2.id')
+            ->orderBy('demand_order_details.id')
+            ->get();
 
-        $head = DB::table('demand_order')
-            ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
-            ->select('dealer.*', 'demand_order.order_remark as order_remark', 'demand_order.order_date as order_date')
-            ->where('dealer.company_id', $company_id)
-            ->where('demand_order.id', $uid)
-            ->first();
-
-        $final_out  = [];
-        $order_date = $head->order_date ?? '';
-        foreach ($mktg_cat_array as $catId => $catName) {
-            $rows = DB::table('demand_order')
-                ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
-                ->join('catalog_product', 'catalog_product.id', '=', 'demand_order_details.product_id')
-                ->where('catalog_product.catalog_id', $catId)
-                ->where('catalog_product.company_id', $company_id)
-                ->where('demand_order.id', $uid)
-                ->groupBy('demand_order_details.id')
-                ->get();
-
-            $out_2 = [];
-            foreach ($rows as $v) {
-                $out_2[] = [
-                    'total_rs'                => $v->total_rs,
-                    'order_converstion_unit'  => $v->order_converstion_unit,
-                    'ITEM_CODE'               => $v->id,
-                    'ITEM_NAME'               => $v->name,
-                    'rate'                    => $v->rate,
-                    'order_unit'              => $v->order_unit,
-                    'quantity'                => $v->quantity,
-                    'quantity_per_case'       => $v->quantity_per_case,
-                    'gst_percent'             => $v->gst_percent ?? '0',
-                    'free_qty'                => $v->free_qty,
-                    'remarks'                 => $v->remarks,
-                    't1_rate'                 => $v->t1_rate,
-                    'atd_rate'                => $v->atd_rate,
-                ];
-            }
-            $final_out[$catId] = ['name' => $catName, 'rows' => $out_2];
-        }
+        $final_out      = $this->groupOrderLines($rows);
+        $mktg_cat_array = array_map(fn ($g) => $g['name'], $final_out);
+        $order_date     = $order->order_date ?? '';
 
         $currMonth      = date('Y-m');
         $checkSuper     = DB::table('dealer')->where('dealer.company_id', $company_id)->where('id', $ctx['dealer_id'])->first();
@@ -1212,13 +1202,61 @@ class QuickOrderController extends Controller
             'data'    => [
                 'order_id'       => 'B-' . $uid,
                 'party_name'     => $head->name ?? '',
-                'order_remark'   => $head->order_remark ?? '',
+                'order_remark'   => $order->order_remark ?? '',
                 'order_date'     => $order_date,
                 'mktg_cat_array' => $mktg_cat_array,
                 'final_out'      => $final_out,
                 'converstion_unit_item_code' => $converstion_unit_item_code,
                 'checkSuper'     => $checkSuper,
                 'currMonthOrder' => $currMonthOrder,
+            ],
+        ]);
+    }
+
+    public function invoiceDetails(Request $request)
+    {
+        $ctx = $this->context($request);
+
+        $from_date = $request->filled('from_date') ? date('Y-m-d', strtotime($request->from_date)) : date('Y-m-d');
+        $to_date   = $request->filled('to_date') ? date('Y-m-d', strtotime($request->to_date)) : date('Y-m-d');
+        if ($from_date < '2021-04-01') {
+            $from_date = '2021-04-01';
+        }
+
+        $q = DB::table('purchase_order')
+            ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.order_id')
+            ->select(
+                'purchase_order.invoice_no_p',
+                DB::raw('MAX(purchase_order.sale_date) as sale_date'),
+                DB::raw("GROUP_CONCAT(DISTINCT purchase_order_details.order_id ORDER BY purchase_order_details.order_id SEPARATOR ', ') as order_ids"),
+                DB::raw("MAX(NULLIF(purchase_order.remarks, '')) as remarks"),
+                DB::raw("MAX(NULLIF(NULLIF(purchase_order.pdf_name2, ''), '0')) as pdf"),
+                DB::raw('SUM(purchase_order_details.inv_busy_amt) as amount')
+            )
+            ->where('purchase_order.dealer_id', $ctx['dealer_id'])
+            ->whereNotIn('purchase_order.invoice_no_p', ['0', ''])
+            ->whereDate('purchase_order.sale_date', '>=', $from_date)
+            ->whereDate('purchase_order.sale_date', '<=', $to_date);
+
+        if ($request->filled('ref_no')) {
+            $ref = '%' . trim((string) $request->ref_no) . '%';
+            $q->where(function ($w) use ($ref) {
+                $w->where('purchase_order.invoice_no_p', 'LIKE', $ref)
+                  ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
+            });
+        }
+
+        $rows = $q->groupBy('purchase_order.invoice_no_p')
+            ->orderBy('sale_date', 'DESC')
+            ->orderBy('purchase_order.invoice_no_p', 'ASC')
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'from_date' => $from_date,
+                'to_date'   => $to_date,
+                'rows'      => $rows,
             ],
         ]);
     }
