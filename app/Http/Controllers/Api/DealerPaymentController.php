@@ -203,11 +203,11 @@ class DealerPaymentController extends Controller
         $dealer_id = $ctx['dealer_id'];
 
         $beats = DB::table('dealer_location_rate_list as dlr')
-            ->join('location_5 as l5', 'l5.id', '=', 'dlr.location_id')
-            ->select('dlr.location_id as beat_id', 'l5.name as beat_name')
+            ->join('location_7 as l7', 'l7.id', '=', 'dlr.location_id')
+            ->select('dlr.location_id as beat_id', 'l7.name as beat_name')
             ->where('dlr.dealer_id', $dealer_id)
-            ->groupBy('dlr.location_id', 'l5.name')
-            ->orderBy('l5.name', 'ASC')
+            ->groupBy('dlr.location_id', 'l7.name')
+            ->orderBy('l7.name', 'ASC')
             ->get();
 
         return response()->json([
@@ -228,100 +228,91 @@ class DealerPaymentController extends Controller
         $ctx       = $this->context($request);
         $dealer_id = $ctx['dealer_id'];
 
-        $start = $request->filled('start') ? $request->start : date('Y-m-d');
-        $end   = $request->filled('end')   ? $request->end   : null;
+        $start = $request->filled('start') ? date('Y-m-d', strtotime($request->start)) : date('Y-m-d');
+        $end   = $request->filled('end') ? date('Y-m-d', strtotime($request->end)) : $start;
 
-        // Retailers having unpaid challans
-        $challanQuery = DB::table('challan_order')
-            ->select('ch_retailer_id as retailer_id', DB::raw('SUM(remaining) as challan_total'))
+        $scope = function ($q, string $column) use ($request, $dealer_id) {
+            if ($request->filled('retailer_id')) {
+                $q->where($column, (string) $request->retailer_id);
+            }
+            if ($request->filled('location_id')) {
+                $q->whereIn($column, DB::table('retailer')
+                    ->where('dealer_id', $dealer_id)
+                    ->where('location_id', $request->location_id)
+                    ->select('id'));
+            }
+            return $q;
+        };
+
+        $challan_ids = $scope(DB::table('challan_order')
             ->where('ch_dealer_id', $dealer_id)
-            ->where('payment_status', '!=', '1');
+            ->where('payment_status', '!=', '1')
+            ->whereDate('ch_date', '>=', $start)
+            ->whereDate('ch_date', '<=', $end), 'ch_retailer_id')
+            ->distinct()
+            ->pluck('ch_retailer_id')
+            ->map(fn ($v) => (string) $v)
+            ->all();
 
-        if ($end) {
-            $challanQuery->whereDate('ch_date', '>=', $start)
-                         ->whereDate('ch_date', '<=', $end);
-        } else {
-            $challanQuery->whereDate('ch_date', '=', $start);
+        $old_ids = $scope(DB::table('old_payment_dues')
+            ->where('ch_dealer_id', $dealer_id)
+            ->where('payment_status', '0')
+            ->where('remaining', '>', 0), 'ch_retailer_id')
+            ->distinct()
+            ->pluck('ch_retailer_id')
+            ->map(fn ($v) => (string) $v)
+            ->all();
+
+        $retailer_ids = array_values(array_unique(array_merge($challan_ids, $old_ids)));
+        if (!$retailer_ids) {
+            return response()->json(['status' => true, 'message' => 'Payment collection list', 'data' => ['records' => []]]);
         }
 
-        if ($request->filled('retailer_id')) {
-            $challanQuery->where('ch_retailer_id', $request->retailer_id);
-        }
+        $challan_due = DB::table('challan_order')
+            ->where('ch_dealer_id', $dealer_id)
+            ->where('payment_status', '!=', '1')
+            ->whereIn('ch_retailer_id', $retailer_ids)
+            ->groupBy('ch_retailer_id')
+            ->pluck(DB::raw('SUM(remaining)'), 'ch_retailer_id');
 
-        $challanRows = $challanQuery->groupBy('ch_retailer_id')->get();
+        $old_due = DB::table('old_payment_dues')
+            ->where('ch_dealer_id', $dealer_id)
+            ->where('payment_status', '0')
+            ->whereIn('ch_retailer_id', $retailer_ids)
+            ->groupBy('ch_retailer_id')
+            ->pluck(DB::raw('SUM(remaining)'), 'ch_retailer_id');
 
-        $records      = [];
-        $retailer_ids = [];
+        $names = DB::table('retailer')->whereIn('id', $retailer_ids)->pluck('name', 'id');
 
-        foreach ($challanRows as $row) {
-            $retailer_id = $row->retailer_id;
-            $retailer_ids[] = $retailer_id;
+        $last = DB::table('payment_collection as pc')
+            ->joinSub(
+                DB::table('payment_collection')
+                    ->select('retailer_id', DB::raw('MAX(pay_date_time) as last_at'))
+                    ->where('dealer_id', $dealer_id)
+                    ->whereIn('retailer_id', $retailer_ids)
+                    ->groupBy('retailer_id'),
+                'x',
+                fn ($j) => $j->on('x.retailer_id', '=', 'pc.retailer_id')->on('x.last_at', '=', 'pc.pay_date_time')
+            )
+            ->where('pc.dealer_id', $dealer_id)
+            ->groupBy('pc.retailer_id', 'x.last_at')
+            ->get(['pc.retailer_id', 'x.last_at', DB::raw('SUM(pc.total_amount) as amount')])
+            ->keyBy(fn ($r) => (string) $r->retailer_id);
 
-            $old_total = (float) DB::table('old_payment_dues')
-                ->where('ch_retailer_id', $retailer_id)
-                ->where('payment_status', '0')
-                ->sum('remaining');
-
-            $retailer_name = DB::table('retailer')
-                ->where('id', $retailer_id)
-                ->value('name');
-
-            $last = DB::table('payment_collection')
-                ->where('retailer_id', $retailer_id)
-                ->where('dealer_id', $dealer_id)
-                ->orderByDesc('pay_date_time')
-                ->first(['pay_date_time as lastdate', 'total_amount as lastamt']);
-
+        $records = [];
+        foreach ($retailer_ids as $retailer_id) {
+            $lp = $last[$retailer_id] ?? null;
             $records[] = [
                 'retailer_id'   => $retailer_id,
-                'retailer_name' => $retailer_name,
-                'total'         => $old_total,
+                'retailer_name' => $names[$retailer_id] ?? '',
+                'total'         => round((float) ($challan_due[$retailer_id] ?? 0) + (float) ($old_due[$retailer_id] ?? 0), 2),
                 'last'          => [
-                    'lastdate' => $last->lastdate ?? '00-00-0000 00:00',
-                    'lastamt'  => (float) ($last->lastamt ?? 0),
+                    'lastdate' => $lp->last_at ?? null,
+                    'lastamt'  => (float) ($lp->amount ?? 0),
                 ],
             ];
         }
-
-        // Retailers having only old dues (exclude already listed)
-        $oldQuery = DB::table('old_payment_dues')
-            ->select('ch_retailer_id as retailer_id', DB::raw('SUM(remaining) as total'))
-            ->where('ch_dealer_id', $dealer_id)
-            ->where('payment_status', '0');
-
-        if (!empty($retailer_ids)) {
-            $oldQuery->whereNotIn('ch_retailer_id', $retailer_ids);
-        }
-
-        if ($request->filled('retailer_id')) {
-            $oldQuery->where('ch_retailer_id', $request->retailer_id);
-        }
-
-        $oldRows = $oldQuery->groupBy('ch_retailer_id')->get();
-
-        foreach ($oldRows as $row) {
-            $retailer_id = $row->retailer_id;
-
-            $retailer_name = DB::table('retailer')
-                ->where('id', $retailer_id)
-                ->value('name');
-
-            $last = DB::table('payment_collection')
-                ->where('retailer_id', $retailer_id)
-                ->where('dealer_id', $dealer_id)
-                ->orderByDesc('pay_date_time')
-                ->first(['pay_date_time as lastdate', 'total_amount as lastamt']);
-
-            $records[] = [
-                'retailer_id'   => $retailer_id,
-                'retailer_name' => $retailer_name,
-                'total'         => (float) $row->total,
-                'last'          => [
-                    'lastdate' => $last->lastdate ?? '00-00-0000 00:00',
-                    'lastamt'  => (float) ($last->lastamt ?? 0),
-                ],
-            ];
-        }
+        usort($records, fn ($a, $b) => strcasecmp((string) $a['retailer_name'], (string) $b['retailer_name']));
 
         return response()->json([
             'status'  => true,
@@ -332,70 +323,63 @@ class DealerPaymentController extends Controller
         ]);
     }
 
+    private function dealerRetailer(int $dealer_id, $retailer_id): bool
+    {
+        $retailer_id = (string) $retailer_id;
+        return DB::table('retailer')->where('id', $retailer_id)->where('dealer_id', $dealer_id)->exists()
+            || DB::table('challan_order')->where('ch_retailer_id', $retailer_id)->where('ch_dealer_id', $dealer_id)->exists()
+            || DB::table('old_payment_dues')->where('ch_retailer_id', $retailer_id)->where('ch_dealer_id', $dealer_id)->exists();
+    }
+
     /**
      * Retailer dues breakdown: old dues + unpaid challans.
      */
-   public function paymentCollectionRetailerDues(Request $request): JsonResponse
-{
-    $ctx       = $this->context($request);
-    $dealer_id = $ctx['dealer_id'];
+    public function paymentCollectionRetailerDues(Request $request): JsonResponse
+    {
+        $ctx       = $this->context($request);
+        $dealer_id = (int) $ctx['dealer_id'];
 
-    $request->validate([
-        'retailer_id' => 'required',
-    ]);
+        $retailer_id = (string) ($request->route('retailer_id') ?? $request->retailer_id);
+        if ($retailer_id === '' || !$this->dealerRetailer($dealer_id, $retailer_id)) {
+            return response()->json(['status' => false, 'message' => 'Retailer not found.'], 404);
+        }
 
-    $retailer_id = $request->retailer_id;
+        $old_remaining = (float) DB::table('old_payment_dues')
+            ->where('ch_retailer_id', $retailer_id)
+            ->where('ch_dealer_id', $dealer_id)
+            ->where('payment_status', '0')
+            ->sum('remaining');
 
-    // 1. Old dues — aggregated
-    $old_dues_row = DB::table('old_payment_dues')
-        ->select(
-            'id',
-            DB::raw('SUM(amount) as total_amount'),
-            DB::raw('SUM(remaining) as remaining')
-        )
-        ->where('ch_retailer_id', $retailer_id)
-        ->where('ch_dealer_id', $dealer_id)
-        ->where('payment_status', '0')
-        ->first();
+        $old_dues = $old_remaining > 0 ? ['remaining' => round($old_remaining, 2)] : null;
 
-    $old_dues = null;
-    if ($old_dues_row && (float) $old_dues_row->remaining > 0) {
-        $old_dues = [
-            'id'         => $old_dues_row->id,
-            'amount'     => (float) $old_dues_row->total_amount,
-            'remaining'  => (float) $old_dues_row->remaining,
-        ];
+        $invoices = DB::table('challan_order')
+            ->select('id', 'ch_no', 'ch_date', 'amount', 'remaining')
+            ->where('ch_retailer_id', $retailer_id)
+            ->where('ch_dealer_id', $dealer_id)
+            ->where('payment_status', '!=', '1')
+            ->where('remaining', '>', 0)
+            ->orderBy('auto', 'ASC')
+            ->get()
+            ->map(fn ($row) => [
+                'id'        => (string) $row->id,
+                'ch_no'     => $row->ch_no,
+                'ch_date'   => $row->ch_date,
+                'amount'    => (float) $row->amount,
+                'remaining' => round((float) $row->remaining, 2),
+            ]);
+
+        return response()->json([
+            'status'  => true,
+            'message' => 'Retailer dues',
+            'data'    => [
+                'retailer_name' => DB::table('retailer')->where('id', $retailer_id)->value('name'),
+                'old_dues'      => $old_dues,
+                'invoices'      => $invoices,
+                'total_amount'  => round(($old_dues['remaining'] ?? 0) + $invoices->sum('remaining'), 2),
+            ],
+        ]);
     }
 
-    // 2. Unpaid challans
-    $invoices = DB::table('challan_order')
-        ->select('id', 'ch_no', 'amount', 'remaining')
-        ->where('ch_retailer_id', $retailer_id)
-        ->where('ch_dealer_id', $dealer_id)
-        ->where('payment_status', '!=', '1')
-        ->orderBy('auto', 'ASC')
-        ->get()
-        ->map(function ($row) {
-            return [
-                'id'        => $row->id,
-                'ch_no'     => $row->ch_no,
-                'amount'    => (float) $row->amount,
-                'remaining' => (float) $row->remaining,
-            ];
-        });
-
-    $total = ($old_dues['remaining'] ?? 0) + $invoices->sum('remaining');
-
-    return response()->json([
-        'status'  => true,
-        'message' => 'Retailer dues',
-        'data'    => [
-            'old_dues'     => $old_dues,
-            'invoices'     => $invoices,
-            'total_amount' => round($total, 2),
-        ],
-    ]);
-}
     /**
      * Save payment collection (old dues + challan-wise).
      * Mirrors payment::save_payment_new().
@@ -403,106 +387,124 @@ class DealerPaymentController extends Controller
     public function paymentCollectionSave(Request $request): JsonResponse
     {
         $ctx        = $this->context($request);
-        $dealer_id  = $ctx['dealer_id'];
+        $dealer_id  = (int) $ctx['dealer_id'];
         $company_id = $ctx['company_id'];
 
         $request->validate([
-            'retailer_id'       => 'required',
-            'reciept_no'        => 'required',
-            'pay_mode'          => 'required',
-            'old_ch_id'         => 'nullable',
-            'old_remain_amount' => 'nullable|numeric|min:0',
-            'old_recieved_amt'  => 'nullable|numeric|min:0',
-            'invoice'           => 'nullable|array',
-            'remain_amount'     => 'nullable|array',
-            'recieved_amt'      => 'nullable|array',
-            'bank_name'         => 'nullable',
-            'chq_no'            => 'nullable',
-            'chq_date'          => 'nullable',
-            'txn_no'            => 'nullable',
-            'txn_date'          => 'nullable',
-            'Remark'            => 'nullable',
+            'retailer_id'      => 'required',
+            'reciept_no'       => 'required|string|max:500',
+            'pay_mode'         => 'required|in:0,1,2',
+            'old_recieved_amt' => 'nullable|numeric|min:0',
+            'recieved_amt'     => 'nullable|array',
+            'recieved_amt.*'   => 'nullable|numeric|min:0',
+            'bank_name'        => 'nullable|string|max:100',
+            'chq_no'           => 'nullable|string|max:100',
+            'chq_date'         => 'nullable|string|max:200',
+            'txn_no'           => 'nullable|string|max:100',
+            'txn_date'         => 'nullable|string|max:200',
+            'Remark'           => 'nullable|string',
         ]);
 
-        $chq_no   = $request->chq_no   ?: $request->txn_no;
-        $chq_date = $request->chq_date ?: $request->txn_date;
+        $retailer_id = (string) $request->retailer_id;
+        if (!$this->dealerRetailer($dealer_id, $retailer_id)) {
+            return response()->json(['status' => false, 'message' => 'Retailer not found.'], 404);
+        }
 
-        $id = $dealer_id . date('YmdHis');
+        $old_amount = round((float) $request->old_recieved_amt, 2);
+        $received   = collect((array) $request->recieved_amt)
+            ->map(fn ($v) => round((float) $v, 2))
+            ->filter(fn ($v) => $v > 0);
+
+        if ($old_amount <= 0 && $received->isEmpty()) {
+            return response()->json(['status' => false, 'message' => 'Enter the received amount for at least one invoice or old dues.'], 422);
+        }
+
+        $pay_mode = (int) $request->pay_mode;
+        $chq_no   = $pay_mode === 2 ? $request->txn_no : $request->chq_no;
+        $chq_date = $pay_mode === 2 ? $request->txn_date : $request->chq_date;
+        $base_row = [
+            'dealer_id'     => $dealer_id,
+            'retailer_id'   => $retailer_id,
+            'reciept_no'    => $request->reciept_no,
+            'pay_mode'      => $pay_mode,
+            'bank_name'     => $pay_mode === 0 ? '' : (string) $request->bank_name,
+            'chq_no'        => $pay_mode === 0 ? '' : (string) $chq_no,
+            'chq_date'      => $pay_mode === 0 ? '' : (string) $chq_date,
+            'Remark'        => (string) $request->Remark,
+            'pay_date_time' => now(),
+            'company_id'    => $company_id,
+        ];
 
         DB::beginTransaction();
 
         try {
-            // 1. Old dues payment
-            if ($request->filled('old_recieved_amt') && $request->filled('old_ch_id')) {
-                $old_ch_id    = $request->old_ch_id;
-                $old_remain   = (float) $request->old_remain_amount;
-                $old_recieved = (float) $request->old_recieved_amt;
+            if ($old_amount > 0) {
+                $old_rows = DB::table('old_payment_dues')
+                    ->where('ch_retailer_id', $retailer_id)
+                    ->where('ch_dealer_id', $dealer_id)
+                    ->where('payment_status', '0')
+                    ->where('remaining', '>', 0)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
 
-                if ($old_remain == $old_recieved) {
-                    DB::table('old_payment_dues')
-                        ->where('id', $old_ch_id)
-                        ->update(['remaining' => 0, 'payment_status' => '1']);
-                } else {
-                    DB::table('old_payment_dues')
-                        ->where('id', $old_ch_id)
-                        ->update([
-                            'remaining' => DB::raw("remaining - $old_recieved"),
-                        ]);
+                if ($old_amount > round((float) $old_rows->sum('remaining'), 2)) {
+                    DB::rollBack();
+                    return response()->json(['status' => false, 'message' => "Received amount can't be greater than the remaining old dues."], 422);
                 }
 
-                DB::table('payment_collection')->insert([
-                    'dealer_id'     => $dealer_id,
-                    'retailer_id'   => $request->retailer_id,
-                    'challan_id'    => $old_ch_id,
-                    'total_amount'  => $old_recieved,
-                    'reciept_no'    => $request->reciept_no,
-                    'pay_mode'      => $request->pay_mode,
-                    'bank_name'     => $request->bank_name,
-                    'chq_no'        => $chq_no,
-                    'chq_date'      => $chq_date,
-                    'Remark'        => $request->Remark,
-                    'pay_date_time' => now(),
-                    'company_id'    => $company_id,
+                $left = $old_amount;
+                foreach ($old_rows as $row) {
+                    if ($left <= 0) {
+                        break;
+                    }
+                    $take = min($left, (float) $row->remaining);
+                    $rest = round((float) $row->remaining - $take, 2);
+                    DB::table('old_payment_dues')->where('id', $row->id)->update([
+                        'remaining'      => $rest,
+                        'payment_status' => $rest <= 0 ? '1' : '0',
+                    ]);
+                    $left = round($left - $take, 2);
+                }
+
+                DB::table('payment_collection')->insert($base_row + [
+                    'challan_id'   => (string) $old_rows->first()->id,
+                    'total_amount' => $old_amount,
                 ]);
             }
 
-            // 2. Challan-wise payments
-            if ($request->filled('invoice')) {
-                foreach ($request->invoice as $challan_id => $value) {
-                    $remain_amount = (float) ($request->remain_amount[$challan_id] ?? 0);
-                    $recieved_amt  = (float) ($request->recieved_amt[$challan_id] ?? 0);
+            if ($received->isNotEmpty()) {
+                $challans = DB::table('challan_order')
+                    ->whereIn('id', $received->keys()->map(fn ($k) => (string) $k)->all())
+                    ->where('ch_dealer_id', $dealer_id)
+                    ->where('ch_retailer_id', $retailer_id)
+                    ->where('payment_status', '!=', '1')
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy(fn ($c) => (string) $c->id);
 
-                    if ($recieved_amt <= 0) {
-                        continue;
+                foreach ($received as $challan_id => $amount) {
+                    $challan = $challans[(string) $challan_id] ?? null;
+                    if (!$challan) {
+                        DB::rollBack();
+                        return response()->json(['status' => false, 'message' => 'One of the selected invoices is no longer pending.'], 422);
+                    }
+                    $remaining = round((float) $challan->remaining, 2);
+                    if ($amount > $remaining) {
+                        DB::rollBack();
+                        return response()->json(['status' => false, 'message' => "Received amount can't be greater than the remaining amount of invoice {$challan->ch_no}."], 422);
                     }
 
-                    DB::table('payment_collection')->insert([
-                        'dealer_id'     => $dealer_id,
-                        'retailer_id'   => $request->retailer_id,
-                        'challan_id'    => $challan_id,
-                        'total_amount'  => $recieved_amt,
-                        'reciept_no'    => $request->reciept_no,
-                        'pay_mode'      => $request->pay_mode,
-                        'bank_name'     => $request->bank_name,
-                        'chq_no'        => $chq_no,
-                        'chq_date'      => $chq_date,
-                        'Remark'        => $request->Remark,
-                        'pay_date_time' => now(),
-                        'company_id'    => $company_id,
+                    DB::table('payment_collection')->insert($base_row + [
+                        'challan_id'   => (string) $challan_id,
+                        'total_amount' => $amount,
                     ]);
 
-                    if ($remain_amount == $recieved_amt) {
-                        DB::table('challan_order')
-                            ->where('id', $challan_id)
-                            ->update(['remaining' => 0, 'payment_status' => '1']);
-                    } else {
-                        DB::table('challan_order')
-                            ->where('id', $challan_id)
-                            ->update([
-                                'remaining'      => DB::raw("remaining - $recieved_amt"),
-                                'payment_status' => '2',
-                            ]);
-                    }
+                    $rest = round($remaining - $amount, 2);
+                    DB::table('challan_order')->where('id', (string) $challan_id)->update([
+                        'remaining'      => $rest,
+                        'payment_status' => $rest <= 0 ? '1' : '2',
+                    ]);
                 }
             }
 
@@ -511,7 +513,7 @@ class DealerPaymentController extends Controller
             return response()->json([
                 'status'  => true,
                 'message' => 'Payment successfully saved',
-                'rId'     => $id,
+                'rId'     => $dealer_id . date('YmdHis'),
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
