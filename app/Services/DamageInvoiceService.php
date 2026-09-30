@@ -13,30 +13,33 @@ class DamageInvoiceService
         protected StockService $stock,
     ) {}
 
+    public static function companyId($user): int
+    {
+        return (int) ($user->company_id_cus ?? $user->company_id ?? 0);
+    }
+
     /* ------------------------------------------------------------------ */
     /*  SAVE                                                              */
     /* ------------------------------------------------------------------ */
     public function save(array $data, $user): array
     {
         $dealerId     = (int) $user->dealer_id;
-        $companyIdCus = (int) $user->company_id_cus;
-        $userId       = (int) $user->id;
+        $companyIdCus = self::companyId($user);
+        $userId       = (int) $user->getKey();
 
         $saleableNonSaleable = (int) ($data['saleable_non_saleable'] ?? 1);
         $returnReplace       = (int) ($data['return_replace_status'] ?? 0);
         $forSelfRetailer     = (int) ($data['for_self_retailer'] ?? 1);
-        $retailerId          = (int) ($data['retailer_id'] ?? 0);
-        $storedRetailerId    = $forSelfRetailer === 0 ? 0 : $retailerId;
+        $retailerId          = (string) ($data['retailer_id'] ?? '0');
+        $storedRetailerId    = $forSelfRetailer === 0 ? '0' : $retailerId;
 
-        $items = $data['items'] ?? [];
-        if (empty($items)) {
-            throw new \InvalidArgumentException('At least one item is required.');
-        }
+        $this->assertRetailer($forSelfRetailer, $retailerId, $dealerId);
 
-        $chNo   = $data['ch_no'] ?? $this->numbers->next($dealerId, $companyIdCus)['ch_no'];
+        $calc  = $this->compute($data['items'] ?? [], $data['discount_per'] ?? 0, $this->checkGst($user, $forSelfRetailer, $retailerId), $companyIdCus);
+        $items = $calc['items'];
+
+        $chNo   = $this->numbers->next($dealerId, $companyIdCus)['ch_no'];
         $chDate = $this->normalizeDateTime($data['ch_date'] ?? now());
-
-        [$amount, $discPer, $discAmt, $finalAmount] = $this->totals($items, $data['discount_per'] ?? 0);
 
         DB::beginTransaction();
         try {
@@ -64,10 +67,10 @@ class DamageInvoiceService
                 'date_added'            => now(),
                 'company_id'            => 1,
                 'invoice_type'          => 4,
-                'discount_per'          => $discPer,
-                'discount_amt'          => $discAmt,
-                'amount'                => $finalAmount,
-                'remaining'             => $finalAmount,
+                'discount_per'          => $calc['discount_per'],
+                'discount_amt'          => $calc['discount_amt'],
+                'amount'                => $calc['total_amount_a'],
+                'remaining'             => $calc['total_amount_a'],
                 'damage_order_type_id'  => $saleableNonSaleable,
                 'replace_return_id'     => $returnReplace,
             ]);
@@ -86,10 +89,10 @@ class DamageInvoiceService
                 'status'                => true,
                 'challan_id'            => $challanId,
                 'ch_no'                 => $chNo,
-                'discount_per'          => $discPer,
-                'discount_amt'          => $discAmt,
-                'total_before_discount' => $amount,
-                'amount'                => $finalAmount,
+                'discount_per'          => $calc['discount_per'],
+                'discount_amt'          => $calc['discount_amt'],
+                'total_before_discount' => $calc['total'],
+                'amount'                => $calc['total_amount_a'],
             ];
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -107,35 +110,30 @@ class DamageInvoiceService
     /* ------------------------------------------------------------------ */
     public function update(string $id, array $data, $user): array
     {
-        $existing = DB::table('damage_order')->where('id', $id)->first();
-        if (!$existing) {
-            throw new ModelNotFoundException('Damage invoice not found.');
-        }
+        $existing = $this->findOwned($id, $user);
 
-        $dealerId = (int) $existing->ch_dealer_id;
-        $userId   = (int) $user->id;
+        $dealerId     = (int) $existing->ch_dealer_id;
+        $companyIdCus = self::companyId($user);
+        $userId       = (int) $user->getKey();
 
         $oldSaleable      = (int) $existing->damage_order_type_id;
         $oldReturnReplace = (int) $existing->replace_return_id;
-        $oldForSelf       = ((int) $existing->ch_retailer_id === 0) ? 0 : 1;
+        $oldForSelf       = ((string) $existing->ch_retailer_id === '0') ? 0 : 1;
 
         $oldItems = DB::table('damage_order_details')->where('ch_id', $id)->get()->all();
 
         $saleableNonSaleable = (int) ($data['saleable_non_saleable'] ?? $oldSaleable);
         $returnReplace       = (int) ($data['return_replace_status'] ?? $oldReturnReplace);
         $forSelfRetailer     = (int) ($data['for_self_retailer'] ?? $oldForSelf);
-        $retailerId          = (int) ($data['retailer_id'] ?? (int) $existing->ch_retailer_id);
-        $storedRetailerId    = $forSelfRetailer === 0 ? 0 : $retailerId;
+        $retailerId          = (string) ($data['retailer_id'] ?? $existing->ch_retailer_id);
+        $storedRetailerId    = $forSelfRetailer === 0 ? '0' : $retailerId;
 
-        $items = $data['items'] ?? [];
-        if (empty($items)) {
-            throw new \InvalidArgumentException('At least one item is required.');
-        }
+        $this->assertRetailer($forSelfRetailer, $retailerId, $dealerId);
 
-        $chNo   = $data['ch_no'] ?? $existing->ch_no;
+        $calc  = $this->compute($data['items'] ?? [], $data['discount_per'] ?? 0, $this->checkGst($user, $forSelfRetailer, $retailerId), $companyIdCus);
+        $items = $calc['items'];
+
         $chDate = $this->normalizeDateTime($data['ch_date'] ?? $existing->ch_date);
-
-        [$amount, $discPer, $discAmt, $finalAmount] = $this->totals($items, $data['discount_per'] ?? 0);
 
         DB::beginTransaction();
         try {
@@ -150,14 +148,13 @@ class DamageInvoiceService
 
             // Update header
             DB::table('damage_order')->where('id', $id)->update([
-                'ch_no'                 => $chNo,
                 'ch_created_by'         => $userId,
                 'ch_retailer_id'        => $storedRetailerId,
                 'ch_date'               => $chDate,
-                'discount_per'          => $discPer,
-                'discount_amt'          => $discAmt,
-                'amount'                => $finalAmount,
-                'remaining'             => $finalAmount,
+                'discount_per'          => $calc['discount_per'],
+                'discount_amt'          => $calc['discount_amt'],
+                'amount'                => $calc['total_amount_a'],
+                'remaining'             => $calc['total_amount_a'],
                 'damage_order_type_id'  => $saleableNonSaleable,
                 'replace_return_id'     => $returnReplace,
             ]);
@@ -174,11 +171,11 @@ class DamageInvoiceService
             return [
                 'status'                => true,
                 'challan_id'            => $id,
-                'ch_no'                 => $chNo,
-                'discount_per'          => $discPer,
-                'discount_amt'          => $discAmt,
-                'total_before_discount' => $amount,
-                'amount'                => $finalAmount,
+                'ch_no'                 => $existing->ch_no,
+                'discount_per'          => $calc['discount_per'],
+                'discount_amt'          => $calc['discount_amt'],
+                'total_before_discount' => $calc['total'],
+                'amount'                => $calc['total_amount_a'],
             ];
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -195,16 +192,13 @@ class DamageInvoiceService
     /* ------------------------------------------------------------------ */
     public function delete(string $id, $user): void
     {
-        $existing = DB::table('damage_order')->where('id', $id)->first();
-        if (!$existing) {
-            throw new ModelNotFoundException('Damage invoice not found.');
-        }
+        $existing = $this->findOwned($id, $user);
 
         DB::beginTransaction();
         try {
             if ((int) $existing->replace_return_id === 0) {
                 $oldItems   = DB::table('damage_order_details')->where('ch_id', $id)->get()->all();
-                $forSelf    = ((int) $existing->ch_retailer_id === 0) ? 0 : 1;
+                $forSelf    = ((string) $existing->ch_retailer_id === '0') ? 0 : 1;
                 if (!empty($oldItems)) {
                     $this->stock->reverse(
                         $oldItems,
@@ -231,6 +225,7 @@ class DamageInvoiceService
     public function list(array $filters, $user): array
     {
         $q = DB::table('damage_order')
+            ->leftJoin('saleable_non_saleable as sns', 'sns.id', '=', 'damage_order.damage_order_type_id')
             ->select([
                 'damage_order.id',
                 'damage_order.ch_no',
@@ -244,32 +239,45 @@ class DamageInvoiceService
                 'damage_order.damage_order_type_id',
                 'damage_order.replace_return_id',
                 'damage_order.by_status',
-            ]);
+                'sns.name as damage_type',
+            ])
+            ->where('damage_order.ch_dealer_id', (int) $user->dealer_id);
 
         if (!empty($filters['from'])) {
-            $q->where('ch_date', '>=', $filters['from']);
+            $q->whereDate('damage_order.ch_date', '>=', $filters['from']);
         }
         if (!empty($filters['to'])) {
-            $q->where('ch_date', '<=', $filters['to']);
+            $q->whereDate('damage_order.ch_date', '<=', $filters['to']);
         }
         if (!empty($filters['retailer_id'])) {
-            $q->where('ch_retailer_id', $filters['retailer_id']);
+            $q->where('damage_order.ch_retailer_id', (string) $filters['retailer_id']);
         }
-        if (!empty($filters['return_replace_status'])) {
-            $q->where('replace_return_id', $filters['return_replace_status']);
+        if (isset($filters['return_replace_status']) && $filters['return_replace_status'] !== '') {
+            $q->where('damage_order.replace_return_id', (int) $filters['return_replace_status']);
+        }
+        if (!empty($filters['ch_no'])) {
+            $q->where('damage_order.ch_no', 'like', '%' . $filters['ch_no'] . '%');
         }
 
-        $rows = $q->orderByDesc('auto')
-            ->paginate((int) ($filters['per_page'] ?? 25));
+        $rows = $q->orderByDesc('damage_order.auto')
+            ->paginate(min(1000, max(1, (int) ($filters['per_page'] ?? 25))));
 
-        // Attach retailer names
-        $retailerIds = collect($rows->items())->pluck('ch_retailer_id')->filter()->unique()->all();
+        $orders      = collect($rows->items());
+        $retailerIds = $orders->pluck('ch_retailer_id')->map(fn ($v) => (string) $v)->filter(fn ($v) => $v !== '' && $v !== '0')->unique()->all();
         $retailers   = $retailerIds
             ? DB::table('retailer')->whereIn('id', $retailerIds)->pluck('name', 'id')->all()
             : [];
 
-        foreach ($rows->items() as $r) {
-            $r->retailer_name = $retailers[$r->ch_retailer_id] ?? null;
+        $items = $orders->isEmpty() ? collect() : DB::table('damage_order_details as dod')
+            ->leftJoin('catalog_product as cp', 'cp.id', '=', 'dod.product_id')
+            ->whereIn('dod.ch_id', $orders->pluck('id')->map(fn ($v) => (string) $v)->all())
+            ->orderBy('dod.id')
+            ->get(['dod.ch_id', 'dod.product_id', 'cp.name', 'dod.product_rate', 'dod.qty', 'dod.free_qty', 'dod.vat_amt', 'dod.taxable_amt'])
+            ->groupBy(fn ($r) => (string) $r->ch_id);
+
+        foreach ($orders as $r) {
+            $r->retailer_name = $retailers[(string) $r->ch_retailer_id] ?? null;
+            $r->items         = $items[(string) $r->id] ?? [];
         }
 
         return $rows->toArray();
@@ -278,15 +286,11 @@ class DamageInvoiceService
     /* ------------------------------------------------------------------ */
     /*  SHOW                                                              */
     /* ------------------------------------------------------------------ */
-    public function show(string $id): array
+    public function show(string $id, $user): array
     {
-        $header = DB::table('damage_order')
-            ->where('id', $id)
-            ->first();
-
-        if (!$header) {
-            throw new ModelNotFoundException('Damage invoice not found.');
-        }
+        $header = $this->findOwned($id, $user);
+        $header->retailer_name = DB::table('retailer')->where('id', (string) $header->ch_retailer_id)->value('name');
+        $header->damage_type   = DB::table('saleable_non_saleable')->where('id', $header->damage_order_type_id)->value('name');
 
         $items = DB::table('damage_order_details as dod')
             ->leftJoin('catalog_product as cp', 'cp.id', '=', 'dod.product_id')
@@ -303,9 +307,188 @@ class DamageInvoiceService
         ];
     }
 
+    public function checkGst($user, int $forSelfRetailer, $retailerId): int
+    {
+        if (self::companyId($user) === 213 || $forSelfRetailer === 0) {
+            return 1;
+        }
+        $retailerState = DB::table('retailer')
+            ->join('location_view', 'location_view.l7_id', '=', 'retailer.location_id')
+            ->where('retailer.id', (string) $retailerId)
+            ->value('location_view.l3_id');
+        return (string) $retailerState === (string) $user->state_id ? 1 : 0;
+    }
+
+    public function compute(array $items, $discountPer, int $checkGst, int $companyIdCus): array
+    {
+        if (empty($items)) {
+            throw new \InvalidArgumentException('At least one item is required.');
+        }
+
+        $productIds = array_values(array_unique(array_map(fn ($it) => (int) $it['product_id'], $items)));
+        $products   = DB::table('catalog_product as cp')
+            ->leftJoin('_gst as t', 't.hsn_code', '=', 'cp.hsn_code')
+            ->whereIn('cp.id', $productIds)
+            ->where('cp.company_id', $companyIdCus)
+            ->get(['cp.id', 'cp.hsn_code', DB::raw('COALESCE(t.igst, 0) as igst')])
+            ->keyBy('id');
+
+        $rows = [];
+        $seen = [];
+        $totTd = $totSpl = $totCd = $totTaxable = $totVat = $totAmount = 0.0;
+
+        foreach ($items as $idx => $it) {
+            $n    = $idx + 1;
+            $pid  = (int) $it['product_id'];
+            $prod = $products[$pid] ?? null;
+            if (!$prod) {
+                throw new \InvalidArgumentException("Item #{$n}: product not found.");
+            }
+
+            $qty  = (float) $it['qty'];
+            $rate = (float) $it['product_rate'];
+            $mrp  = (float) $it['mrp'];
+            $tax  = (float) $prod->igst;
+
+            if ($qty <= 0) {
+                throw new \InvalidArgumentException("Item #{$n}: quantity must be greater than 0.");
+            }
+            if ($rate < 0) {
+                throw new \InvalidArgumentException("Item #{$n}: rate cannot be negative.");
+            }
+
+            $key = $pid . '|' . $mrp;
+            if (isset($seen[$key])) {
+                throw new \InvalidArgumentException("Item #{$n}: the same product and MRP is already added.");
+            }
+            $seen[$key] = true;
+
+            $disType = (int) ($it['dis_type'] ?? 1);
+            $disVal  = (float) ($it['dis_val'] ?? 0);
+            $spType  = (int) ($it['spl_disc_type'] ?? 1);
+            $spVal   = (float) ($it['spl_disc_val'] ?? 0);
+            $cdType  = (int) ($it['cd_type'] ?? 1);
+            $cdVal   = (float) ($it['cd'] ?? 0);
+            foreach ([[$disType, $disVal, 'trade discount'], [$spType, $spVal, 'special scheme discount'], [$cdType, $cdVal, 'ATD']] as [$t, $v, $label]) {
+                if ($v < 0 || ($t === 1 && $v > 100)) {
+                    throw new \InvalidArgumentException("Item #{$n}: {$label} must be between 0 and 100%.");
+                }
+            }
+
+            $gross      = $qty * $rate;
+            $tradeAmt   = $disType === 1 ? $gross * $disVal / 100 : $disVal;
+            $afterTrade = $gross - $tradeAmt;
+            $spAmt      = $spType === 1 ? $afterTrade * $spVal / 100 : $spVal;
+            $afterSp    = $afterTrade - $spAmt;
+            $cdAmt      = $cdType === 1 ? $afterSp * $cdVal / 100 : $cdVal;
+            $taxable    = round($afterSp - $cdAmt, 2);
+
+            if ($taxable < 0) {
+                throw new \InvalidArgumentException("Item #{$n}: discounts cannot exceed the item value.");
+            }
+
+            if ($checkGst === 1) {
+                $half   = round($taxable * ($tax / 2) / 100, 2);
+                $cgst   = $half;
+                $sgst   = $half;
+                $igst   = 0.0;
+                $vatAmt = round($half * 2, 2);
+            } else {
+                $cgst   = $sgst = 0.0;
+                $igst   = round($taxable * $tax / 100, 2);
+                $vatAmt = $igst;
+            }
+            $amount = round($taxable + $vatAmt, 2);
+
+            $rows[] = [
+                'product_id'     => $pid,
+                'hsn_code'       => (string) $prod->hsn_code,
+                'mrp'            => $mrp,
+                'qty'            => $qty,
+                'free_qty'       => (float) ($it['free_qty'] ?? 0),
+                'product_rate'   => $rate,
+                'batch_no'       => (string) ($it['batch_no'] ?? ''),
+                'mfg_date'       => (string) ($it['mfg_date'] ?? ''),
+                'order_id'       => $it['order_id'] ?? null,
+                'tax'            => $tax,
+                'dis_type'       => $disType,
+                'dis_percent'    => $disType === 1 ? $disVal : 0,
+                'dis_amt'        => round($tradeAmt, 2),
+                'spl_disc_type'  => $spType,
+                'spl_disc_val'   => $spVal,
+                'spl_disc_amt'   => round($spAmt, 2),
+                'cd_type'        => $cdType,
+                'cd'             => $cdVal,
+                'cd_amt'         => round($cdAmt, 2),
+                'taxable_amt'    => $taxable,
+                'cgst'           => $checkGst ? round($tax / 2, 2) : 0,
+                'cgst_amt'       => $cgst,
+                'sgst'           => $checkGst ? round($tax / 2, 2) : 0,
+                'sgst_amt'       => $sgst,
+                'igst'           => $checkGst ? 0 : $tax,
+                'igst_amt'       => $igst,
+                'vat_amt'        => $vatAmt,
+                'amount'         => $amount,
+            ];
+
+            $totTd      += $tradeAmt;
+            $totSpl     += $spAmt;
+            $totCd      += $cdAmt;
+            $totTaxable += $taxable;
+            $totVat     += $vatAmt;
+            $totAmount  += $amount;
+        }
+
+        $discPer = (float) $discountPer;
+        if ($discPer < 0 || $discPer > 100) {
+            throw new \InvalidArgumentException('Discount must be between 0 and 100%.');
+        }
+        $discAmt = round($totAmount * $discPer / 100, 2);
+        $final   = round($totAmount - $discAmt, 2);
+
+        return [
+            'items'          => $rows,
+            'total_td'       => round($totTd, 2),
+            'total_spl'      => round($totSpl, 2),
+            'total_cd'       => round($totCd, 2),
+            'total_taxable'  => round($totTaxable, 2),
+            'total_vat'      => round($totVat, 2),
+            'total'          => round($totAmount, 2),
+            'discount_per'   => $discPer,
+            'discount_amt'   => $discAmt,
+            'total_amount_a' => $final,
+            'final_amount'   => (int) round($final),
+            'check_gst'      => $checkGst,
+        ];
+    }
+
     /* ------------------------------------------------------------------ */
     /*  HELPERS                                                           */
     /* ------------------------------------------------------------------ */
+    protected function findOwned(string $id, $user)
+    {
+        $row = DB::table('damage_order')
+            ->where('id', $id)
+            ->where('ch_dealer_id', (int) $user->dealer_id)
+            ->first();
+        if (!$row) {
+            throw new ModelNotFoundException('Damage invoice not found.');
+        }
+        return $row;
+    }
+
+    protected function assertRetailer(int $forSelfRetailer, string $retailerId, int $dealerId): void
+    {
+        if ($forSelfRetailer === 0) {
+            return;
+        }
+        $ok = $retailerId !== '' && $retailerId !== '0'
+            && DB::table('retailer')->where('id', $retailerId)->where('dealer_id', $dealerId)->exists();
+        if (!$ok) {
+            throw new \InvalidArgumentException('Select a retailer from your retailer list.');
+        }
+    }
+
     protected function insertDetails(string $challanId, array $items, int $userId): void
     {
         $rows = [];
@@ -355,28 +538,6 @@ class DamageInvoiceService
             }
         }
     }
-
-    /**
-     * Mirrors the frontend: taxable_amt is sent per item; header amount
-     * = sum(taxable_amt) - discount.
-     */
-    protected function totals(array $items, $discountPer): array
-{
-    $amount = 0.0;
-    foreach ($items as $it) {
-        // 'taxable_amt' from frontend = taxable amount AFTER all discounts,
-        // but NOT including tax. Amount = taxable + tax.
-        $taxable = (float) ($it['taxable_amt'] ?? 0);
-        $vatAmt  = (float) ($it['vat_amt'] ?? 0);
-        $amount += $taxable + $vatAmt;   // <-- matches JS .amount sum
-    }
-
-    $discPer = (float) $discountPer;
-    $discAmt = round($amount * $discPer / 100, 2);
-    $final   = round($amount - $discAmt, 2);
-
-    return [$amount, $discPer, $discAmt, $final];
-}
 
     protected function normalizeDate(?string $d): string
     {

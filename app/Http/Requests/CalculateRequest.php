@@ -16,6 +16,8 @@ class CalculateRequest extends FormRequest
         return [
             'discount_per'             => 'nullable|numeric|min:0|max:100',
             'items'                    => 'required|array|min:1',
+            'items.*.product_id'       => 'required|integer',
+            'items.*.mrp'              => 'required|numeric',
             'items.*.qty'              => 'required|numeric',
             'items.*.product_rate'     => 'required|numeric',
             'items.*.cd'               => 'nullable|numeric',

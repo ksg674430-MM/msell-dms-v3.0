@@ -85,7 +85,7 @@ class StockService
                         'qty'                => 0,
                         'salable_damage'     => 0,
                         'nonsalable_damage'  => $qtyy,
-                        'remaining'          => $qtyy,
+                        'remaining'          => 0,
                         'mfg'                => $mfgDate,
                     ]);
                 }
