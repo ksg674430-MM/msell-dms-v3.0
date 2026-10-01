@@ -51,6 +51,13 @@ use App\Http\Controllers\Api\DepotDamageLookupController;
 use App\Http\Controllers\Api\ChangePasswordController;
 
 
+use App\Http\Controllers\Api\Reports\SalesReportController;
+use App\Http\Controllers\Api\Reports\PerformanceReportController;
+
+use App\Http\Controllers\Api\Reports\StockReportController;      
+use App\Http\Controllers\Api\Reports\GstReportController;         
+use App\Http\Controllers\Api\Reports\LedgerReportController;
+
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -335,6 +342,56 @@ Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::c
         Route::get('products/{id}/gst',             [DepotDamageLookupController::class, 'productGst']);
         Route::get('saleable-non-saleable',         [DepotDamageLookupController::class, 'saleableNonSaleable']);
     });
+
+
+    
+// ========================================================
+// REPORTS → MENU: Reports (grouped by domain)
+// ========================================================
+Route::prefix('reports')->group(function () {
+
+    // ---------- SALES ----------
+    Route::get('/sales/item-wise',                    [SalesReportController::class, 'itemWise']);
+    Route::get('/sales/item-summary',                 [SalesReportController::class, 'itemSummary']);
+    Route::get('/sales/product-sale',                 [SalesReportController::class, 'productSale']);
+    Route::get('/sales/item-sale',                    [SalesReportController::class, 'itemSale']);
+    Route::get('/sales/item-challan',                 [SalesReportController::class, 'itemChallan']);
+    Route::get('/sales/retailer-bill-summary',        [SalesReportController::class, 'retailerBillSummary']);
+    Route::get('/sales/retailer-dues-ageing',         [SalesReportController::class, 'retailerDuesAgeing']);
+    Route::get('/sales/sales-purchase-performance',   [SalesReportController::class, 'salesPurchasePerformance']);
+    Route::get('/sales/sales-purchase-list',          [SalesReportController::class, 'salesPurchaseList']);
+
+    // ---------- PERFORMANCE ----------
+    Route::get('/performance/user-sales',             [PerformanceReportController::class, 'userSales']);
+    Route::get('/performance/user-bill',              [PerformanceReportController::class, 'userBill']);
+    Route::get('/performance/retailer-sales',         [PerformanceReportController::class, 'retailerSales']);
+    Route::get('/performance/secondary-sales-book',   [PerformanceReportController::class, 'secondarySalesBook']);
+       // ---------- STOCK ----------
+    Route::get('/stock/balance',                 [StockReportController::class, 'balanceStock']);
+    Route::get('/stock/balance/edit',            [StockReportController::class, 'balanceStockEdit']);
+    Route::get('/stock/primary',                 [StockReportController::class, 'primaryStock']);
+    Route::get('/stock/item-opening',            [StockReportController::class, 'itemOpeningStock']);
+    Route::get('/stock/summary',                 [StockReportController::class, 'stockSummary']);
+    Route::get('/stock/opening-closing',         [StockReportController::class, 'openingClosingStock']);
+    Route::get('/stock/ledger',                  [StockReportController::class, 'stockLedger']);
+    Route::get('/stock/category-qty-value',      [StockReportController::class, 'categoryQtyValue']);
+
+    // ---------- GST ----------
+    Route::get('/gst/return-summary',            [GstReportController::class, 'gstReturnSummary']);
+    Route::get('/gst/gstr-3b',                   [GstReportController::class, 'gstr3b']);
+    Route::get('/gst/hsn-summary',               [GstReportController::class, 'hsnSummary']);
+    Route::get('/gst/hsn-detail',                [GstReportController::class, 'hsnDetail']);
+    Route::get('/gst/bill-detailed',             [GstReportController::class, 'billDetailed']);
+    Route::get('/gst/purchase-detailed',         [GstReportController::class, 'purchaseDetailed']);
+    Route::get('/gst/book-wise',                 [GstReportController::class, 'bookWise']);
+    Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
+
+    // ---------- LEDGER ----------
+    Route::get('/ledger/party',                  [LedgerReportController::class, 'partyLedger']);
+    Route::get('/ledger/retailer',               [LedgerReportController::class, 'retailerLedger']);
+    Route::get('/ledger/retailer-payment',       [LedgerReportController::class, 'retailerPayment']);
+
+     });
 });
 
 
