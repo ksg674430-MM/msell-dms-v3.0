@@ -107,7 +107,9 @@ class AuthController extends Controller
         );
 
         $model = DealerPersonLogin::find($user->id);
-        $model->tokens()->delete();
+        if (! config('auth.multi_session')) {
+            $model->tokens()->delete();
+        }
         $token = $model->createToken('api-token')->plainTextToken;
 
         $redirect = $this->resolveRedirectUrl($user, $comp);
