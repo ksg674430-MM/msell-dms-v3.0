@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Exceptions\InsufficientStockException;
+use App\Services\InvoiceService;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -174,10 +177,6 @@ class ChallanController extends Controller
             );
         }
 
-        // ---- Products with available stock
-        // FIX: stock availability now reads `remaining` (the column that
-        // reduceStock/restoreStock actually update). Previously it read
-        // `qty`, so the UI showed stale stock after a challan was saved.
         $beatList = DB::select(
     "SELECT DISTINCT l7.id, l7.name
        FROM location_7 l7
@@ -188,16 +187,14 @@ class ChallanController extends Controller
 );
         $products = DB::select(
             "SELECT cp.id,
-                    CONCAT_WS(' ', cp.name, '[', cp.quantity_per_case, ']') AS name,
+                    CONCAT(cp.name, '[', cp.quantity_per_case, ']') AS name,
                     cp.quantity_per_case,
                     cp.hsn_code,
-                    COALESCE(SUM(s.remaining), 0) AS available_stock
+                    SUM(s.qty) AS available_stock
                FROM catalog_product cp
-               LEFT JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ?
-              WHERE cp.status = 1
-                AND cp.company_id = ?
+               INNER JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ? AND s.qty > 0
+              WHERE cp.company_id = ?
               GROUP BY cp.id
-              HAVING available_stock > 0
               ORDER BY cp.id",
             [$dealerId, $companyId]
         );
@@ -452,24 +449,16 @@ class ChallanController extends Controller
                     ]
                 );
 
-                $requiredQty = $l['qty'] + $l['freeQty'];
-                try {
-                    $this->reduceStock($dealerId, $l['productId'], $requiredQty);
-                } catch (\RuntimeException $e) {
-                    $row = DB::selectOne(
-                        "SELECT COALESCE(SUM(remaining), 0) AS qty FROM stock
-                          WHERE dealer_id = ? AND product_id = ? AND remaining > 0",
-                        [$dealerId, $l['productId']]
-                    );
-
-                    throw new \RuntimeException(sprintf(
-                        'Insufficient stock for product "%s". Required qty: %s, Available qty: %s.',
-                        $l['productName'],
-                        $this->formatQty($requiredQty),
-                        $this->formatQty((float) $row->qty)
-                    ), 0, $e);
-                }
             }
+
+            app(StockService::class)->sync($dealerId, [], array_map(fn ($l) => [
+                'product_id' => $l['productId'],
+                'batch_no'   => $l['batchNo'],
+                'mfg_date'   => $l['mfgDate'],
+                'mrp'        => $l['mrp'],
+                'qty'        => $l['qty'] + $l['freeQty'],
+                'name'       => $l['productName'],
+            ], $normalizedItems));
 
             $invoicedByOrder = [];
             foreach ($normalizedItems as $l) {
@@ -478,7 +467,7 @@ class ChallanController extends Controller
                 }
             }
             foreach ($invoicedByOrder as $sfaOrderId => $invoiced) {
-                $this->fulfilSalesOrder($dealerId, (string) $sfaOrderId, $invoiced);
+                app(InvoiceService::class)->fulfilSalesOrder($dealerId, (string) $sfaOrderId, $invoiced);
             }
 
             DB::commit();
@@ -507,11 +496,6 @@ class ChallanController extends Controller
                 'message' => 'Challan could not be saved: ' . $e->getMessage(),
             ], 500);
         }
-    }
-
-    private function formatQty(float $qty): string
-    {
-        return rtrim(rtrim(number_format($qty, 2, '.', ''), '0'), '.') ?: '0';
     }
 
     /* =========================================================
@@ -632,7 +616,11 @@ class ChallanController extends Controller
                             $hsn = (string) ($cp->hsn_code ?? '');
                         }
 
-                        $this->reduceStock($dealerId, $productId, $qty + $schQty);
+                        if ($batchNo !== '') {
+                            app(StockService::class)->take($dealerId, $productId, $batchNo, $mfgDate, $mrp, $qty + $schQty);
+                        } else {
+                            app(StockService::class)->takeFifo($dealerId, $productId, $qty + $schQty);
+                        }
 
                         DB::update(
                             "UPDATE user_sales_order_details
@@ -740,7 +728,7 @@ class ChallanController extends Controller
      |  EDIT
      |  PUT /api/challans/{id}
      |
-     |  Replaces all lines. Adjusts stock.remaining by the delta
+     |  Replaces all lines. Adjusts stock.qty by the delta
      |  between new qty and the original qty (per product), and
      |  restores stock for any product removed entirely.
      | ========================================================= */
@@ -766,12 +754,8 @@ class ChallanController extends Controller
             ], 404);
         }
 
-        // FIX: cancelled challans must not be editable.
-        if ((int) $header->dispatch_status === 3) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Cancelled challan cannot be edited.',
-            ], 409);
+        if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
+            return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
         $v = Validator::make($request->all(), [
@@ -818,26 +802,11 @@ class ChallanController extends Controller
 
         // Load current lines so we can compute stock deltas
         $oldLines = DB::select(
-            "SELECT id, product_id, qty, free_qty, mrp
+            "SELECT id, product_id, qty, free_qty, mrp, batch_no, mfg_date
                FROM challan_order_details
               WHERE ch_id = ?",
             [$id]
         );
-
-        // FIX: aggregate old quantities per product. The previous version
-        // kept only the last line per product and lost quantities when the
-        // same product appeared on multiple lines.
-        $oldTotals = [];
-        $oldMrp    = [];
-        foreach ($oldLines as $row) {
-            $pid = (int) $row->product_id;
-            if (!isset($oldTotals[$pid])) {
-                $oldTotals[$pid] = 0.0;
-                $oldMrp[$pid]    = 0.0;
-            }
-            $oldTotals[$pid] += (float) $row->qty + (float) $row->free_qty;
-            $oldMrp[$pid]     = (float) $row->mrp;
-        }
 
         $items       = $request->input('items');
         $discountPer = (float) ($request->input('discount_per') ?? 0);
@@ -848,7 +817,7 @@ class ChallanController extends Controller
             // ── Normalize incoming items (server-side fallbacks)
             $normalized = [];
             $subTotal   = 0.0;
-            $newTotals  = [];
+            $stockLines = [];
 
             foreach ($items as $it) {
                 $productId  = (int)   $it['product_id'];
@@ -898,28 +867,16 @@ class ChallanController extends Controller
                 );
                 $subTotal += $amount;
 
-                if (!isset($newTotals[$productId])) $newTotals[$productId] = 0.0;
-                $newTotals[$productId] += $qty + $freeQty;
+                $stockLines[] = [
+                    'product_id' => $productId,
+                    'batch_no'   => $batchNo,
+                    'mfg_date'   => $mfgDate,
+                    'mrp'        => $mrp,
+                    'qty'        => $qty + $freeQty,
+                ];
             }
 
-            // ── Apply per-product stock deltas.
-            // FIX: computed once per product (old vs new totals) instead of
-            // per line, so duplicate product lines are handled correctly.
-            $allPids = array_unique(array_merge(array_keys($oldTotals), array_keys($newTotals)));
-            foreach ($allPids as $pid) {
-                $oldTot = $oldTotals[$pid] ?? 0.0;
-                $newTot = $newTotals[$pid] ?? 0.0;
-                $delta  = $newTot - $oldTot;
-
-                if ($delta > 0.0000001) {
-                    // More stock going out → reduce; throws if insufficient.
-                    $this->reduceStock($dealerId, (int) $pid, $delta);
-                } elseif ($delta < -0.0000001) {
-                    // Less stock going out → give back.
-                    $mrp = $oldMrp[$pid] ?? 0.0;
-                    $this->restoreStock($dealerId, (int) $pid, abs($delta), $mrp);
-                }
-            }
+            app(StockService::class)->sync($dealerId, $oldLines, $stockLines);
 
             $discountAmt = round($subTotal * $discountPer / 100, 2);
             $finalAmount = round($subTotal - $discountAmt, 2);
@@ -993,6 +950,9 @@ class ChallanController extends Controller
                 'items_count'  => count($normalized),
             ]);
 
+        } catch (InsufficientStockException $e) {
+            DB::rollBack();
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
@@ -1028,6 +988,10 @@ class ChallanController extends Controller
             ], 404);
         }
 
+        if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
+            return response()->json(['status' => false, 'message' => $lock], 409);
+        }
+
         // Already cancelled?
         $already = DB::selectOne(
             "SELECT 1 AS x FROM challan_order_cancel WHERE challan_id = ? LIMIT 1",
@@ -1042,21 +1006,21 @@ class ChallanController extends Controller
 
         DB::beginTransaction();
         try {
-            // 1. Restore stock for every line
-            $lines = DB::select(
-                "SELECT product_id, qty, free_qty, mrp
-                   FROM challan_order_details
-                  WHERE ch_id = ?",
-                [$id]
+            app(InvoiceService::class)->reopenSalesOrders(
+                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
             );
-            foreach ($lines as $l) {
-                $this->restoreStock(
-                    $dealerId,
-                    (int) $l->product_id,
-                    (float) $l->qty + (float) $l->free_qty,
-                    (float) $l->mrp
-                );
-            }
+
+            // 1. Restore stock for every line
+            app(StockService::class)->sync(
+                $dealerId,
+                DB::select(
+                    "SELECT product_id, qty, free_qty, mrp, batch_no, mfg_date
+                       FROM challan_order_details
+                      WHERE ch_id = ?",
+                    [$id]
+                ),
+                []
+            );
 
             // 2. Mirror the header into challan_order_cancel
             DB::insert(
@@ -1091,6 +1055,9 @@ class ChallanController extends Controller
                 'ch_no'   => $header->ch_no,
             ]);
 
+        } catch (InsufficientStockException $e) {
+            DB::rollBack();
+            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
@@ -1121,6 +1088,7 @@ class ChallanController extends Controller
     {
         if (empty($value)) return null;
         $value = trim((string) $value);
+        if (str_starts_with($value, '0000-00-00')) return '0000-00-00';
         foreach (['d/m/Y', 'd-m-Y', 'Y-m-d', 'd/M/Y'] as $fmt) {
             $dt = \DateTime::createFromFormat($fmt, $value);
             if ($dt && $dt->format($fmt) === $value) {
@@ -1183,7 +1151,7 @@ class ChallanController extends Controller
     {
         $row = DB::selectOne(
             "SELECT id FROM catalog_product
-              WHERE id = ? AND company_id = ? AND status = 1
+              WHERE id = ? AND company_id = ?
               LIMIT 1",
             [$productId, $companyId]
         );
@@ -1201,137 +1169,6 @@ class ChallanController extends Controller
      * the caller's transaction rolls back instead of silently allowing
      * negative / missing stock.
      */
-    private function fulfilSalesOrder(int $dealerId, string $orderId, array $invoicedQty): void
-    {
-        $order = DB::selectOne(
-            "SELECT order_status FROM user_sales_order WHERE order_id = ? AND dealer_id = ? LIMIT 1 FOR UPDATE",
-            [$orderId, $dealerId]
-        );
-        if (!$order || !in_array((string) $order->order_status, ['0', '7'], true)) {
-            throw new \RuntimeException("Order {$orderId} is not open for invoicing.");
-        }
-        $partial = (string) $order->order_status === '7';
-
-        foreach ($invoicedQty as $productId => $qty) {
-            $line = DB::selectOne(
-                "SELECT id, quantity, remaining_qty FROM user_sales_order_details
-                  WHERE order_id = ? AND product_id = ? AND status != 2 LIMIT 1",
-                [$orderId, $productId]
-            );
-            if (!$line) {
-                continue;
-            }
-            $open = $partial && (float) $line->remaining_qty > 0 ? (float) $line->remaining_qty : (float) $line->quantity;
-            $left = max(0, $open - (float) $qty);
-            if ($left > 0) {
-                DB::update("UPDATE user_sales_order_details SET remaining_qty = ? WHERE id = ?", [$left, $line->id]);
-            } else {
-                DB::update("UPDATE user_sales_order_details SET status = 2, remaining_qty = 0 WHERE id = ?", [$line->id]);
-            }
-        }
-
-        $stillOpen = DB::selectOne(
-            "SELECT COUNT(*) AS n FROM user_sales_order_details WHERE order_id = ? AND status != 2",
-            [$orderId]
-        );
-        DB::update(
-            "UPDATE user_sales_order SET order_status = ? WHERE order_id = ?",
-            [(int) $stillOpen->n > 0 ? '7' : '1', $orderId]
-        );
-    }
-
-    private function reduceStock(int $dealerId, int $productId, float $qty): void
-    {
-        if ($qty <= 0) return;
-
-        $rows = DB::select(
-            "SELECT id, remaining FROM stock
-              WHERE dealer_id = ? AND product_id = ? AND remaining > 0
-              ORDER BY mfg ASC
-              FOR UPDATE",
-            [$dealerId, $productId]
-        );
-
-        $available = 0.0;
-        foreach ($rows as $r) {
-            $available += (float) $r->remaining;
-        }
-
-        if ($available + 0.0000001 < $qty) {
-            throw new \RuntimeException(
-                "Insufficient stock for product {$productId}. " .
-                "Required {$qty}, available {$available}."
-            );
-        }
-
-        $left = (float) $qty;
-        foreach ($rows as $row) {
-            if ($left <= 0) break;
-
-            $thisQty = (float) $row->remaining;
-            if ($left >= $thisQty) {
-                DB::update("UPDATE stock SET remaining = 0 WHERE id = ?", [$row->id]);
-                $left -= $thisQty;
-            } else {
-                DB::update(
-                    "UPDATE stock SET remaining = ? WHERE id = ?",
-                    [$thisQty - $left, $row->id]
-                );
-                $left = 0;
-            }
-        }
-    }
-
-    /**
-     * Give stock back — inverse of reduceStock.
-     * Writes to stock.remaining; also bumps qty on the row that
-     * matches mrp when the client supplied one.
-     *
-     * FIX: throws when no matching stock row exists, so a cancel/update
-     * cannot silently lose stock.
-     */
-    private function restoreStock(int $dealerId, int $productId, float $qty, float $mrp = 0): void
-    {
-        if ($qty <= 0) return;
-
-        // Prefer the exact mrp row if we know it
-        if ($mrp > 0) {
-            $row = DB::selectOne(
-                "SELECT id FROM stock
-                  WHERE dealer_id = ? AND product_id = ? AND mrp = ?
-                  LIMIT 1
-                  FOR UPDATE",
-                [$dealerId, $productId, $mrp]
-            );
-            if ($row) {
-                DB::update(
-                    "UPDATE stock SET remaining = remaining + ? WHERE id = ?",
-                    [$qty, $row->id]
-                );
-                return;
-            }
-        }
-
-        // Fallback: add back to the most recent row
-        $row = DB::selectOne(
-            "SELECT id FROM stock
-              WHERE dealer_id = ? AND product_id = ?
-              ORDER BY mfg DESC LIMIT 1
-              FOR UPDATE",
-            [$dealerId, $productId]
-        );
-        if ($row) {
-            DB::update(
-                "UPDATE stock SET remaining = remaining + ? WHERE id = ?",
-                [$qty, $row->id]
-            );
-        } else {
-            throw new \RuntimeException(
-                "Cannot restore stock: no stock row for product {$productId}."
-            );
-        }
-    }
-
     // public function query(Request $request): JsonResponse
     // {
     //     $user = $request->user();

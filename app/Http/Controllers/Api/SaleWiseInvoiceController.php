@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Exceptions\InsufficientStockException;
+use App\Services\InvoiceService;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -266,7 +269,6 @@ public function save(Request $request): JsonResponse
                 $qty1       = (float) $item['quantity'];
                 $schqty1    = (float) ($item['scheme'] ?? 0);
                 $qty2       = $qty1 + $schqty1;
-                $avalStock  = (float) ($item['aval_stock'] ?? 0);
                 $freeStock  = (float) ($item['free_stock'] ?? 0);
                 $freeQty    = (float) ($item['freeqty'] ?? 0);
                 $cashAmt    = (float) ($item['cash_amt'] ?? 0);
@@ -281,12 +283,14 @@ public function save(Request $request): JsonResponse
                 $batchNo = (string) ($parts[2] ?? '');
 
                 $stockRow = DB::selectOne(
-                    "SELECT id, mfg, qty, remaining FROM stock
-                      WHERE product_id = ? AND dealer_id = ? AND mrp = ? AND batch_no = ?
-                      ORDER BY mfg ASC LIMIT 1",
+                    "SELECT id, mfg, qty FROM stock
+                      WHERE product_id = ? AND dealer_id = ? AND ABS(mrp - ?) < 0.001 AND batch_no = ?
+                      ORDER BY mfg ASC LIMIT 1
+                      FOR UPDATE",
                     [$productId, $dealerId, $mrp, $batchNo]
                 );
-                $mfgDate = $stockRow->mfg ?? null;
+                $mfgDate   = $stockRow->mfg ?? null;
+                $avalStock = max(0.0, (float) ($stockRow->qty ?? 0));
 
                 $cd          = (float) ($item['cd'] ?? 0);
                 $cdType      = (int)   ($item['cd_type'] ?? 1);
@@ -323,12 +327,7 @@ public function save(Request $request): JsonResponse
 
                         $remainingStockVal[] = $taxAmt - $taxableAmt;
 
-                        DB::update(
-                            "UPDATE stock SET qty = 0
-                              WHERE product_id = ? AND dealer_id = ? AND mrp = ?
-                                AND batch_no = ? AND mfg = ?",
-                            [$productId, $dealerId, $mrp, $batchNo, $mfgDate]
-                        );
+                        app(StockService::class)->take($dealerId, $productId, $batchNo, (string) $mfgDate, $mrp, $avalStock);
                     } else {
                         $checkStatus = 2;
                         $remainingStockVal[] = $taxableAmt;
@@ -336,15 +335,8 @@ public function save(Request $request): JsonResponse
                 } else {
                     $qty = $qty2;
                     $qtyNew = ($freeQty > 0) ? ($qty2 + $freeQty) : $qty2;
-                    $newStockQty = $avalStock - $qtyNew;
                     $mfgDate = $mfgDate ?: date('Y-m') . '-01';
-
-                    DB::update(
-                        "UPDATE stock SET qty = ?
-                          WHERE product_id = ? AND dealer_id = ? AND mrp = ?
-                            AND batch_no = ? AND mfg = ?",
-                        [$newStockQty, $productId, $dealerId, $mrp, $batchNo, $mfgDate]
-                    );
+                    app(StockService::class)->take($dealerId, $productId, $batchNo, $mfgDate, $mrp, $qtyNew);
                 }
 
                 $schqty = ($freeStock < $schqty1) ? $freeStock : $schqty1;
@@ -405,8 +397,6 @@ public function save(Request $request): JsonResponse
                     ];
 
                     $amount += $taxableAmt;
-
-                    $this->reduceStockRemaining($productId, $dealerId, $qty + $schqty);
                 }
 
                 if ($companyId === 213) {
@@ -542,6 +532,9 @@ public function save(Request $request): JsonResponse
             'challans' => $orderResults,
         ]);
 
+    } catch (InsufficientStockException $e) {
+        DB::rollBack();
+        return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
     } catch (\Throwable $e) {
         DB::rollBack();
 
@@ -615,7 +608,7 @@ public function save(Request $request): JsonResponse
         return [
             'billed'    => round($billedAmt, 2),
             'collected' => round($paidAmt, 2),
-            'balance'   => round($billedAmt - $paidAmt, 2),
+            'balance'   => app(InvoiceService::class)->outstanding($dealerId, [$retailerId])[(string) $retailerId] ?? 0.0,
         ];
     }
 
@@ -695,41 +688,4 @@ public function save(Request $request): JsonResponse
         return "{$prefix}/{$dealerId}/{$year}/{$num}";
     }
 
-    /**
-     * FIFO reduction (same as ChallanController).
-     */
-    private function reduceStock(int $dealerId, int $productId, float $qty): void
-    {
-        if ($qty <= 0) return;
-
-        $rows = DB::select(
-            "SELECT id, remaining FROM stock
-              WHERE dealer_id = ? AND product_id = ? AND remaining > 0
-              ORDER BY mfg ASC
-              FOR UPDATE",
-            [$dealerId, $productId]
-        );
-
-        $available = 0.0;
-        foreach ($rows as $r) $available += (float) $r->remaining;
-
-        if ($available + 0.0000001 < $qty) {
-            throw new \RuntimeException(
-                "Insufficient stock for product {$productId}. Required {$qty}, available {$available}."
-            );
-        }
-
-        $left = $qty;
-        foreach ($rows as $row) {
-            if ($left <= 0) break;
-            $thisQty = (float) $row->remaining;
-            if ($left >= $thisQty) {
-                DB::update("UPDATE stock SET remaining = 0 WHERE id = ?", [$row->id]);
-                $left -= $thisQty;
-            } else {
-                DB::update("UPDATE stock SET remaining = ? WHERE id = ?", [$thisQty - $left, $row->id]);
-                $left = 0;
-            }
-        }
-    }
 }

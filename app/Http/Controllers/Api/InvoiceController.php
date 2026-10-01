@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\InvoiceService;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class InvoiceController extends Controller
@@ -228,6 +230,7 @@ class InvoiceController extends Controller
             'items'  => $items,
             'claim'  => $claim,
             'irn'    => $irnLog,
+            'lock'   => app(InvoiceService::class)->reason((string) $header->id, $dealerId),
 
             'st'     => $st,
             'seller' => [
@@ -263,7 +266,7 @@ class InvoiceController extends Controller
         if (!$invoice) {
             return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
-        if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        if ($lock = app(InvoiceService::class)->reason((string) $invoice->id, $dealerId)) {
             return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
@@ -288,17 +291,24 @@ class InvoiceController extends Controller
             'items.*.spl_disc_amt' => 'nullable|numeric|min:0',
             'items.*.cash_amt'   => 'nullable|numeric|min:0',
             'items.*.batch_no'   => 'nullable|string|max:11',
-            'items.*.mfg_date'   => 'nullable|date',
+            'items.*.mfg_date'   => 'nullable|string|max:20',
         ]);
 
         try {
         DB::transaction(function () use ($id, $invoice, $validated, $dealerId) {
 
             $oldItems = DB::select(
-                "SELECT product_id, qty, free_qty, batch_no, mfg_date, tax, old_rate
+                "SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp, tax, old_rate, order_id
                    FROM challan_order_details WHERE ch_id = ?",
                 [$id]
             );
+
+            $orderOf = [];
+            foreach ($oldItems as $o) {
+                if ((string) $o->order_id !== '') $orderOf[(int) $o->product_id] = (string) $o->order_id;
+            }
+            $orderIds     = array_values(array_unique($orderOf));
+            $defaultOrder = count($orderIds) === 1 ? $orderIds[0] : '';
 
             $oldMap = [];
             foreach ($oldItems as $o) {
@@ -316,11 +326,11 @@ class InvoiceController extends Controller
             $lines        = [];
             $totalTaxable = 0.0;
             $totalVat     = 0.0;
-            $seenKeys     = [];
+            $stockLines   = [];
 
             foreach ($validated['items'] as $row) {
                 $product = DB::selectOne(
-                    "SELECT id, gst_percent FROM catalog_product WHERE id = ?",
+                    "SELECT id, name, gst_percent FROM catalog_product WHERE id = ?",
                     [(int) $row['product_id']]
                 );
                 if (!$product) {
@@ -358,20 +368,14 @@ class InvoiceController extends Controller
                 // FIX #1: legacy stores GST-inclusive line total
                 $lineTotal = round($taxable + $vatAmt, 2);
 
-                // stock delta
-                $key = $this->lineKey((int) $row['product_id'], $batchNo, $mfgDate);
-                $seenKeys[$key] = true;
-
-                if (isset($oldMap[$key])) {
-                    $oldQtyTot = $oldMap[$key]['qty'];
-                    if ($newQtyTot > $oldQtyTot) {
-                        $this->adjustStockQty($dealerId, (int) $row['product_id'], $batchNo, $mfgDate, -($newQtyTot - $oldQtyTot));
-                    } elseif ($newQtyTot < $oldQtyTot) {
-                        $this->adjustStockQty($dealerId, (int) $row['product_id'], $batchNo, $mfgDate, ($oldQtyTot - $newQtyTot));
-                    }
-                } else {
-                    $this->adjustStockQty($dealerId, (int) $row['product_id'], $batchNo, $mfgDate, -$newQtyTot);
-                }
+                $stockLines[] = [
+                    'product_id' => (int) $row['product_id'],
+                    'batch_no'   => $batchNo,
+                    'mfg_date'   => $mfgDate,
+                    'mrp'        => $mrp,
+                    'qty'        => $newQtyTot,
+                    'name'       => (string) $product->name,
+                ];
 
                 $lines[] = [
                     'ch_id'         => $id,
@@ -396,6 +400,7 @@ class InvoiceController extends Controller
                     'batch_no'      => $batchNo,
                     'mfg_date'      => $mfgDate,
                     'user_id'       => (int) ($validated['user_id'] ?? $invoice->ch_user_id),
+                    'order_id'      => $orderOf[(int) $row['product_id']] ?? $defaultOrder,
                     'sync_status'   => 1,
                     'old_rate'      => $oldMap[$key]['old_rate'] ?? null,
                 ];
@@ -404,11 +409,18 @@ class InvoiceController extends Controller
                 $totalVat     += $vatAmt;
             }
 
-            // removed items → stock wapas
-            foreach ($oldMap as $key => $o) {
-                if (isset($seenKeys[$key])) continue;
-                if ($o['qty'] <= 0) continue;
-                $this->adjustStockQty($dealerId, $o['product_id'], $o['batch_no'], $o['mfg_date'], $o['qty']);
+            app(StockService::class)->sync($dealerId, $oldItems, $stockLines);
+
+            $invoiceService = app(InvoiceService::class);
+            $invoiceService->reopenSalesOrders($oldItems);
+            $invoicedByOrder = [];
+            foreach ($lines as $l) {
+                if ($l['order_id'] !== '') {
+                    $invoicedByOrder[$l['order_id']][$l['product_id']] = ($invoicedByOrder[$l['order_id']][$l['product_id']] ?? 0) + (float) $l['qty'];
+                }
+            }
+            foreach ($invoicedByOrder as $orderId => $qtys) {
+                $invoiceService->fulfilSalesOrder($dealerId, (string) $orderId, $qtys);
             }
 
             DB::table('challan_order_details')->where('ch_id', $id)->delete();
@@ -471,16 +483,21 @@ class InvoiceController extends Controller
         if (!$invoice) {
             return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
-        if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        if ($lock = app(InvoiceService::class)->reason((string) $invoice->id, $dealerId)) {
             return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
         try {
         DB::transaction(function () use ($id, $invoice, $user, $reason, $dealerId) {
 
-            foreach (DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date FROM challan_order_details WHERE ch_id = ?", [$id]) as $l) {
-                $this->adjustStockQty($dealerId, (int) $l->product_id, (string) $l->batch_no, (string) $l->mfg_date, (float) $l->qty + (float) $l->free_qty);
-            }
+            app(InvoiceService::class)->reopenSalesOrders(
+                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
+            );
+            app(StockService::class)->sync(
+                $dealerId,
+                DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp FROM challan_order_details WHERE ch_id = ?", [$id]),
+                []
+            );
 
             $detailRows = DB::select("SELECT * FROM challan_order_details WHERE ch_id = ?", [$id]);
             foreach ($detailRows as $r) {
@@ -547,16 +564,21 @@ class InvoiceController extends Controller
             return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
 
-        if ($lock = $this->invoiceLockReason($invoice, $dealerId)) {
+        if ($lock = app(InvoiceService::class)->reason((string) $invoice->id, $dealerId)) {
             return response()->json(['status' => false, 'message' => $lock], 409);
         }
 
         try {
         DB::transaction(function () use ($id, $invoice, $user, $dealerId) {
 
-            foreach (DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date FROM challan_order_details WHERE ch_id = ?", [$id]) as $l) {
-                $this->adjustStockQty($dealerId, (int) $l->product_id, (string) $l->batch_no, (string) $l->mfg_date, (float) $l->qty + (float) $l->free_qty);
-            }
+            app(InvoiceService::class)->reopenSalesOrders(
+                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
+            );
+            app(StockService::class)->sync(
+                $dealerId,
+                DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp FROM challan_order_details WHERE ch_id = ?", [$id]),
+                []
+            );
 
             $detailRows = DB::select("SELECT * FROM challan_order_details WHERE ch_id = ?", [$id]);
             foreach ($detailRows as $r) {
@@ -684,74 +706,11 @@ class InvoiceController extends Controller
         return '';
     }
 
-    private function invoiceLockReason(object $inv, int $dealerId): ?string
-    {
-        if ((int) $inv->dispatch_status === 1) return 'Invoice already dispatched.';
-        if ((int) $inv->payment_status  === 1) return 'Payment already recorded against this invoice.';
-        if ((int) $inv->isclaim         === 1) return 'Claim already filed against this invoice.';
-
-        $irn = DB::selectOne(
-            "SELECT id FROM einvoice_api_logs
-              WHERE challan_id = ? AND status = 1
-              LIMIT 1",
-            [(string) $inv->id]
-        );
-        if ($irn) return 'E-invoice (IRN) already generated for this invoice.';
-
-        $claim = DB::selectOne(
-            "SELECT id FROM dms_retailer_images_amount_claim
-              WHERE order_id = ? AND dealer_id = ?
-              LIMIT 1",
-            [(string) $inv->id, $dealerId]
-        );
-        if ($claim) return 'Claim exists for this invoice.';
-
-        return null;
-    }
-
     private function lineKey(int $productId, string $batchNo, string $mfgDate): string
     {
         return $productId . '|' . $batchNo . '|' . $mfgDate;
     }
 
-    private function adjustStockQty(
-        int $dealerId,
-        int $productId,
-        string $batchNo,
-        string $mfgDate,
-        float $delta
-    ): void {
-        $abs = abs($delta);
-        if ($abs <= 0) return;
-
-        if ($delta < 0) {
-            $done = DB::update(
-                "UPDATE stock SET remaining = remaining - ?
-                  WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ? AND remaining >= ?
-                  LIMIT 1",
-                [$abs, $dealerId, $productId, $batchNo, $mfgDate, $abs]
-            );
-            if (!$done) {
-                throw new \RuntimeException("Insufficient stock for product {$productId} (batch {$batchNo}).");
-            }
-            return;
-        }
-
-        $done = DB::update(
-            "UPDATE stock SET remaining = remaining + ?
-              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ?
-              LIMIT 1",
-            [$abs, $dealerId, $productId, $batchNo, $mfgDate]
-        ) ?: DB::update(
-            "UPDATE stock SET remaining = remaining + ?
-              WHERE dealer_id = ? AND product_id = ?
-              ORDER BY mfg DESC LIMIT 1",
-            [$abs, $dealerId, $productId]
-        );
-        if (!$done) {
-            throw new \RuntimeException("Cannot restore stock: no stock row for product {$productId}.");
-        }
-    }
     public function claimDetails(Request $request, string $id): JsonResponse
     {
         $user      = $request->user();

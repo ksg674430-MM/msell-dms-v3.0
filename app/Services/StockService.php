@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\InsufficientStockException;
 use Illuminate\Support\Facades\DB;
 
 class StockService
@@ -23,24 +24,17 @@ class StockService
             $mrp       = (float) $it['mrp'];
             $batchNo   = (string) ($it['batch_no'] ?? '');
             $mfgDate   = $this->normalizeDate($it['mfg_date'] ?? '1970-01-01');
-            $mfgMon    = date('Y-m', strtotime($mfgDate));
             $rate      = (float) ($it['product_rate'] ?? 0);
-            $qty       = (float) $it['qty'];
-            $freeQty   = (float) ($it['free_qty'] ?? 0);
-            $qtyy      = $qty + $freeQty;
+            $qtyy      = (float) $it['qty'] + (float) ($it['free_qty'] ?? 0);
 
-            $stock = $this->findStock($productId, $dealerId, $mrp, $batchNo, $mfgMon);
+            $stock = $this->locate($dealerId, $productId, $batchNo, $mfgDate, $mrp);
 
             if ($saleableNonSaleable === 1) {
-                // Saleable → increase qty + salable_damage
                 if ($stock) {
-                    $newQty = (float) $stock->qty + $qtyy;
-                    DB::table('stock')->where('id', $stock->id)->update([
-                        'qty'              => $newQty,
-                        'remaining'        => $newQty,
-                        'salable_damage'   => $newQty,
-                        'update_date_time' => now(),
-                    ]);
+                    DB::update(
+                        "UPDATE stock SET qty = qty + ?, remaining = qty, salable_damage = qty, update_date_time = NOW() WHERE id = ?",
+                        [$qtyy, $stock->id]
+                    );
                 } else {
                     $this->insertStock([
                         'product_id'         => $productId,
@@ -57,23 +51,15 @@ class StockService
                     ]);
                 }
             } elseif ($saleableNonSaleable === 2) {
-                // Self → deduct from qty (must be available)
                 if ($forSelfRetailer === 0) {
-                    if (!$stock || (float) $stock->qty < $qtyy) {
-                        throw new \RuntimeException('Stock Qty is not available in salable stock.');
-                    }
-                    DB::table('stock')->where('id', $stock->id)->update([
-                        'qty'              => (float) $stock->qty - $qtyy,
-                        'update_date_time' => now(),
-                    ]);
+                    $this->decrement($stock, 'qty', $qtyy, $this->shortage($productId, '', $batchNo, $mrp, $qtyy, (float) ($stock->qty ?? 0)));
                 }
 
-                // Increase nonsalable_damage
                 if ($stock) {
-                    DB::table('stock')->where('id', $stock->id)->update([
-                        'nonsalable_damage' => (float) $stock->nonsalable_damage + $qtyy,
-                        'update_date_time'  => now(),
-                    ]);
+                    DB::update(
+                        "UPDATE stock SET nonsalable_damage = nonsalable_damage + ?, update_date_time = NOW() WHERE id = ?",
+                        [$qtyy, $stock->id]
+                    );
                 } else {
                     $this->insertStock([
                         'product_id'         => $productId,
@@ -93,9 +79,6 @@ class StockService
         }
     }
 
-    /**
-     * Reverse effect of a previous apply() — used by update().
-     */
     public function reverse(
         array $items,
         int $dealerId,
@@ -107,51 +90,333 @@ class StockService
             $mrp       = (float) $it->mrp;
             $batchNo   = (string) $it->batch_no;
             $mfgDate   = (string) $it->mfg_date;
-            $mfgMon    = date('Y-m', strtotime($mfgDate));
             $qtyy      = (float) $it->qty + (float) $it->free_qty;
 
-            $stock = $this->findStock($productId, $dealerId, $mrp, $batchNo, $mfgMon);
-            if (!$stock) {
-                continue;
-            }
+            $stock = $this->locate($dealerId, $productId, $batchNo, $mfgDate, $mrp);
 
             if ($saleableNonSaleable === 1) {
-                $newQty = max(0, (float) $stock->qty - $qtyy);
-                DB::table('stock')->where('id', $stock->id)->update([
-                    'qty'              => $newQty,
-                    'remaining'        => $newQty,
-                    'salable_damage'   => $newQty,
-                    'update_date_time' => now(),
-                ]);
+                $this->decrement($stock, 'qty', $qtyy, $this->shortage($productId, '', $batchNo, $mrp, $qtyy, (float) ($stock->qty ?? 0)));
+                DB::update(
+                    "UPDATE stock SET remaining = qty, salable_damage = qty, update_date_time = NOW() WHERE id = ?",
+                    [$stock->id]
+                );
             } elseif ($saleableNonSaleable === 2) {
+                $this->decrement($stock, 'nonsalable_damage', $qtyy, $this->shortage($productId, '', $batchNo, $mrp, $qtyy, (float) ($stock->nonsalable_damage ?? 0), 'Non-salable stock'));
                 if ($forSelfRetailer === 0) {
-                    DB::table('stock')->where('id', $stock->id)->update([
-                        'qty'              => (float) $stock->qty + $qtyy,
-                        'update_date_time' => now(),
-                    ]);
+                    DB::update(
+                        "UPDATE stock SET qty = qty + ?, update_date_time = NOW() WHERE id = ?",
+                        [$qtyy, $stock->id]
+                    );
                 }
-                DB::table('stock')->where('id', $stock->id)->update([
-                    'nonsalable_damage' => max(0, (float) $stock->nonsalable_damage - $qtyy),
-                    'update_date_time'  => now(),
-                ]);
             }
         }
     }
 
-    protected function findStock(
-        int $productId,
+    public function receive(
         int $dealerId,
-        float $mrp,
+        int $productId,
         string $batchNo,
-        string $mfgMon
-    ) {
-        return DB::table('stock')
-            ->where('product_id', $productId)
+        string $mfg,
+        float $mrp,
+        float $qty,
+        array $insert = [],
+        array $set = [],
+        float $salableDamage = 0,
+        float $nonsalableDamage = 0
+    ): void {
+        if ($qty < 0 || $salableDamage < 0 || $nonsalableDamage < 0) {
+            throw new InsufficientStockException('Stock quantity cannot be negative.');
+        }
+
+        $row = $this->locate($dealerId, $productId, $batchNo, $mfg, $mrp);
+        if ($row) {
+            $sql = 'qty = qty + ?, remaining = remaining + ?, salable_damage = salable_damage + ?, nonsalable_damage = nonsalable_damage + ?, date = CURDATE(), update_date_time = NOW()';
+            $bindings = [$qty, $qty, $salableDamage, $nonsalableDamage];
+            foreach ($set as $column => $value) {
+                $sql .= ", `{$column}` = ?";
+                $bindings[] = $value;
+            }
+            $bindings[] = $row->id;
+            DB::update("UPDATE stock SET {$sql} WHERE id = ?", $bindings);
+            return;
+        }
+
+        $this->insertStock($insert + [
+            'product_id'        => $productId,
+            'batch_no'          => $batchNo,
+            'rate'              => 0,
+            'dealer_rate'       => 0,
+            'mrp'               => $mrp,
+            'dealer_id'         => $dealerId,
+            'qty'               => $qty,
+            'salable_damage'    => $salableDamage,
+            'nonsalable_damage' => $nonsalableDamage,
+            'remaining'         => $qty,
+            'mfg'               => $this->normalizeDate($mfg),
+        ]);
+    }
+
+    public function takeFifo(int $dealerId, int $productId, float $qty, string $productName = ''): void
+    {
+        if ($qty <= 0) return;
+
+        $rows = DB::select(
+            "SELECT id, qty FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND qty > 0
+              ORDER BY mfg ASC, id ASC
+              FOR UPDATE",
+            [$dealerId, $productId]
+        );
+
+        $available = array_sum(array_map(fn ($r) => (float) $r->qty, $rows));
+        if ($available + 0.0000001 < $qty) {
+            throw new InsufficientStockException($this->shortage($productId, $productName, null, null, $qty, $available));
+        }
+
+        $left = $qty;
+        foreach ($rows as $row) {
+            if ($left <= 0) break;
+            $part = min($left, (float) $row->qty);
+            $this->decrement($row, 'qty', $part, $this->shortage($productId, $productName, null, null, $qty, $available));
+            $left -= $part;
+        }
+    }
+
+    public function editRow(int $dealerId, int $companyId, object $existing, array $update, bool $mrpChanged): void
+    {
+        if ((float) $update['qty'] < 0 || (float) ($update['nonsalable_damage'] ?? 0) < 0) {
+            throw new InsufficientStockException('Stock quantity cannot be negative.');
+        }
+
+        $target = DB::selectOne(
+            "SELECT id FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ? AND ABS(mrp - ?) < 0.001 AND id <> ?
+              LIMIT 1
+              FOR UPDATE",
+            [
+                $dealerId, $existing->product_id,
+                $update['batch_no'] ?? $existing->batch_no,
+                $update['mfg'] ?? $existing->mfg,
+                $update['mrp'] ?? $existing->mrp,
+                $existing->id,
+            ]
+        );
+
+        if ($target) {
+            DB::update(
+                "UPDATE stock SET qty = qty + ?, nonsalable_damage = nonsalable_damage + ?, date = NOW() WHERE id = ?",
+                [(float) $update['qty'], (int) ($update['nonsalable_damage'] ?? $existing->nonsalable_damage), $target->id]
+            );
+            $this->clearRow($dealerId, (int) $existing->id);
+            return;
+        }
+
+        if ($mrpChanged) {
+            DB::table('stock')->insert($update + [
+                'product_id'        => $existing->product_id,
+                'batch_no'          => $existing->batch_no,
+                'mfg'               => $existing->mfg,
+                'nonsalable_damage' => (int) $existing->nonsalable_damage,
+                'csa_id'            => $existing->csa_id,
+                'dealer_id'         => $dealerId,
+                'salable_damage'    => 0,
+                'remaining'         => 0,
+                'expire'            => date('Y-m-d', strtotime('+1 years')),
+                'pr_rate'           => 0,
+                'company_id'        => $companyId,
+            ]);
+            $this->clearRow($dealerId, (int) $existing->id);
+            return;
+        }
+
+        DB::table('stock')
+            ->where('id', $existing->id)
             ->where('dealer_id', $dealerId)
-            ->where('mrp', $mrp)
-            ->where('batch_no', $batchNo)
-            ->whereRaw("DATE_FORMAT(mfg, '%Y-%m') = ?", [$mfgMon])
-            ->first();
+            ->update($update);
+    }
+
+    public function deleteRow(int $dealerId, int $id): void
+    {
+        DB::delete("DELETE FROM stock WHERE id = ? AND dealer_id = ?", [$id, $dealerId]);
+    }
+
+    public function locate(int $dealerId, int $productId, string $batchNo, ?string $mfg, float $mrp): ?object
+    {
+        if ($this->isUndated($mfg)) {
+            return DB::selectOne(
+                "SELECT * FROM stock
+                  WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND ABS(mrp - ?) < 0.001
+                    AND (mfg IS NULL OR mfg < '1971-01-01')
+                  ORDER BY qty DESC, id ASC
+                  LIMIT 1
+                  FOR UPDATE",
+                [$dealerId, $productId, $batchNo, $mrp]
+            );
+        }
+
+        $mfg = $this->normalizeDate($mfg);
+
+        return DB::selectOne(
+            "SELECT * FROM stock
+              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND ABS(mrp - ?) < 0.001
+                AND DATE_FORMAT(mfg, '%Y-%m') = DATE_FORMAT(?, '%Y-%m')
+              ORDER BY mfg = ? DESC, qty DESC, id ASC
+              LIMIT 1
+              FOR UPDATE",
+            [$dealerId, $productId, $batchNo, $mrp, $mfg, $mfg]
+        );
+    }
+
+    public function available(int $dealerId, int $productId, ?float $mrp = null, ?string $batchNo = null, ?string $mfg = null): float
+    {
+        $sql = "SELECT COALESCE(SUM(qty), 0) AS qty FROM stock WHERE dealer_id = ? AND product_id = ? AND qty > 0";
+        $bindings = [$dealerId, $productId];
+        if ($mrp !== null) {
+            $sql .= " AND ABS(mrp - ?) < 0.001";
+            $bindings[] = $mrp;
+        }
+        if ($batchNo !== null) {
+            $sql .= " AND batch_no = ?";
+            $bindings[] = $batchNo;
+        }
+        if ($mfg !== null && $mfg !== '') {
+            $sql .= " AND DATE_FORMAT(mfg, '%Y-%m') = DATE_FORMAT(?, '%Y-%m')";
+            $bindings[] = $this->normalizeDate($mfg);
+        }
+
+        return (float) DB::selectOne($sql, $bindings)->qty;
+    }
+
+    public function take(int $dealerId, int $productId, string $batchNo, string $mfg, float $mrp, float $qty, string $productName = '', float $held = 0): void
+    {
+        if ($qty <= 0) return;
+
+        $row = $this->locate($dealerId, $productId, $batchNo, $mfg, $mrp);
+        $this->decrement($row, 'qty', $qty, $this->shortage($productId, $productName, $batchNo, $mrp, $qty + $held, (float) ($row->qty ?? 0) + $held));
+    }
+
+    public function give(int $dealerId, int $productId, string $batchNo, string $mfg, float $mrp, float $qty): void
+    {
+        if ($qty <= 0) return;
+
+        $row = $this->locate($dealerId, $productId, $batchNo, $mfg, $mrp);
+        if ($row) {
+            DB::update(
+                "UPDATE stock SET qty = qty + ?, update_date_time = NOW() WHERE id = ?",
+                [$qty, $row->id]
+            );
+            return;
+        }
+
+        $ref = DB::selectOne(
+            "SELECT rate, dealer_rate, company_id FROM stock
+              WHERE dealer_id = ? AND product_id = ?
+              ORDER BY ABS(mrp - ?) ASC, id DESC
+              LIMIT 1",
+            [$dealerId, $productId, $mrp]
+        );
+
+        $this->insertStock([
+            'product_id'        => $productId,
+            'batch_no'          => $batchNo,
+            'rate'              => $ref->rate ?? 0,
+            'dealer_rate'       => $ref->dealer_rate ?? 0,
+            'mrp'               => $mrp,
+            'dealer_id'         => $dealerId,
+            'qty'               => $qty,
+            'salable_damage'    => 0,
+            'nonsalable_damage' => 0,
+            'remaining'         => 0,
+            'mfg'               => $this->normalizeDate($mfg),
+            'company_id'        => $ref->company_id ?? 1,
+        ]);
+    }
+
+    public function sync(int $dealerId, array $before, array $after): void
+    {
+        $totals = [];
+        foreach ([[$before, 'before'], [$after, 'after']] as [$lines, $side]) {
+            foreach ($lines as $l) {
+                $l   = (array) $l;
+                $mfg = $this->isUndated($l['mfg_date'] ?? null) ? '0000-00-00' : $this->normalizeDate($l['mfg_date']);
+                $key = implode('|', [(int) $l['product_id'], (string) ($l['batch_no'] ?? ''), $mfg, number_format((float) $l['mrp'], 2, '.', '')]);
+                $totals[$key] ??= [
+                    'product_id' => (int) $l['product_id'],
+                    'batch_no'   => (string) ($l['batch_no'] ?? ''),
+                    'mfg_date'   => $mfg,
+                    'mrp'        => (float) $l['mrp'],
+                    'name'       => '',
+                    'before'     => 0.0,
+                    'after'      => 0.0,
+                ];
+                $totals[$key]['name'] = $totals[$key]['name'] !== '' ? $totals[$key]['name'] : (string) ($l['name'] ?? '');
+                $totals[$key][$side] += (float) $l['qty'] + (float) ($l['free_qty'] ?? 0);
+            }
+        }
+
+        uasort($totals, fn ($a, $b) => ($b['before'] - $b['after']) <=> ($a['before'] - $a['after']));
+
+        foreach ($totals as $t) {
+            $delta = $t['before'] - $t['after'];
+            if ($delta > 0.0000001) {
+                $this->give($dealerId, $t['product_id'], $t['batch_no'], $t['mfg_date'], $t['mrp'], $delta);
+            } elseif ($delta < -0.0000001) {
+                $this->take($dealerId, $t['product_id'], $t['batch_no'], $t['mfg_date'], $t['mrp'], -$delta, $t['name'], $t['before']);
+            }
+        }
+    }
+
+    protected function decrement(?object $row, string $column, float $qty, string $message): void
+    {
+        if ($qty <= 0) return;
+
+        $column = $column === 'nonsalable_damage' ? 'nonsalable_damage' : 'qty';
+        $done = $row
+            ? DB::update(
+                "UPDATE stock SET {$column} = {$column} - ?, update_date_time = NOW() WHERE id = ? AND {$column} + 0.0000001 >= ?",
+                [$qty, $row->id, $qty]
+            )
+            : 0;
+
+        if (!$done) {
+            throw new InsufficientStockException($message);
+        }
+    }
+
+    protected function clearRow(int $dealerId, int $id): void
+    {
+        DB::update(
+            "UPDATE stock SET qty = 0, nonsalable_damage = 0, date = NOW() WHERE id = ? AND dealer_id = ?",
+            [$id, $dealerId]
+        );
+    }
+
+    protected function shortage(int $productId, string $productName, ?string $batchNo, ?float $mrp, float $required, float $available, string $label = 'Stock'): string
+    {
+        if ($productName === '') {
+            $productName = (string) (DB::table('catalog_product')->where('id', $productId)->value('name') ?? $productId);
+        }
+
+        return sprintf(
+            '%s not available for product "%s"%s. Required qty: %s, Available qty: %s.',
+            $label,
+            $productName,
+            $batchNo === null ? '' : sprintf(' (batch %s, MRP %s)', $batchNo !== '' ? $batchNo : '-', number_format((float) $mrp, 2, '.', '')),
+            $this->formatQty($required),
+            $this->formatQty(max($available, 0))
+        );
+    }
+
+    protected function isUndated(?string $d): bool
+    {
+        $d = trim((string) $d);
+
+        return $d === '' || str_starts_with($d, '0000') || str_starts_with($d, '-') || str_starts_with($d, '1970-01-01');
+    }
+
+    protected function formatQty(float $qty): string
+    {
+        return rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.');
     }
 
     protected function insertStock(array $d): void
@@ -162,18 +427,18 @@ class StockService
             'rate'               => $d['rate'],
             'dealer_rate'        => $d['dealer_rate'],
             'mrp'                => $d['mrp'],
-            'person_id'          => 0,
-            'csa_id'             => 0,
+            'person_id'          => $d['person_id'] ?? 0,
+            'csa_id'             => $d['csa_id'] ?? 0,
             'dealer_id'          => $d['dealer_id'],
             'qty'                => $d['qty'],
             'salable_damage'     => $d['salable_damage'],
             'nonsalable_damage'  => $d['nonsalable_damage'],
             'remaining'          => $d['remaining'],
             'mfg'                => $d['mfg'],
-            'expire'             => null,
+            'expire'             => $d['expire'] ?? null,
             'date'               => now()->format('Y-m-d'),
-            'pr_rate'            => 0,
-            'company_id'         => 1,
+            'pr_rate'            => $d['pr_rate'] ?? 0,
+            'company_id'         => $d['company_id'] ?? 1,
             'action'             => '1',
             'sync_status'        => 1,
             'update_date_time'   => now(),

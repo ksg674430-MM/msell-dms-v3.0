@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class DepotDamageLookupController extends Controller
@@ -127,45 +128,44 @@ class DepotDamageLookupController extends Controller
         // (see `rateNstockDamage` depot branch → `dealer_pcs_rate`).
         $rateCol = 'dealer_pcs_rate';  // this is what the depot branch used
 
-        $q = DB::table('stock as s')
-            ->join('catalog_product as p', 's.product_id', '=', 'p.id')
+        $rate = DB::table('catalog_product as p')
             ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
-            ->where('s.product_id', $id)
-            ->where('s.batch_no', $batchNo)
-            ->whereRaw("DATE_FORMAT(s.mfg, '%d-%b-%Y') = ?", [$mfgDate]);
-
-        if ($companyIdCus === 213) {
-            $rateTable = $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
-            $q->join("$rateTable as prl", 'prl.product_id', '=', 'p.id');
-            if ($templateId > 0) {
-                $q->where('prl.template_type', (string) $templateId);
-            } else {
-                $q->where('prl.state_id', $stateId);
+            ->where('p.id', $id);
+        $rateTable = $companyIdCus === 213 && $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
+        $rate->leftJoin("$rateTable as prl", function ($j) use ($rateTable, $templateId, $stateId, $companyIdCus) {
+            $j->on('prl.product_id', '=', 'p.id');
+            if ($rateTable === 'product_rate_list_template') {
+                $j->where('prl.template_type', (string) $templateId);
+            } elseif ($companyIdCus === 213) {
+                $j->where('prl.state_id', $stateId);
             }
-            $q->whereRaw("ROUND(s.mrp,1) = ROUND(CAST(? AS DECIMAL(16,2)),1)", [(float) $mrp]);
-            $q->where('s.dealer_id', $dealerId);
-        } else {
-            $q->where('s.mrp', $mrp)->where('s.dealer_id', $dealerId);
-            $q->leftJoin('product_rate_list as prl', 'prl.product_id', '=', 'p.id');
-        }
-
-        $row = $q->first([
-            's.product_id',
-            's.qty',
+        });
+        $row = $rate->first([
             DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
             DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
         ]);
-
         if (!$row) {
             return response()->json(['data' => null]);
         }
+
+        $mfg = null;
+        if ($mfgDate) {
+            $ts  = strtotime(str_replace('/', '-', (string) $mfgDate));
+            $mfg = $ts ? date('Y-m-d', $ts) : null;
+        }
+        $qty = app(StockService::class)->available(
+            $dealerId, $id,
+            $mrp !== null && $mrp !== '' ? (float) $mrp : null,
+            $batchNo !== null && $batchNo !== '' ? (string) $batchNo : null,
+            $mfg
+        );
 
         $beforeGst = round($row->raw_rate - ($row->raw_rate * (100 / (100 + (float) $row->igst))), 3);
         $netRate   = round($row->raw_rate - $beforeGst, 2);
 
         return response()->json(['data' => [
-            'product_id' => $row->product_id,
-            'qty'        => $row->qty,
+            'product_id' => $id,
+            'qty'        => $qty,
             'igst'       => $row->igst,
             'rate'       => $netRate,
         ]]);

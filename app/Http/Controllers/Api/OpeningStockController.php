@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class OpeningStockController extends Controller
@@ -196,65 +197,13 @@ class OpeningStockController extends Controller
                     ]
                 );
 
-                // 2. Sync into `stock`
-                $existing = DB::selectOne(
-                    "SELECT id, qty
-                       FROM stock
-                      WHERE dealer_id  = ?
-                        AND product_id = ?
-                        AND batch_no   = ?
-                        AND mrp        = ?
-                        AND DATE_FORMAT(mfg, '%Y-%m') = DATE_FORMAT(?, '%Y-%m')
-                      LIMIT 1",
-                    [$dealerId, $productId, $batchNo, $mrp, $mfg]
+                app(StockService::class)->receive(
+                    $dealerId, $productId, (string) $batchNo, $mfg, $mrp, $qty,
+                    ['rate' => $rate, 'dealer_rate' => $rate, 'company_id' => $companyId],
+                    ['dealer_rate' => $rate],
+                    $salableQty,
+                    $nsQty
                 );
-
-                if ($existing) {
-                    // Updated: Removed `expire`, added `salable_damage`
-                    DB::update(
-                        "UPDATE stock
-                            SET qty              = ?,
-                                remaining        = remaining + ?,
-                                salable_damage   = salable_damage + ?,
-                                nonsalable_damage = nonsalable_damage + ?,
-                                dealer_rate      = ?,
-                                mrp              = ?,
-                                date             = NOW(),
-                                update_date_time = NOW()
-                          WHERE id = ?",
-                        [
-                            $existing->qty + $qty,
-                            $qty,
-                            $salableQty,
-                            $nsQty,
-                            $rate,
-                            $mrp,
-                            $existing->id,
-                        ]
-                    );
-                } else {
-                    // Insert into stock (Removed `expire`, added `salable_damage`)
-                    DB::insert(
-                        "INSERT INTO stock
-                            (product_id, batch_no, rate, dealer_rate, mrp,
-                             person_id, csa_id, dealer_id, qty,
-                             salable_damage, nonsalable_damage, remaining,
-                             mfg, date, pr_rate, company_id,
-                             action, sync_status, update_date_time)
-                         VALUES
-                            (?, ?, ?, ?, ?,
-                             0, 0, ?, ?,
-                             ?, ?, ?,
-                             ?, NOW(), 0, ?,
-                             1, 1, NOW())",
-                        [
-                            $productId, $batchNo, $rate, $rate, $mrp,
-                            $dealerId, $qty,
-                            $salableQty, $nsQty, $qty,
-                            $mfg, $companyId,
-                        ]
-                    );
-                }
             }
 
             DB::commit();

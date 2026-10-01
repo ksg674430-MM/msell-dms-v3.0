@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class StockImportController extends Controller
@@ -192,45 +193,18 @@ class StockImportController extends Controller
                     ]
                 );
 
-                $existingStock = DB::selectOne(
-                    "SELECT id, qty FROM stock
-                      WHERE product_id = ? AND dealer_id = ? AND batch_no = ?
-                        AND mrp = ?
-                        AND DATE_FORMAT(mfg, '%Y-%m') = DATE_FORMAT(?, '%Y-%m')
-                      LIMIT 1",
-                    [$productId, $dealerId, $batchNo, $mrp, $mfgDate]
+                app(StockService::class)->receive(
+                    $dealerId, (int) $productId, (string) $batchNo, (string) $mfgDate, (float) $mrp, (float) $qty,
+                    [
+                        'rate'        => (float) $rate,
+                        'dealer_rate' => (float) $rate,
+                        'person_id'   => $userId,
+                        'csa_id'      => $csaId,
+                        'expire'      => $mfgDate,
+                        'company_id'  => $companyId,
+                    ],
+                    ['dealer_rate' => (float) $rate, 'expire' => $mfgDate]
                 );
-
-                if ($existingStock) {
-                    DB::update(
-                        "UPDATE stock
-                            SET qty = qty + ?, remaining = remaining + ?, dealer_rate = ?, mrp = ?,
-                                expire = ?, date = NOW(), update_date_time = NOW()
-                          WHERE id = ?",
-                        [(float) $qty, (float) $qty, (float) $rate, (float) $mrp, $mfgDate, $existingStock->id]
-                    );
-                } else {
-                    DB::insert(
-                        "INSERT INTO stock
-                            (product_id, batch_no, rate, dealer_rate, mrp,
-                             person_id, csa_id, dealer_id, qty,
-                             salable_damage, nonsalable_damage, remaining,
-                             mfg, expire, date, pr_rate, company_id,
-                             action, sync_status, update_date_time)
-                         VALUES
-                            (?, ?, ?, ?, ?,
-                             ?, ?, ?, ?,
-                             0, 0, ?,
-                             ?, ?, NOW(), 0, ?,
-                             1, 1, NOW())",
-                        [
-                            $productId, $batchNo, (float) $rate, (float) $rate, (float) $mrp,
-                            $userId, $csaId, $dealerId, (float) $qty,
-                            (float) $qty,
-                            $mfgDate, $mfgDate, $companyId,
-                        ]
-                    );
-                }
 
                 $inserted++;
                 $importedCodes[] = $itemCode;

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -430,30 +431,15 @@ class PurchaseOrderController extends Controller
         if ($qty <= 0) {
             return;
         }
-        $existing = DB::selectOne(
-            "SELECT id FROM stock
-              WHERE dealer_id = ? AND product_id = ? AND batch_no = ? AND mfg = ? AND ROUND(mrp, 2) = ROUND(?, 2)
-              LIMIT 1",
-            [$dealerId, $productId, $batchNo, $mfg, $mrp]
-        );
-        if ($existing) {
-            DB::update(
-                "UPDATE stock SET qty = qty + ?, remaining = remaining + ?, date = CURDATE(), update_date_time = NOW() WHERE id = ?",
-                [$qty, $qty, $existing->id]
-            );
-            return;
-        }
-        DB::insert(
-            "INSERT INTO stock
-                (product_id, batch_no, rate, dealer_rate, mrp, person_id, csa_id, dealer_id,
-                 qty, salable_damage, nonsalable_damage, remaining, mfg, expire, date,
-                 pr_rate, company_id, action, sync_status, update_date_time)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, CURDATE(), ?, ?, 1, 1, NOW())",
-            [
-                $productId, $batchNo, $rate, $rate, $mrp, $personId, $csaId, $dealerId,
-                $qty, $qty, $mfg, $expiry, $rate, $companyId,
-            ]
-        );
+        app(StockService::class)->receive($dealerId, $productId, $batchNo, $mfg, $mrp, $qty, [
+            'rate'        => $rate,
+            'dealer_rate' => $rate,
+            'person_id'   => $personId,
+            'csa_id'      => $csaId,
+            'expire'      => $expiry,
+            'pr_rate'     => $rate,
+            'company_id'  => $companyId,
+        ]);
     }
 
     // -----------------------------------------------------------------

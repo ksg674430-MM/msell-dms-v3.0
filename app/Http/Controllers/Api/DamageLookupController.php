@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class DamageLookupController extends Controller
@@ -138,8 +139,10 @@ class DamageLookupController extends Controller
         $batchNo = $request->query('batch_no');
         $mfgDate = $request->query('mfg_date'); // e.g. '01-Jan-2024'
 
-        // Choose rate column by role + quantity_type (from rateNstockDamage)
-        if ($role === 'DEPO') {
+        $for = (string) $request->query('for', '');
+        if ($for === 'retailer') {
+            $rateCol = $qtyType === '0' ? 'retailer_pcs_rate' : 'retailer_rate';
+        } elseif ($for === 'depot' || $role === 'DEPO') {
             $rateCol = $qtyType === '0' ? 'dealer_pcs_rate' : 'dealer_rate';
         } elseif ($role === 'DISTRIBUTOR') {
             $rateCol = $qtyType === '0' ? 'retailer_pcs_rate' : 'retailer_rate';
@@ -147,49 +150,44 @@ class DamageLookupController extends Controller
             $rateCol = $qtyType === '0' ? 'ss_pcs_rate' : 'ss_case_rate';
         }
 
-        $stockQ = DB::table('stock as s')
-            ->join('catalog_product as p', 's.product_id', '=', 'p.id')
+        $rate = DB::table('catalog_product as p')
             ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
-            ->where('s.product_id', $id)
-            ->where('s.batch_no', $batchNo)
-            ->whereRaw("DATE_FORMAT(s.mfg, '%d-%b-%Y') = ?", [$mfgDate]);
-
-        if ($companyIdCus === 213) {
-            // MRP 213 has numeric(16,2) — cast on both sides
-            $stockQ->whereRaw("ROUND(s.mrp,1) = ROUND(CAST(? AS DECIMAL(16,2)),1)", [(float) $mrp]);
-
-            $rateTable = $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
-            $stockQ->join("$rateTable as prl", 'prl.product_id', '=', 'p.id');
-
-            if ($templateId > 0) {
-                $stockQ->where('prl.template_type', (string) $templateId);
-            } else {
-                $stockQ->where('prl.state_id', $stateId);
+            ->where('p.id', $id);
+        $rateTable = $companyIdCus === 213 && $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
+        $rate->leftJoin("$rateTable as prl", function ($j) use ($rateTable, $templateId, $stateId, $companyIdCus) {
+            $j->on('prl.product_id', '=', 'p.id');
+            if ($rateTable === 'product_rate_list_template') {
+                $j->where('prl.template_type', (string) $templateId);
+            } elseif ($companyIdCus === 213) {
+                $j->where('prl.state_id', $stateId);
             }
-            $stockQ->where('s.dealer_id', $dealerId);
-        } else {
-            $stockQ->where('s.mrp', $mrp)->where('s.dealer_id', $dealerId);
-            $stockQ->leftJoin('product_rate_list as prl', 'prl.product_id', '=', 'p.id');
-        }
-
-        $row = $stockQ->first([
-            's.product_id',
-            's.qty',
+        });
+        $row = $rate->first([
             DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
             DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
         ]);
-
         if (!$row) {
             return response()->json(['data' => null]);
         }
 
-        // For company 213 & most, strip GST from the rate (mirrors JS/PHP)
+        $mfg = null;
+        if ($mfgDate) {
+            $ts  = strtotime(str_replace('/', '-', (string) $mfgDate));
+            $mfg = $ts ? date('Y-m-d', $ts) : null;
+        }
+        $qty = app(StockService::class)->available(
+            $dealerId, $id,
+            $mrp !== null && $mrp !== '' ? (float) $mrp : null,
+            $batchNo !== null && $batchNo !== '' ? (string) $batchNo : null,
+            $mfg
+        );
+
         $beforeGst = round($row->raw_rate - ($row->raw_rate * (100 / (100 + (float) $row->igst))), 3);
         $netRate   = round($row->raw_rate - $beforeGst, 2);
 
         return response()->json(['data' => [
-            'product_id' => $row->product_id,
-            'qty'        => $row->qty,
+            'product_id' => $id,
+            'qty'        => $qty,
             'igst'       => $row->igst,
             'rate'       => $netRate,
         ]]);

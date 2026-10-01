@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\InvoiceService;
 use Illuminate\Support\Facades\DB;
 
 class SalesOrderController extends Controller
@@ -364,23 +365,7 @@ try {
 
     private function outstandingMap(int $dealerId, array $retailerIds): array
     {
-        if (empty($retailerIds)) return [];
-        $in = implode(',', array_map('intval', $retailerIds));
-
-        $rows = DB::select(
-            "SELECT r.id AS retailer_id,
-                    COALESCE((SELECT SUM(amount_round) FROM challan_order
-                              WHERE ch_retailer_id = r.id AND ch_dealer_id = ?), 0)
-                  - COALESCE((SELECT SUM(total_amount) FROM payment_collection
-                              WHERE retailer_id = r.id AND dealer_id = ?), 0) AS outstanding
-               FROM retailer r
-              WHERE r.id IN ({$in})",
-            [$dealerId, $dealerId]
-        );
-
-        $map = [];
-        foreach ($rows as $r) $map[$r->retailer_id] = round((float) $r->outstanding, 2);
-        return $map;
+        return app(InvoiceService::class)->outstanding($dealerId, $retailerIds);
     }
 
     private function overdueDays(string $date): int

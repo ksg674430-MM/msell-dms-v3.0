@@ -94,10 +94,6 @@ class ChallanHelperController extends Controller
     /**
      * GET /api/challans/product-stock/{id}
      * On product select — MRP options + current stock.
-     *
-     * Filters on `remaining` so it agrees with reduceStock().
-     * If your schema treats `qty` as authoritative, change the WHERE
-     * here AND in ChallanController::reduceStock() + formData().
      */
     public function productStock(Request $request, $id): JsonResponse
 {

@@ -101,9 +101,9 @@ class DashboardController extends Controller
                     s.qty, s.remaining, s.mfg, s.expire,
                     cv.product_name, cv.c1_name AS category_name
                FROM stock s
+               INNER JOIN catalog_product cp ON cp.id = s.product_id
                LEFT JOIN catalog_view cv ON cv.product_id = s.product_id
               WHERE s.dealer_id = ?
-                AND s.action = '1'
               ORDER BY cv.c1_name, cv.product_name, s.expire ASC",
             [$dealerId]
         );
@@ -115,9 +115,10 @@ class DashboardController extends Controller
             "SELECT s.id, s.product_id, s.batch_no, s.qty, s.expire,
                     cv.product_name
                FROM stock s
+               INNER JOIN catalog_product cp ON cp.id = s.product_id
                LEFT JOIN catalog_view cv ON cv.product_id = s.product_id
               WHERE s.dealer_id = ?
-                AND s.action = '1'
+                AND s.qty > 0
                 AND s.expire IS NOT NULL
                 AND s.expire <> '1970-01-01'
                 AND s.expire <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)

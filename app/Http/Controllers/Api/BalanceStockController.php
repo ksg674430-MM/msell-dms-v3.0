@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
 
 class BalanceStockController extends Controller
@@ -60,7 +61,7 @@ class BalanceStockController extends Controller
                 prl.mrp                         AS product_mrp,
                 prl.dealer_rate                 AS default_dealer_rate
                FROM catalog_product c
-               INNER JOIN catalog_2 c2 ON c2.id = c.catalog_id
+               LEFT  JOIN catalog_2 c2 ON c2.id = c.catalog_id
                INNER JOIN stock    s  ON s.product_id = c.id AND s.dealer_id = ?
                LEFT  JOIN other_company oc ON oc.id = c.company_id
                LEFT  JOIN (
@@ -130,10 +131,16 @@ class BalanceStockController extends Controller
         $companyId = (int) $request->user()->company_id;
 
         $rows = DB::select(
-            "SELECT id, name FROM catalog_0
-              WHERE company_id = ? AND status = 1
+            "SELECT id, name FROM catalog_0 c0
+              WHERE company_id = ?
+                AND (status = 1 OR EXISTS (
+                     SELECT 1 FROM catalog_1 c1
+                      INNER JOIN catalog_2 c2 ON c2.catalog_1_id = c1.id
+                      INNER JOIN catalog_product p ON p.catalog_id = c2.id
+                      INNER JOIN stock s ON s.product_id = p.id AND s.dealer_id = ?
+                      WHERE c1.catalog_0_id = c0.id))
               ORDER BY sequence, name",
-            [$companyId]
+            [$companyId, (int) $request->user()->dealer_id]
         );
 
         return response()->json([
@@ -160,10 +167,15 @@ class BalanceStockController extends Controller
         $companyId = (int) $request->user()->company_id;
 
         $rows = DB::select(
-            "SELECT id, name FROM catalog_1
-              WHERE catalog_0_id = ? AND company_id = ? AND status = 1
+            "SELECT id, name FROM catalog_1 c1
+              WHERE catalog_0_id = ? AND company_id = ?
+                AND (status = 1 OR EXISTS (
+                     SELECT 1 FROM catalog_2 c2
+                      INNER JOIN catalog_product p ON p.catalog_id = c2.id
+                      INNER JOIN stock s ON s.product_id = p.id AND s.dealer_id = ?
+                      WHERE c2.catalog_1_id = c1.id))
               ORDER BY catalog_1_sequence, name",
-            [$classificationId, $companyId]
+            [$classificationId, $companyId, (int) $request->user()->dealer_id]
         );
 
         return response()->json([
@@ -190,10 +202,14 @@ class BalanceStockController extends Controller
         $companyId = (int) $request->user()->company_id;
 
         $rows = DB::select(
-            "SELECT id, name FROM catalog_2
-              WHERE catalog_1_id = ? AND company_id = ? AND status = 1
+            "SELECT id, name FROM catalog_2 c2
+              WHERE catalog_1_id = ? AND company_id = ?
+                AND (status = 1 OR EXISTS (
+                     SELECT 1 FROM catalog_product p
+                      INNER JOIN stock s ON s.product_id = p.id AND s.dealer_id = ?
+                      WHERE p.catalog_id = c2.id))
               ORDER BY sequence, name",
-            [$categoryId, $companyId]
+            [$categoryId, $companyId, (int) $request->user()->dealer_id]
         );
 
         return response()->json([
@@ -220,11 +236,13 @@ class BalanceStockController extends Controller
         $companyId = (int) $request->user()->company_id;
 
         $rows = DB::select(
-            "SELECT id, CONCAT(name, ' [', quantity_per_case, ']') AS name
-               FROM catalog_product
-              WHERE catalog_id = ? AND company_id = ? AND status = 1
+            "SELECT id, CONCAT(name, '[', quantity_per_case, ']') AS name
+               FROM catalog_product p
+              WHERE catalog_id = ? AND company_id = ?
+                AND (status = 1 OR EXISTS (
+                     SELECT 1 FROM stock s WHERE s.product_id = p.id AND s.dealer_id = ?))
               ORDER BY name",
-            [$productNameId, $companyId]
+            [$productNameId, $companyId, (int) $request->user()->dealer_id]
         );
 
         return response()->json([
@@ -364,12 +382,7 @@ class BalanceStockController extends Controller
         return response()->json(['status' => false, 'message' => 'Stock row not found.'], 404);
     }
 
-    DB::transaction(function () use ($stock, $dealerId) {
-        DB::delete(
-            "DELETE FROM stock WHERE id = ? AND dealer_id = ?",
-            [$stock->id, $dealerId]
-        );
-    });
+    DB::transaction(fn () => app(StockService::class)->deleteRow($dealerId, (int) $stock->id));
 
     return response()->json([
         'status'  => true,
@@ -402,7 +415,7 @@ class BalanceStockController extends Controller
         'rows.*.id'        => 'required|integer',
         'rows.*.qty'       => 'required|numeric|min:0',
         'rows.*.nonsale'   => 'nullable|numeric|min:0',
-        'rows.*.batch_no'  => 'nullable|string|max:11',
+        'rows.*.batch_no'  => 'nullable|string|max:50',
         'rows.*.mfg'       => 'nullable|date',
         'rows.*.mrp'       => 'nullable|numeric|min:0',
     ]);
@@ -428,6 +441,7 @@ class BalanceStockController extends Controller
             if (array_key_exists('batch_no', $row))  $update['batch_no']          = (string) $row['batch_no'];
             if (array_key_exists('mfg', $row))       $update['mfg']               = (string) $row['mfg'];
 
+            $mrpChanged = false;
             if (array_key_exists('mrp', $row) && $row['mrp'] !== null) {
                 $mrp   = (float) $row['mrp'];
                 $rates = $this->ratesFromMrp($mrp, $existing->gst_percent, $existing->division, $stateId);
@@ -435,33 +449,10 @@ class BalanceStockController extends Controller
                 $update['rate']        = $rates['rate'];
                 $update['dealer_rate'] = $rates['dealer_rate'] ?? (float) $existing->dealer_rate;
                 $update['date']        = now();
-
-                if ((float) $existing->mrp > 0 && $mrp != (float) $existing->mrp) {
-                    DB::table('stock')->insert($update + [
-                        'product_id'        => $existing->product_id,
-                        'batch_no'          => $existing->batch_no,
-                        'mfg'               => $existing->mfg,
-                        'nonsalable_damage' => (int) $existing->nonsalable_damage,
-                        'csa_id'            => $existing->csa_id,
-                        'dealer_id'         => $dealerId,
-                        'salable_damage'    => 0,
-                        'remaining'         => 0,
-                        'expire'            => date('Y-m-d', strtotime('+1 years')),
-                        'pr_rate'           => 0,
-                        'company_id'        => $companyId,
-                    ]);
-                    DB::table('stock')
-                        ->where('id', $existing->id)
-                        ->where('dealer_id', $dealerId)
-                        ->update(['qty' => 0, 'nonsalable_damage' => 0, 'date' => now()]);
-                    continue;
-                }
+                $mrpChanged = (float) $existing->mrp > 0 && abs($mrp - (float) $existing->mrp) >= 0.001;
             }
 
-            DB::table('stock')
-                ->where('id', $row['id'])
-                ->where('dealer_id', $dealerId)
-                ->update($update);
+            app(StockService::class)->editRow($dealerId, $companyId, $existing, $update, $mrpChanged);
         }
     });
 

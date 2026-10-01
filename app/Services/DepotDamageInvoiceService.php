@@ -77,7 +77,7 @@ class DepotDamageInvoiceService
             // Depot is always treated as CSA-side (not self), so:
             //   saleable (1)      → qty += qtyy, salable_damage += qtyy
             //   non-saleable (2)  → qty -= qtyy (must be enough), nonsalable_damage += qtyy
-            $this->applyStock($items, $dealerId, $saleableNonSaleable);
+            $this->stock->apply($items, $dealerId, $saleableNonSaleable, 0);
 
             $this->markSaleOrders($items);
 
@@ -131,7 +131,7 @@ class DepotDamageInvoiceService
         DB::beginTransaction();
         try {
             if (!empty($oldItems)) {
-                $this->reverseStock($oldItems, $dealerId, $oldType);
+                $this->stock->reverse($oldItems, $dealerId, $oldType, 0);
             }
 
             DB::table($this->detailsTable)->where('ch_id', $id)->delete();
@@ -149,7 +149,7 @@ class DepotDamageInvoiceService
                 'damage_order_type_id'  => $saleableNonSaleable,
             ]);
 
-            $this->applyStock($items, $dealerId, $saleableNonSaleable);
+            $this->stock->apply($items, $dealerId, $saleableNonSaleable, 0);
             $this->markSaleOrders($items);
 
             DB::commit();
@@ -184,7 +184,7 @@ class DepotDamageInvoiceService
         try {
             $oldItems = DB::table($this->detailsTable)->where('ch_id', $id)->get()->all();
             if (!empty($oldItems)) {
-                $this->reverseStock($oldItems, (int) $existing->ch_dealer_id, (int) $existing->damage_order_type_id);
+                $this->stock->reverse($oldItems, (int) $existing->ch_dealer_id, (int) $existing->damage_order_type_id, 0);
             }
             DB::table($this->detailsTable)->where('ch_id', $id)->delete();
             DB::table($this->headerTable)->where('id', $id)->delete();
@@ -318,105 +318,6 @@ class DepotDamageInvoiceService
         $discAmt = round($amount * $discPer / 100, 2);
         $final   = round($amount - $discAmt, 2);
         return [$amount, $discAmt, $final];
-    }
-
-    /**
-     * Depot stock rules — no "self" branch. Always treat qtyy = qty + free_qty.
-     */
-    protected function applyStock(array $items, int $dealerId, int $saleableNonSaleable): void
-    {
-        foreach ($items as $it) {
-            $productId = (int) $it['product_id'];
-            $mrp       = (float) $it['mrp'];
-            $batchNo   = (string) ($it['batch_no'] ?? '');
-            $mfgDate   = $this->normalizeDate($it['mfg_date'] ?? '1970-01-01');
-            $mfgMon    = date('Y-m', strtotime($mfgDate));
-            $rate      = (float) ($it['product_rate'] ?? 0);
-            $qtyy      = (float) $it['qty'] + (float) ($it['free_qty'] ?? 0);
-
-            $stock = DB::table('stock')
-                ->where('product_id', $productId)
-                ->where('dealer_id', $dealerId)
-                ->where('mrp', $mrp)
-                ->where('batch_no', $batchNo)
-                ->whereRaw("DATE_FORMAT(mfg, '%Y-%m') = ?", [$mfgMon])
-                ->first();
-
-            if ($saleableNonSaleable === 1) {
-                if ($stock) {
-                    $newQty = (float) $stock->qty + $qtyy;
-                    DB::table('stock')->where('id', $stock->id)->update([
-                        'qty' => $newQty, 'remaining' => $newQty, 'salable_damage' => $newQty,
-                        'update_date_time' => now(),
-                    ]);
-                } else {
-                    $this->insertStock([
-                        'product_id' => $productId, 'batch_no' => $batchNo, 'rate' => $rate,
-                        'mrp' => $mrp, 'dealer_id' => $dealerId,
-                        'qty' => $qtyy, 'salable_damage' => $qtyy, 'nonsalable_damage' => 0,
-                        'remaining' => $qtyy, 'mfg' => $mfgDate,
-                    ]);
-                }
-            } elseif ($saleableNonSaleable === 2) {
-                if (!$stock || (float) $stock->qty < $qtyy) {
-                    throw new \RuntimeException('Stock Qty is not available in salable stock.');
-                }
-                DB::table('stock')->where('id', $stock->id)->update([
-                    'qty' => (float) $stock->qty - $qtyy,
-                    'nonsalable_damage' => (float) $stock->nonsalable_damage + $qtyy,
-                    'update_date_time' => now(),
-                ]);
-            }
-        }
-    }
-
-    protected function reverseStock(array $items, int $dealerId, int $saleableNonSaleable): void
-    {
-        foreach ($items as $it) {
-            $productId = (int) $it->product_id;
-            $mrp       = (float) $it->mrp;
-            $batchNo   = (string) $it->batch_no;
-            $mfgDate   = (string) $it->mfg_date;
-            $mfgMon    = date('Y-m', strtotime($mfgDate));
-            $qtyy      = (float) $it->qty + (float) $it->free_qty;
-
-            $stock = DB::table('stock')
-                ->where('product_id', $productId)
-                ->where('dealer_id', $dealerId)
-                ->where('mrp', $mrp)
-                ->where('batch_no', $batchNo)
-                ->whereRaw("DATE_FORMAT(mfg, '%Y-%m') = ?", [$mfgMon])
-                ->first();
-            if (!$stock) continue;
-
-            if ($saleableNonSaleable === 1) {
-                $newQty = max(0, (float) $stock->qty - $qtyy);
-                DB::table('stock')->where('id', $stock->id)->update([
-                    'qty' => $newQty, 'remaining' => $newQty, 'salable_damage' => $newQty,
-                    'update_date_time' => now(),
-                ]);
-            } elseif ($saleableNonSaleable === 2) {
-                DB::table('stock')->where('id', $stock->id)->update([
-                    'qty' => (float) $stock->qty + $qtyy,
-                    'nonsalable_damage' => max(0, (float) $stock->nonsalable_damage - $qtyy),
-                    'update_date_time' => now(),
-                ]);
-            }
-        }
-    }
-
-    protected function insertStock(array $d): void
-    {
-        DB::table('stock')->insert([
-            'product_id' => $d['product_id'], 'batch_no' => $d['batch_no'],
-            'rate' => $d['rate'], 'dealer_rate' => $d['rate'], 'mrp' => $d['mrp'],
-            'person_id' => 0, 'csa_id' => 0, 'dealer_id' => $d['dealer_id'],
-            'qty' => $d['qty'], 'salable_damage' => $d['salable_damage'],
-            'nonsalable_damage' => $d['nonsalable_damage'], 'remaining' => $d['remaining'],
-            'mfg' => $d['mfg'], 'expire' => null, 'date' => now()->format('Y-m-d'),
-            'pr_rate' => 0, 'company_id' => 1, 'action' => '1',
-            'sync_status' => 1, 'update_date_time' => now(),
-        ]);
     }
 
     protected function normalizeDate(?string $d): string

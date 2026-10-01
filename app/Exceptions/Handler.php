@@ -6,6 +6,7 @@ use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
 
@@ -62,9 +63,25 @@ class Handler extends ExceptionHandler
             }
         });
 
+        $this->renderable(function (InsufficientStockException $e, $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+        });
+
         // ── Generic 500 → JSON
         $this->renderable(function (Throwable $e, $request) {
             if ($request->is('api/*') || $request->expectsJson()) {
+                if ($e instanceof HttpExceptionInterface) {
+                    return response()->json([
+                        'status'  => false,
+                        'message' => $e->getMessage() ?: 'Request failed.',
+                    ], $e->getStatusCode(), $e->getHeaders());
+                }
+
                 return response()->json([
                     'status'  => false,
                     'message' => config('app.debug')
