@@ -17,7 +17,7 @@ class MenuController extends Controller
         $companyId = (int) $user->company_id;
         $appEnv    = config('app.env');
 
-        $items = config('menu', []);
+        $items = require config_path('menu.php');
 
         $visible = [];
 
