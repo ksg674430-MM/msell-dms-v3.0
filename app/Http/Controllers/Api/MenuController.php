@@ -74,7 +74,6 @@ class MenuController extends Controller
                 'grouped'    => $grouped,      // { "Master": [...], "Stock": [...] }
                 'badges'     => [
                     'notifications' => $this->notificationCount($companyId, $user->dealer_id),
-                    'low_stock'     => $this->lowStockCount($user->dealer_id),
                 ],
             ],
         ]);
@@ -128,23 +127,5 @@ class MenuController extends Controller
         } catch (\Throwable $e) {
             return 0;
         }
-    }
-
-    private function lowStockCount(int $dealerId): int
-    {
-        $row = DB::selectOne(
-            "SELECT COUNT(*) AS cnt FROM (
-                SELECT s.product_id, SUM(s.qty) AS remain
-                  FROM stock s
-                 WHERE s.dealer_id = ?
-                 GROUP BY s.product_id
-             ) AS agg
-             JOIN threshold t
-               ON t.product_id = agg.product_id
-              AND t.dealer_id  = ?
-             WHERE agg.remain <= t.qty",
-            [$dealerId, $dealerId]
-        );
-        return (int) ($row->cnt ?? 0);
     }
 }

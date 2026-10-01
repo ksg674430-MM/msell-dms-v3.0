@@ -267,6 +267,16 @@ class StockService
         );
     }
 
+    public function totalsByProduct(int $dealerId): array
+    {
+        return DB::table('stock')
+            ->where('dealer_id', $dealerId)
+            ->groupBy('product_id')
+            ->pluck(DB::raw('SUM(qty)'), 'product_id')
+            ->map(fn ($q) => (float) $q)
+            ->all();
+    }
+
     public function available(int $dealerId, int $productId, ?float $mrp = null, ?string $batchNo = null, ?string $mfg = null): float
     {
         $sql = "SELECT COALESCE(SUM(qty), 0) AS qty FROM stock WHERE dealer_id = ? AND product_id = ? AND qty > 0";

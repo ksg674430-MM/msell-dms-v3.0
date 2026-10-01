@@ -246,7 +246,11 @@ try {
                     [$orderId, $dealerId]
                 );
                 if (!$exists) {
-                    throw new \RuntimeException("Order {$orderId} cannot be cancelled.");
+                    DB::rollBack();
+                    return response()->json([
+                        'status'  => false,
+                        'message' => "Order {$orderId} cannot be cancelled. It is already cancelled or fully invoiced.",
+                    ], 422);
                 }
 
                 // 1. Copy header into cancel_order

@@ -110,20 +110,25 @@ class QuickOrderController extends Controller
 
         if ($company_id == 44) {
             $result = $rate->dealer_rate;
+            $perCase = true;
         } elseif ($company_id == 206) {
             $result = $rate->dealer_pcs_rate;
+            $perCase = false;
         } elseif ($qtyType == 1) {
             $result = ((int) $mode === 1) ? $rate->ss_case_rate : $rate->dealer_rate;
+            $perCase = true;
         } else {
             $result = ((int) $mode === 1) ? $rate->ss_pcs_rate : $rate->dealer_pcs_rate;
+            $perCase = false;
         }
+        $mrp = $perCase ? $rate->mrp : ((float) ($rate->mrp_pcs ?? 0) > 0 ? $rate->mrp_pcs : $rate->mrp);
 
         $um = 'PCS';
         if (in_array($company_id, [243, 213, 331], true)) {
             $um = $qtyType == 1 ? 'BOX' : 'PCS';
         }
 
-        return ['rate' => (float) $result, 'um' => $um];
+        return ['rate' => (float) $result, 'um' => $um, 'mrp' => (float) ($mrp ?? 0)];
     }
 
     private function dealerScheme(array $ctx, $productId, float $qty, float $rate): array
@@ -605,12 +610,6 @@ class QuickOrderController extends Controller
                 $scheme   = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
                 $line_total = $this->lineTotal($scheme['rate'], $line_qty, $scheme['percent']);
 
-                $mrp_details = DB::table('product_rate_list')
-                    ->where('product_id', $value)
-                    ->where('state_id', 39)
-                    ->where('company_id', $company_id)
-                    ->first();
-
                 if ($base['um'] === 'PCS') {
                     $order_conv = $line_qty;
                 } else {
@@ -624,7 +623,7 @@ class QuickOrderController extends Controller
                     'order_id'                  => $order_id,
                     'product_id'                => $value,
                     'rate'                      => $scheme['rate'],
-                    'mrp'                       => $mrp_details->mrp ?? '0',
+                    'mrp'                       => $base['mrp'],
                     'quantity'                  => $line_qty,
                     'scheme_qty'                => 0,
                     'free_qty'                  => 0,
@@ -693,6 +692,8 @@ class QuickOrderController extends Controller
         $company_id = $ctx['company_id'];
         $order_id   = date('YmdHis') . $ctx['dealer_id'];
         $lines      = [];
+        $skipped    = [];
+        $seen       = [];
         $line_no    = 1;
 
         fgetcsv($fh, 1000, ",");
@@ -702,39 +703,41 @@ class QuickOrderController extends Controller
                 continue;
             }
             if (count($row) !== 3) {
-                fclose($fh);
-                DB::rollBack();
-                return response()->json(['status' => false, 'message' => "Row {$line_no}: expected 3 columns (SNO, Product Id, Quantity)."], 422);
+                $skipped[] = "Row {$line_no}: expected 3 columns (SNO, Product Id, Quantity).";
+                continue;
             }
             $product_id = trim((string) $row[1]);
             $quantity   = (float) str_replace(',', '', trim((string) $row[2]));
 
-            $valid = DB::table('catalog_product')
+            $product = DB::table('catalog_product')
                 ->where('id', $product_id)
-                ->where('company_id', $company_id)
-                ->where('status', 1)
-                ->exists();
-            if (!$valid || $quantity <= 0) {
-                fclose($fh);
-                DB::rollBack();
-                return response()->json(['status' => false, 'message' => "Row {$line_no}: " . (!$valid ? "product {$product_id} not found." : 'quantity must be greater than 0.')], 422);
+                ->first(['name', 'company_id', 'status']);
+            $problem = match (true) {
+                !$product || (int) $product->company_id !== (int) $company_id => "product {$product_id} not found.",
+                (int) $product->status !== 1 => "product {$product_id} ({$product->name}) is not active.",
+                $quantity <= 0 => "quantity for product {$product_id} must be greater than 0.",
+                isset($seen[$product_id]) => "product {$product_id} is already in row {$seen[$product_id]}.",
+                default => null,
+            };
+            if (!$problem) {
+                $base = $this->dealerRate($ctx, $product_id);
+                if (!$base || $base['rate'] <= 0) {
+                    $problem = "rate not found for product {$product_id} ({$product->name}).";
+                }
             }
-
-            $base = $this->dealerRate($ctx, $product_id);
-            if (!$base || $base['rate'] <= 0) {
-                fclose($fh);
-                DB::rollBack();
-                return response()->json(['status' => false, 'message' => "Row {$line_no}: rate not found for product {$product_id}."], 422);
+            if ($problem) {
+                $skipped[] = "Row {$line_no}: {$problem}";
+                continue;
             }
+            $seen[$product_id] = $line_no;
             $scheme = $this->dealerScheme($ctx, $product_id, $quantity, $base['rate']);
             $total  = $this->lineTotal($scheme['rate'], $quantity, $scheme['percent']);
-            $mrp    = DB::table('product_rate_list')->where('product_id', $product_id)->where('company_id', $company_id)->value('mrp');
 
             $lines[] = [
                 'order_id'                  => $order_id,
                 'product_id'                => $product_id,
                 'rate'                      => $scheme['rate'],
-                'mrp'                       => $mrp ?? 0,
+                'mrp'                       => $base['mrp'],
                 'quantity'                  => $quantity,
                 'scheme_qty'                => 0,
                 'free_qty'                  => '0',
@@ -760,7 +763,11 @@ class QuickOrderController extends Controller
 
         if (!$lines) {
             DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'The file has no order rows.'], 422);
+            return response()->json([
+                'status'  => false,
+                'message' => $skipped ? 'No item was ordered. ' . implode(' ', $skipped) : 'The file has no order rows.',
+                'skipped' => $skipped,
+            ], 422);
         }
 
         DB::table('demand_order_details')->insert($lines);
@@ -768,6 +775,7 @@ class QuickOrderController extends Controller
             'id'         => $order_id,
             'order_id'   => $order_id,
             'product_id' => $l['product_id'],
+            'mrp'        => $l['mrp'],
             'rate'       => $l['rate'],
             'quantity'   => $l['quantity'],
             'scheme_qty' => 0,
@@ -799,6 +807,7 @@ class QuickOrderController extends Controller
             'created_date'             => $orderDate . ' ' . date('H:i:s'),
             'created_person_id'        => $ctx['dealer_id'],
             'sale_date'                => $orderDate,
+            'order_date'               => $orderDate,
             'receive_date'             => null,
             'date_time'                => $orderDate . ' ' . date('H:i:s'),
             'company_id'               => $company_id,
@@ -813,7 +822,8 @@ class QuickOrderController extends Controller
 
         return response()->json([
             'status'  => true,
-            'message' => 'Order uploaded successfully (' . count($lines) . ' items).',
+            'message' => 'Order uploaded successfully (' . count($lines) . ' items).' . ($skipped ? ' Not ordered: ' . implode(' ', $skipped) : ''),
+            'skipped' => $skipped,
             'data'    => ['order_id' => $order_id],
         ]);
     }
@@ -893,6 +903,7 @@ class QuickOrderController extends Controller
                 'id'         => $order_id,
                 'order_id'   => $order_id,
                 'product_id' => $v->product_id,
+                'mrp'        => $v->mrp,
                 'rate'       => $v->rate,
                 'quantity'   => $v->quantity,
                 'scheme_qty' => $v->scheme_qty,
@@ -950,6 +961,7 @@ class QuickOrderController extends Controller
                 'created_date'             => $order_date . ' ' . date('H:i:s'),
                 'created_person_id'        => $auth_id,
                 'sale_date'                => $order_date,
+                'order_date'               => $order_date,
                 'receive_date'             => null,
                 'date_time'                => $order_date . ' ' . date('H:i:s'),
                 'company_id'               => $company_id,

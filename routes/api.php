@@ -101,6 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // --------------------------------------------------------
     Route::get   ('/thresholds',          [ThresholdController::class, 'index']);    // list
     Route::get   ('/thresholds/products', [ThresholdController::class, 'products']); // product dropdown
+    Route::get   ('/thresholds/low-stock', [ThresholdController::class, 'lowStock']); // header low stock list
     Route::get   ('/thresholds/{id}',     [ThresholdController::class, 'show']);     // detail
     Route::post  ('/thresholds',          [ThresholdController::class, 'store']);    // create
     Route::put   ('/thresholds/{id}',     [ThresholdController::class, 'update']);   // edit

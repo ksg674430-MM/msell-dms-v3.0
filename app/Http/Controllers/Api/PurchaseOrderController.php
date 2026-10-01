@@ -43,12 +43,16 @@ class PurchaseOrderController extends Controller
 //         'meta'   => $result['meta'],
 //     ]);
 // }
+    private const AWAITING_BILLING = "(po.receive_date IS NULL OR po.receive_date LIKE '0000%')
+        AND COALESCE(po.challan_no, '') IN ('', '0')
+        AND EXISTS (SELECT 1 FROM demand_order d WHERE d.order_id = po.order_id)";
+
     public function index(Request $request)
     {
         $user     = $request->user();
         $dealerId = $user->dealer_id;
 
-        $where = ["po.dealer_id = ?"];
+        $where = ["po.dealer_id = ?", "NOT (" . self::AWAITING_BILLING . ")"];
         $bind  = [$dealerId];
 
         if ($request->filled('order_no')) {
@@ -342,6 +346,9 @@ class PurchaseOrderController extends Controller
         }
         if ((int) $po->action === 0) {
             return response()->json(['status' => false, 'message' => 'Order is not active.'], 409);
+        }
+        if (DB::selectOne("SELECT 1 FROM purchase_order po WHERE po.auto = ? AND " . self::AWAITING_BILLING, [(int) $po->auto])) {
+            return response()->json(['status' => false, 'message' => 'This order has not been billed by the super stockist yet.'], 409);
         }
         if ((int) $po->cancel_order_reason_id !== 0) {
             return response()->json(['status' => false, 'message' => 'Order is cancelled.'], 409);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -252,5 +253,47 @@ class ThresholdController extends Controller
         }
 
         return response()->json(['status' => true, 'message' => 'Threshold deleted successfully.']);
+    }
+
+    public function lowStock(Request $request): JsonResponse
+    {
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) $user->company_id;
+        $stateId   = (int) ($user->state_id ?? 0);
+
+        $products = DB::select(
+            "SELECT cp.id, cp.name, MAX(prl.mrp) AS mrp, MAX(COALESCE(g.igst, 0)) AS gst
+               FROM catalog_product cp
+               INNER JOIN product_rate_list prl ON prl.product_id = cp.id AND prl.state_id = ?
+               LEFT JOIN _gst g ON g.hsn_code = cp.hsn_code
+              WHERE cp.company_id = ?
+              GROUP BY cp.id, cp.name
+              ORDER BY cp.id",
+            [$stateId, $companyId]
+        );
+
+        $stock     = app(StockService::class)->totalsByProduct($dealerId);
+        $minLabels = DB::table('threshold')->where('dealer_id', $dealerId)->orderByDesc('id')->pluck('qty', 'product_id');
+
+        $rows = array_map(function ($p) use ($stock, $minLabels) {
+            $mrp   = (float) $p->mrp;
+            $base  = (float) $p->gst > 0 ? $mrp * 0.75 : $mrp * 0.82;
+            $rate  = (float) $p->gst > 0 ? $base * (1 - 0.0733) : $base * (1 - 0.07);
+            $qty   = round((float) ($stock[$p->id] ?? 0), 3);
+            $min   = isset($minLabels[$p->id]) ? (float) $minLabels[$p->id] : null;
+
+            return [
+                'product_id' => (int) $p->id,
+                'name'       => $p->name,
+                'mrp'        => round($mrp, 2),
+                'rate'       => round($rate, 2),
+                'min_label'  => $min,
+                'stock'      => $qty,
+                'low'        => $qty <= 0 || ($min !== null && $min > 0 && $qty < $min),
+            ];
+        }, $products);
+
+        return response()->json(['status' => true, 'rows' => $rows]);
     }
 }
