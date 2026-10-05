@@ -196,8 +196,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --------------------------------------------------------
     // CHALLAN HELPERS  → MENU: Invoice → Direct Invoice (form load helpers)
-    // NOTE: Order matters. Static routes MUST come before /{id} else
-    //       Laravel "next-number" ko id samajh lega.
     // --------------------------------------------------------
     Route::get ('/challans/next-number',            [ChallanController::class, 'nextNumber']);        // auto inv. no.
     Route::get ('/challans/form-data',              [ChallanController::class, 'formData']);          // retailer, salesman, beat dropdowns
@@ -456,6 +454,7 @@ Route::prefix('reports')->group(function () {
     Route::post  ('complaint/show',                [MainReportApiController::class, 'showComplaint']);
     Route::put   ('complaint',                     [MainReportApiController::class, 'updateComplaint']);
     Route::delete('complaint',                     [MainReportApiController::class, 'deleteComplaint']);
+
 });
 
 
@@ -497,4 +496,42 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     // ---------- CSV FORMATS ----------
     Route::get('/formats/order',        [QuickOrderController::class, 'orderFormat']);
     Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
+});
+
+//------------ Claim Api's --------------
+
+use App\Http\Controllers\Api\DmsDgrCreditNoteApiController;
+
+Route::middleware('auth:sanctum')->prefix('dms/credit-note')->group(function () {
+
+    // 1. Listing + filter data
+    Route::post('index',           [DmsDgrCreditNoteApiController::class, 'index']);       // retailer claim list (dealer claims)
+    Route::post('create',          [DmsDgrCreditNoteApiController::class, 'create']);      // new claim form data
+    Route::post('store',           [DmsDgrCreditNoteApiController::class, 'store']);       // create claim
+    Route::get ('edit/{id}',       [DmsDgrCreditNoteApiController::class, 'edit']);        // edit claim by encrypted id
+    Route::put ('update/{id}',     [DmsDgrCreditNoteApiController::class, 'update']);      // fulfill retailer claim
+
+    // 2. Product rates
+    Route::post('claim-product-rates',           [DmsDgrCreditNoteApiController::class, 'claimProductRates']);
+    Route::post('non-saleable-qty',              [DmsDgrCreditNoteApiController::class, 'getNonSaleableQty']);
+    Route::post('rasna-scheme-qty',              [DmsDgrCreditNoteApiController::class, 'getRasnaSchemeQty']);
+
+    // 3. PDF
+    Route::post('pdf/retailer-claim',            [DmsDgrCreditNoteApiController::class, 'pdfGenerationRetailerClaim']);
+
+    // 4. Dealer claims — credit note
+    Route::post('generate-credit-note',          [DmsDgrCreditNoteApiController::class, 'takeActionGenerateCreditNote']);
+
+    // 5. Retailer images/amount claim
+    Route::post('mt-images',                     [DmsDgrCreditNoteApiController::class, 'creditNoteMtImages']);
+    Route::post('mt-images/details',             [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimDetailsDms']);
+    Route::post('mt-images/update',              [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimUpdateDms']); // multipart
+    Route::post('mt-images/generate-credit-note',[DmsDgrCreditNoteApiController::class, 'takeActionGenerateCreditNoteDms']);
+
+    // 6. Challan claim
+    Route::post('challan/process',               [DmsDgrCreditNoteApiController::class, 'takeActionOnProcessChallanClaim']);
+    Route::post('challan/list',                  [DmsDgrCreditNoteApiController::class, 'creditNoteChallan']);
+    Route::post('challan/details',               [DmsDgrCreditNoteApiController::class, 'mtChallanClaimDetailsSs']);
+    Route::post('challan/update',                [DmsDgrCreditNoteApiController::class, 'mtChallanClaimUpdateSs']);
+    Route::post('challan/generate-credit-note',  [DmsDgrCreditNoteApiController::class, 'takeActionGenerateChallanCreditNote']);
 });

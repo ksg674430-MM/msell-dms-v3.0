@@ -401,7 +401,7 @@ class BalanceStockController extends Controller
         return response()->json(['status' => false, 'message' => 'Edit not allowed.'], 403);
     }
 
-    // Rule 2: legacy — sirf edit_stock = 1 wale dealer edit kar sakte hain
+    // Rule 2: legacy — only for edit_stock = 1 dealer can edit
     $dealer = DB::selectOne(
         "SELECT edit_stock FROM dealer WHERE id = ? LIMIT 1",
         [$dealerId]
