@@ -58,6 +58,7 @@ use App\Http\Controllers\Api\Reports\PerformanceReportController;
 use App\Http\Controllers\Api\Reports\StockReportController;      
 use App\Http\Controllers\Api\Reports\GstReportController;         
 use App\Http\Controllers\Api\Reports\LedgerReportController;
+use App\Http\Controllers\Api\Reports\VanReportController;
 
 use App\Http\Controllers\Api\SsVanSalesReportController;
 use App\Http\Controllers\Api\MainReportApiController;
@@ -407,6 +408,12 @@ Route::prefix('reports')->group(function () {
     Route::get('/ledger/party',                  [LedgerReportController::class, 'partyLedger']);
     Route::get('/ledger/retailer',               [LedgerReportController::class, 'retailerLedger']);
     Route::get('/ledger/retailer-payment',       [LedgerReportController::class, 'retailerPayment']);
+    Route::get('/van/ss-sales',                  [VanReportController::class, 'ssVanSales']);
+    Route::get('/van/sales',                     [VanReportController::class, 'vanSales']);
+    Route::get('/van/retailer-ledger',           [VanReportController::class, 'retailerLedger']);
+    Route::get('/van/retailer-wise-sales',       [VanReportController::class, 'retailerWiseSales']);
+    Route::put('/van/retailer-wise-sales/{orderId}', [VanReportController::class, 'updateRetailerWiseSale']);
+    Route::get('/van/retailer-wise',             [VanReportController::class, 'retailerWise']);
 
      });
     // Dispatch Order
@@ -431,23 +438,6 @@ Route::prefix('reports')->group(function () {
     // Attendance export
     Route::post('reports/attendance/export',       [MainReportApiController::class, 'simpleExport']);
 
-    // Retailer ledger / sales
-    Route::get ('reports/retailer-ledger',         [MainReportApiController::class, 'retailerLedgerIndex']);
-    Route::post('reports/retailer-ledger/data',    [MainReportApiController::class, 'retailerLedgerAjax']);
-    Route::get ('reports/retailer-sales',          [MainReportApiController::class, 'retailerWiseSalesIndex']);
-    Route::post('reports/retailer-sales/data',     [MainReportApiController::class, 'retailerWiseSalesAjax']);
-
-    // Van sale / settlement
-    Route::get ('reports/van-sale',                [MainReportApiController::class, 'vanSaleIndex']);
-    Route::post('reports/van-sale/data',           [MainReportApiController::class, 'vanSaleAjax']);
-    Route::get ('reports/van-settlement',          [MainReportApiController::class, 'vanSettlementIndex']);
-    Route::post('reports/van-settlement/data',     [MainReportApiController::class, 'vanSettlementAjax']);
-
-    // DB sales / DB van summary
-    Route::get ('reports/db-sales',                [MainReportApiController::class, 'dbSalesIndex']);
-    Route::post('reports/db-sales/data',           [MainReportApiController::class, 'dbSalesAjax']);
-    Route::get ('reports/db-van-summary',          [MainReportApiController::class, 'dbVanSummaryIndex']);
-    Route::post('reports/db-van-summary/data',     [MainReportApiController::class, 'dbVanSummaryAjax']);
 
     // DGR
     Route::get ('reports/dgr-claim',               [MainReportApiController::class, 'dgrClaimReport']);
