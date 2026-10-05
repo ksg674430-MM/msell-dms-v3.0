@@ -51,9 +51,11 @@ class ChangePasswordController extends Controller
         try {
             DB::table('history_log')->insert([
                 'user_id'     => $id,
-                'action'      => 'Update',
-                'particular'  => 'Password update for user ' . ($u->uname ?? $u->person_name ?? $id),
-                'date_added'  => now(),
+                'particulars' => 'Password update for user ' . ($u->uname ?? $id) . ' in system',
+                'operation'   => 'Update',
+                'ipaddress'   => (string) $request->ip(),
+                'dated'       => now(),
+                'identifier'  => '',
             ]);
         } catch (\Throwable $e) {
             // silently ignore if history_log table doesn't exist

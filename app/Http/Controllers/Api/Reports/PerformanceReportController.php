@@ -84,18 +84,17 @@ class PerformanceReportController extends Controller
             ->where('uso.dealer_id', $dealer)
             ->where('uso.company_id', $company)
             ->whereBetween(DB::raw('DATE(uso.date)'), [$from, $to])
-            ->groupBy('uso.retailer_id', 'r.name', 'uso.dealer_id', 'uso.user_id',
+            ->groupBy('uso.retailer_id', 'r.name', 'uso.dealer_id',
                       'r.contact_per_name', 'r.landline', 'r.other_numbers',
                       'r.track_address', 'l7.name')
             ->select([
                 DB::raw('COUNT(DISTINCT usod.product_id) as total_sku'),
                 'r.name as retailer_name',
                 'uso.dealer_id',
-                'uso.user_id',
                 'uso.retailer_id',
                 DB::raw('ROUND(SUM((usod.rate * usod.quantity) + (usod.case_rate * usod.case_quantity)),2) as sale_value'),
                 DB::raw('SUM(usod.quantity) as order_quantity'),
-                DB::raw('COUNT(uso.order_id) as orders'),
+                DB::raw('COUNT(DISTINCT uso.order_id) as orders'),
                 'r.contact_per_name',
                 'r.landline',
                 'r.other_numbers',

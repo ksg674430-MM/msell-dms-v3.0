@@ -84,10 +84,10 @@ class LedgerReportController extends Controller
         ->whereDate('ch_date', '<', $from)
         ->sum('amount_round');
 
-    $openPaid = (float) DB::table('challan_order_wise_payment')
-        ->where('retailer_id', $retailerId)
-        ->whereDate('payment_date', '<', $from)
-        ->sum('pay_amount');
+    $openPaid = (float) DB::table('payment_collection')
+        ->where('dealer_id', $dealer)->where('retailer_id', $retailerId)
+        ->whereDate('pay_date_time', '<', $from)
+        ->sum('total_amount');
 
     $openDues = (float) DB::table('old_payment_dues')
         ->where('ch_dealer_id', $dealer)->where('ch_retailer_id', $retailerId)
@@ -106,24 +106,26 @@ class LedgerReportController extends Controller
             'co.ch_no as voucher',
             DB::raw("DATE_FORMAT(co.ch_date,'%Y-%m-%d') as voucher_date"),
             DB::raw('ROUND(co.amount_round,2) as debit'),
-            DB::raw('0 as credit')
+            DB::raw('0 as credit'),
+            DB::raw("'invoice' as type")
         )->get();
 
-    // cwp has no dealer_id — do NOT join dealer
-    $payments = DB::table('challan_order_wise_payment as cwp')
-        ->where('cwp.retailer_id', $retailerId)
-        ->whereDate('cwp.payment_date', '>=', $from)->whereDate('cwp.payment_date', '<=', $to)
+    $payments = DB::table('payment_collection as pc')
+        ->join('dealer as d', 'd.id', '=', 'pc.dealer_id')
+        ->where('pc.dealer_id', $dealer)->where('pc.retailer_id', $retailerId)
+        ->whereDate('pc.pay_date_time', '>=', $from)->whereDate('pc.pay_date_time', '<=', $to)
         ->select(
-            DB::raw("'' as party"),
-            'cwp.pay_id as ref_id',
-            'cwp.pay_id as voucher',
-            DB::raw("DATE_FORMAT(cwp.payment_date,'%Y-%m-%d') as voucher_date"),
+            'd.name as party',
+            'pc.id as ref_id',
+            'pc.reciept_no as voucher',
+            DB::raw("DATE_FORMAT(pc.pay_date_time,'%Y-%m-%d') as voucher_date"),
             DB::raw('0 as debit'),
-            DB::raw('ROUND(cwp.pay_amount,2) as credit')
+            DB::raw('ROUND(pc.total_amount,2) as credit'),
+            DB::raw("'receipt' as type")
         )->get();
 
     $rows = $challans->merge($payments)
-        ->sortBy(fn($r) => $r->voucher_date.$r->voucher)
+        ->sortBy(fn($r) => $r->voucher_date . ($r->type === 'invoice' ? '0' : '1') . $r->voucher)
         ->values();
 
     $closing = $opening + $rows->sum('debit') - $rows->sum('credit');
@@ -142,11 +144,11 @@ class LedgerReportController extends Controller
     public function retailerPayment(Request $request)
     {
         [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope($request);
+        ['dealer_id' => $dealer] = $this->scope($request);
 
         $q = DB::table('payment_collection as pc')
             ->join('retailer as r', 'r.id', '=', 'pc.retailer_id')
-            ->where('pc.dealer_id', $dealer)->where('pc.company_id', $company)
+            ->where('pc.dealer_id', $dealer)
             ->whereDate('pc.pay_date_time', '>=', $from)->whereDate('pc.pay_date_time', '<=', $to);
 
         if ($request->filled('retailer_id')) $q->where('pc.retailer_id', $request->retailer_id);

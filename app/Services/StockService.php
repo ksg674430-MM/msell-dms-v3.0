@@ -112,6 +112,64 @@ class StockService
         }
     }
 
+    public function toDepot(array $items, int $dealerId, int $saleableNonSaleable): void
+    {
+        $column = $saleableNonSaleable === 1 ? 'qty' : 'nonsalable_damage';
+        $label  = $saleableNonSaleable === 1 ? 'Stock' : 'Non-salable stock';
+
+        foreach ($items as $it) {
+            $it        = (array) $it;
+            $productId = (int) $it['product_id'];
+            $mrp       = (float) $it['mrp'];
+            $batchNo   = (string) ($it['batch_no'] ?? '');
+            $qty       = (float) $it['qty'] + (float) ($it['free_qty'] ?? 0);
+
+            $stock = $this->locate($dealerId, $productId, $batchNo, $it['mfg_date'] ?? null, $mrp);
+            $this->decrement($stock, $column, $qty, $this->shortage($productId, '', $batchNo, $mrp, $qty, (float) ($stock->{$column} ?? 0), $label));
+        }
+    }
+
+    public function fromDepot(array $items, int $dealerId, int $saleableNonSaleable): void
+    {
+        foreach ($items as $it) {
+            $it        = (array) $it;
+            $productId = (int) $it['product_id'];
+            $mrp       = (float) $it['mrp'];
+            $batchNo   = (string) ($it['batch_no'] ?? '');
+            $qty       = (float) $it['qty'] + (float) ($it['free_qty'] ?? 0);
+            if ($qty <= 0) continue;
+
+            if ($saleableNonSaleable === 1) {
+                $this->give($dealerId, $productId, $batchNo, (string) ($it['mfg_date'] ?? ''), $mrp, $qty);
+                continue;
+            }
+
+            $stock = $this->locate($dealerId, $productId, $batchNo, $it['mfg_date'] ?? null, $mrp);
+            if ($stock) {
+                DB::update(
+                    "UPDATE stock SET nonsalable_damage = nonsalable_damage + ?, update_date_time = NOW() WHERE id = ?",
+                    [$qty, $stock->id]
+                );
+                continue;
+            }
+
+            $rate = (float) ($it['product_rate'] ?? 0);
+            $this->insertStock([
+                'product_id'        => $productId,
+                'batch_no'          => $batchNo,
+                'rate'              => $rate,
+                'dealer_rate'       => $rate,
+                'mrp'               => $mrp,
+                'dealer_id'         => $dealerId,
+                'qty'               => 0,
+                'salable_damage'    => 0,
+                'nonsalable_damage' => $qty,
+                'remaining'         => 0,
+                'mfg'               => $this->normalizeDate($it['mfg_date'] ?? null),
+            ]);
+        }
+    }
+
     public function receive(
         int $dealerId,
         int $productId,

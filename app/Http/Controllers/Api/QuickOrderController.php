@@ -2114,40 +2114,48 @@ class QuickOrderController extends Controller
 //---Dealer Dashboard
 public function dealerDashboard(Request $request)
 {
-    $ctx = $this->context($request);
+    $ctx       = $this->context($request);
+    $dealerId  = (int) $ctx['dealer_id'];
+    $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
 
-    $dealer_code = $ctx['dealer_code'];
-    $dealer_id   = $ctx['dealer_id'];
-    $company_id  = $ctx['company_id'];
-
-    $div_entry = DB::table('acc_mast')->where('ACC_CODE', $dealer_code)->first();
-    $login     = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
-    $div_code  = $div_entry->DIV_CODE ?? ($login->div_code_main ?? '0');
-
-    $month_from = date('Y-m') . '-01';
-    $month_to   = date('Y-m-t');
-    $sale_from  = date('Y') . '-04-01';
-    $sale_to    = (date('Y') + 1) . '-03-31';
-
-    $image_dyn = DB::table('image_mast')
+    $banners = DB::table('image_mast')
         ->where('img_locn', 'Dashboard')
-        ->where('company_id', $company_id)
+        ->where('company_id', $ctx['company_id'])
         ->orderBy('id', 'DESC')
-        ->get();
+        ->pluck('img')
+        ->map(fn ($img) => [
+            'url'   => "https://{$domainUrl}/public/baidyanath_images/{$img}",
+            'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4',
+        ]);
 
-    $mktg_catg_array = ["ASV","CLA","GEN","GLD","OTC","OT2","JPS","FMC","JP2"];
-    $mktg_catg_wise_targets     = [];
-    $mktg_catg_wise_sales       = [];
-    $month_mktg_catg_wise_sales = [];
+    $entries = DB::table('dealer_ledger_busy_details')
+        ->where('dealer_id', $dealerId)
+        ->orderBy('trans_date')
+        ->orderBy('id')
+        ->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
+
+    $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
+    $rows    = $entries->whereNotNull('trans_date')->values()->map(fn ($r) => [
+        'date'       => $r->trans_date,
+        'voucher_no' => $r->vocuher_number,
+        'vch_type'   => $r->vocuher_type,
+        'account'    => $r->narration,
+        'amount'     => (float) $r->amount,
+    ]);
+    $summary = DB::table('dealer_ledger_busy')->where('dealer_id', $dealerId)->orderByDesc('end_date')->first(['closing_balance', 'server_date_time']);
 
     return response()->json([
         'status'  => true,
         'message' => 'Dealer dashboard',
         'data'    => [
-            'image_dyn'                  => $image_dyn,
-            'mktg_catg_wise_targets'     => $mktg_catg_wise_targets,
-            'mktg_catg_wise_sales'       => $mktg_catg_wise_sales,
-            'month_mktg_catg_wise_sales' => $month_mktg_catg_wise_sales,
+            'banners' => $banners,
+            'account' => ['name' => $ctx['dealer']->name ?? '', 'erp_code' => $ctx['dealer_code']],
+            'ledger'  => [
+                'opening_balance' => $opening,
+                'closing_balance' => round($summary ? (float) $summary->closing_balance : $opening + $rows->sum('amount'), 2),
+                'fetched_at'      => $summary->server_date_time ?? null,
+                'rows'            => $rows,
+            ],
         ],
     ]);
 }

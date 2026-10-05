@@ -52,6 +52,9 @@ class MenuController extends Controller
             if (($item['group'] ?? '') === 'Details') {
                 $item['label'] = $this->detailsLabel($item['slug'], $roleName, $item['label']);
             }
+            if ($item['slug'] === 'dealer_dashboard' && in_array($roleName, ['DEPO', 'Depo'], true)) {
+                $item['label'] = 'Depo Dashboard';
+            }
 
             $visible[] = $item;
         }

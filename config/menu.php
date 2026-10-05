@@ -226,7 +226,7 @@ return [
         ],
     ],
     [
-        'slug'=>'dashboard', 'label'=>'Dealer Dashboard'
+        'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
     ],
 
     // ============================================================

@@ -49,6 +49,7 @@ use App\Http\Controllers\Api\DepotDamageLookupController;
 
 
 use App\Http\Controllers\Api\ChangePasswordController;
+use App\Http\Controllers\Api\FeedbackController;
 
 
 use App\Http\Controllers\Api\Reports\SalesReportController;
@@ -75,6 +76,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me',      [AuthController::class, 'me']);       // app load pe user info
     Route::post('/logout', [AuthController::class, 'logout']);   // MENU: Logout button
     Route::post('/change-password', [ChangePasswordController::class, 'update']);
+    Route::get('/feedback/types', [FeedbackController::class, 'types']);
+    Route::get('/feedback', [FeedbackController::class, 'index']);
+    Route::post('/feedback', [FeedbackController::class, 'store']);
+    Route::put('/feedback/{id}', [FeedbackController::class, 'update'])->whereNumber('id');
 
     // ========================================================
     // MENU  → MENU: Sidebar / Hamburger
@@ -268,6 +273,8 @@ Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class,
     Route::get   ('/dispatches',            [DispatchController::class, 'index']);
 Route::get   ('/dispatches/challans',   [DispatchController::class, 'searchChallans']);
 Route::get   ('/dispatches/next-no',    [DispatchController::class, 'nextNo']);
+Route::get   ('/dispatches/report/products', [DispatchController::class, 'products']);
+Route::get   ('/dispatches/report/invoices', [DispatchController::class, 'invoices']);
 Route::post  ('/dispatches',            [DispatchController::class, 'store']);
 Route::get   ('/dispatches/{id}',       [DispatchController::class, 'show']);
 Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
@@ -366,6 +373,10 @@ Route::prefix('reports')->group(function () {
     Route::get('/sales/retailer-dues-ageing',         [SalesReportController::class, 'retailerDuesAgeing']);
     Route::get('/sales/sales-purchase-performance',   [SalesReportController::class, 'salesPurchasePerformance']);
     Route::get('/sales/sales-purchase-list',          [SalesReportController::class, 'salesPurchaseList']);
+    Route::get('/sales/retailer-category',            [SalesReportController::class, 'retailerCategorySale']);
+    Route::get('/sales/challan-vs-sale',              [SalesReportController::class, 'challanVsSale']);
+    Route::get('/sales/dsr',                          [SalesReportController::class, 'dsr']);
+    Route::get('/sales/filters',                      [SalesReportController::class, 'filters']);
 
     // ---------- PERFORMANCE ----------
     Route::get('/performance/user-sales',             [PerformanceReportController::class, 'userSales']);

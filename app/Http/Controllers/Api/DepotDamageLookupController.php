@@ -186,10 +186,7 @@ class DepotDamageLookupController extends Controller
 
     public function saleableNonSaleable(Request $request)
     {
-        $u = $request->user();
-        $rows = DB::table('saleable_non_saleable')
-            ->where('company_id', $u->company_id)
-            ->get(['id', 'name']);
+        $rows = DB::table('saleable_non_saleable')->orderBy('id')->get(['id', 'name']);
         return response()->json(['data' => $rows]);
     }
 }

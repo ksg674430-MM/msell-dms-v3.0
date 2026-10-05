@@ -72,6 +72,15 @@ class Handler extends ExceptionHandler
             }
         });
 
+        $this->renderable(function (\InvalidArgumentException $e, $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'status'  => false,
+                    'message' => $e->getMessage(),
+                ], 422);
+            }
+        });
+
         // ── Generic 500 → JSON
         $this->renderable(function (Throwable $e, $request) {
             if ($request->is('api/*') || $request->expectsJson()) {

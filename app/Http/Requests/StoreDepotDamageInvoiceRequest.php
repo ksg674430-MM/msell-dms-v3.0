@@ -15,7 +15,6 @@ class StoreDepotDamageInvoiceRequest extends FormRequest
             'schema' => 'prohibited', 'connection' => 'prohibited', 'model' => 'prohibited',
 
             'ch_date' => 'nullable|string',
-            'ch_no'   => 'nullable|string',
             'csa_id'                => 'required|integer|min:1',
             'saleable_non_saleable' => 'required|in:1,2',
             'discount_per'          => 'nullable|numeric|min:0|max:100',
@@ -25,12 +24,13 @@ class StoreDepotDamageInvoiceRequest extends FormRequest
             'items.*.qty'            => 'required|numeric|gt:0',
             'items.*.product_rate'   => 'required|numeric',
             'items.*.mrp'            => 'required|numeric',
-            'items.*.taxable_amt'    => 'required|numeric',
-            'items.*.vat_amt'        => 'required|numeric',
             'items.*.free_qty'       => 'nullable|numeric',
             'items.*.batch_no'       => 'required|string',
             'items.*.mfg_date'       => 'required|string',
-            'items.*.order_id'       => 'nullable',
+            'items.*.spl_disc_type'  => 'nullable|in:1,2',
+            'items.*.spl_disc_val'   => 'nullable|numeric|min:0',
+            'items.*.cd_type'        => 'nullable|in:1,2',
+            'items.*.cd'             => 'nullable|numeric|min:0',
         ];
     }
 }

@@ -193,6 +193,7 @@ class StockReportController extends Controller
             ->leftJoin('catalog_1 as c1', 'c1.id', '=', 'c2.catalog_1_id')
             ->leftJoin('other_company as oc', 'oc.id', '=', 'cp.company_id')
             ->whereIn('cp.id', $productIds)
+            ->when($request->filled('category_id'), fn ($q) => (int) $request->category_id === 0 ? $q->whereNull('c2.id') : $q->where('c2.id', $request->category_id))
             ->select('cp.id as product_id', 'cp.name as product_name', 'cp.itemcode',
                      'c2.id as category_id', 'c2.name as cat', 'cp.unit')
             ->orderBy('cp.name')->get();

@@ -44,6 +44,11 @@ class InvoiceController extends Controller
             $where[]    = "r.location_id = ?";
             $bindings[] = (int) $locId;
         }
+        $division = $request->filled('division') ? (int) $request->input('division') : null;
+        if ($division) {
+            $where[]    = "EXISTS (SELECT 1 FROM challan_order_details dcod JOIN catalog_product dcp ON dcp.id = dcod.product_id WHERE dcod.ch_id = co.id AND dcp.division = ?)";
+            $bindings[] = $division;
+        }
 
         $whereSql = implode(' AND ', $where);
 
@@ -70,7 +75,7 @@ class InvoiceController extends Controller
         );
 
         $invoiceIds = array_map(fn($r) => (string) $r->id, $rows);
-        $itemsMap   = $this->loadItems($invoiceIds, $stateId);
+        $itemsMap   = $this->loadItems($invoiceIds, $stateId, $division);
         $claimMap   = $this->loadClaimStatus($invoiceIds, $dealerId, $companyId);
 
         $out = [];
@@ -617,7 +622,7 @@ class InvoiceController extends Controller
 
     /* ================= helpers ================= */
 
-    private function loadItems(array $invoiceIds, int $stateId): array
+    private function loadItems(array $invoiceIds, int $stateId, ?int $division = null): array
     {
         if (empty($invoiceIds)) return [];
 
@@ -639,7 +644,7 @@ class InvoiceController extends Controller
                     EXISTS (SELECT 1 FROM dms_challan_claim_details dcd WHERE dcd.challan_id = cod.ch_id AND dcd.product_id = cod.product_id) AS claimed
                FROM challan_order_details cod
                LEFT JOIN catalog_product cp ON cp.id = cod.product_id
-              WHERE cod.ch_id IN ({$in})
+              WHERE cod.ch_id IN ({$in})" . ($division ? " AND cp.division = " . $division : '') . "
               ORDER BY cod.id ASC"
         );
 

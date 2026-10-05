@@ -550,4 +550,67 @@ class DispatchController extends Controller
         $start = ($month >= 4) ? $year : $year - 1;
         return substr((string) $start, -2) . '-' . substr((string) ($start + 1), -2);
     }
+
+    public function products(Request $request): JsonResponse
+    {
+        $q = DB::table('daily_dispatch as dd')
+            ->join('daily_dispatch_details as ddd', 'ddd.dispatch_id', '=', 'dd.dispatch_id')
+            ->join('challan_order_details as cod', 'cod.ch_id', '=', 'ddd.ch_id')
+            ->join('catalog_product as cp', 'cp.id', '=', 'cod.product_id')
+            ->where('dd.dealer_id', (int) $request->user()->dealer_id);
+
+        if ($request->filled('dispatch_id')) {
+            $q->where('dd.dispatch_id', $request->input('dispatch_id'))->groupBy('cod.product_id', 'cod.mrp', 'cp.itemcode', 'cp.name');
+        } else {
+            $q->whereDate('dd.dispatch_date', '>=', $request->input('from_date', date('Y-m-d')))
+              ->whereDate('dd.dispatch_date', '<=', $request->input('to_date', date('Y-m-d')))
+              ->groupBy('dd.dispatch_date', 'dd.van_no', 'cod.product_id', 'cod.mrp', 'cp.itemcode', 'cp.name')
+              ->addSelect(DB::raw("DATE_FORMAT(dd.dispatch_date,'%Y-%m-%d') as dispatch_date"), 'dd.van_no');
+        }
+
+        $rows = $q->addSelect([
+                'cod.product_id',
+                'cp.itemcode',
+                'cp.name',
+                'cod.mrp',
+                DB::raw('SUM(cod.qty + cod.free_qty) as qty'),
+                DB::raw('ROUND(SUM(cod.qty * cod.product_rate),2) as basic'),
+                DB::raw('ROUND(SUM(cod.dis_amt),2) as td_amt'),
+                DB::raw('ROUND(SUM(cod.cd_amt),2) as cd_amt'),
+                DB::raw('ROUND(SUM(cod.vat_amt),2) as vat_amt'),
+                DB::raw('ROUND(SUM(cod.taxable_amt),2) as amount'),
+                DB::raw('ROUND(SUM((cod.qty + cod.free_qty) * COALESCE(cp.weight,0)) / 1000,3) as weight_kg'),
+            ])
+            ->orderBy('cp.name')
+            ->get();
+
+        return response()->json(['status' => true, 'rows' => $rows]);
+    }
+
+    public function invoices(Request $request): JsonResponse
+    {
+        $rows = DB::table('daily_dispatch as dd')
+            ->join('daily_dispatch_details as ddd', 'ddd.dispatch_id', '=', 'dd.dispatch_id')
+            ->join('challan_order as co', 'co.id', '=', 'ddd.ch_id')
+            ->leftJoin('retailer as r', 'r.id', '=', 'co.ch_retailer_id')
+            ->leftJoin('location_7 as l7', 'l7.id', '=', 'r.location_id')
+            ->where('dd.dealer_id', (int) $request->user()->dealer_id)
+            ->whereDate('dd.dispatch_date', '>=', $request->input('from_date', date('Y-m-d')))
+            ->whereDate('dd.dispatch_date', '<=', $request->input('to_date', date('Y-m-d')))
+            ->when($request->filled('van_no'), fn ($q) => $q->where('dd.van_no', $request->input('van_no')))
+            ->orderByDesc('co.ch_date')
+            ->orderBy('co.ch_no')
+            ->get([
+                'co.id',
+                'co.ch_no',
+                'dd.van_no',
+                DB::raw("DATE_FORMAT(dd.dispatch_date,'%Y-%m-%d') as dispatch_date"),
+                DB::raw("DATE_FORMAT(co.ch_date,'%Y-%m-%d') as ch_date"),
+                'l7.name as beat_name',
+                'r.name as retailer_name',
+                'co.amount',
+            ]);
+
+        return response()->json(['status' => true, 'rows' => $rows]);
+    }
 }

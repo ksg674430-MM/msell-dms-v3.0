@@ -87,6 +87,7 @@ class DamageInvoiceService
 
             return [
                 'status'                => true,
+                'message'               => 'Damage invoice saved successfully.',
                 'challan_id'            => $challanId,
                 'ch_no'                 => $chNo,
                 'discount_per'          => $calc['discount_per'],
@@ -519,8 +520,8 @@ class DamageInvoiceService
                 'dis_type'           => (int) ($it['dis_type'] ?? 1),
                 'dis_amt'            => (float) ($it['dis_amt'] ?? 0),
                 'dis_percent'        => (float) ($it['dis_percent'] ?? 0),
-                'taxable_amt'        => (float) ($it['taxable_amt'] ?? 0),
-                'remain_amount'      => (string) ($it['taxable_amt'] ?? 0),
+                'taxable_amt'        => (float) $it['amount'],
+                'remain_amount'      => (string) $it['amount'],
                 'sale_order_id'      => '',
             ];
         }
