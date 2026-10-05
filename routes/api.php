@@ -536,3 +536,66 @@ Route::middleware('auth:sanctum')->prefix('dms/credit-note')->group(function () 
     Route::post('challan/update',                [DmsDgrCreditNoteApiController::class, 'mtChallanClaimUpdateSs']);
     Route::post('challan/generate-credit-note',  [DmsDgrCreditNoteApiController::class, 'takeActionGenerateChallanCreditNote']);
 });
+
+
+
+use App\Http\Controllers\Api\MtImagesClaimApiController;
+
+Route::middleware('auth:sanctum')->prefix('mt-images-claim')->group(function () {
+
+    // Listing / form data
+    Route::post('index',                  [MtImagesClaimApiController::class, 'index']);
+    Route::post('create',                 [MtImagesClaimApiController::class, 'create']);
+    Route::post('store',                  [MtImagesClaimApiController::class, 'store']);           // multipart
+    Route::get ('edit/{id}',              [MtImagesClaimApiController::class, 'edit']);
+    Route::put ('update/{id}',            [MtImagesClaimApiController::class, 'update']);
+
+    // Product rates & stock
+    Route::post('claim-product-rates',    [MtImagesClaimApiController::class, 'claimProductRates']);
+    Route::post('non-saleable-qty',       [MtImagesClaimApiController::class, 'getNonSaleableQty']);
+
+    // PDF + credit note
+    Route::post('pdf/retailer-claim',     [MtImagesClaimApiController::class, 'pdfGenerationRetailerClaim']);
+    Route::post('generate-credit-note',   [MtImagesClaimApiController::class, 'takeActionGenerateCreditNote']);
+
+    // New MT images (samplingclaim)
+    Route::post('new/create',             [MtImagesClaimApiController::class, 'newMtImages']);
+    Route::post('new/store',              [MtImagesClaimApiController::class, 'storingNewImagesClaim']); // multipart
+    Route::post('new/index',              [MtImagesClaimApiController::class, 'newMtImagesIndex']);
+
+    // DGR claim (invoice + claim)
+    Route::post('dgr/details',            [MtImagesClaimApiController::class, 'getDgrClaimDetails']);
+    Route::post('dgr/submit',             [MtImagesClaimApiController::class, 'submitDgrClaim']);        // multipart
+    Route::post('dgr/invoice-details',    [MtImagesClaimApiController::class, 'getInvoiceDetails']);
+});
+
+
+use App\Http\Controllers\Api\DmsClaimOrderApiController;
+
+Route::middleware('auth:sanctum')->prefix('dms/claim-order')->group(function () {
+
+    Route::post('index',                    [DmsClaimOrderApiController::class, 'index']);
+    Route::post('create',                   [DmsClaimOrderApiController::class, 'create']);
+    Route::post('store',                    [DmsClaimOrderApiController::class, 'store']);           // multipart
+    Route::get ('edit/{id}',                [DmsClaimOrderApiController::class, 'edit']);
+    Route::put ('update/{id}',              [DmsClaimOrderApiController::class, 'update']);
+
+    Route::post('claim-product-rates',      [DmsClaimOrderApiController::class, 'claimProductRates']);
+    Route::post('non-saleable-qty',         [DmsClaimOrderApiController::class, 'getNonSaleableQty']);
+
+    Route::post('pdf/retailer-claim',       [DmsClaimOrderApiController::class, 'pdfGenerationRetailerClaim']);
+
+    Route::post('process-claim-preview',    [DmsClaimOrderApiController::class, 'processClaimPreview']);
+    Route::post('save-sra-generate-pdf',    [DmsClaimOrderApiController::class, 'saveSraGeneratePdf']);
+    Route::post('sra-report',               [DmsClaimOrderApiController::class, 'sraReport']);
+    Route::post('generate-sra-pdf',         [DmsClaimOrderApiController::class, 'generateSraPdf']);
+    Route::post('dealer-generate-sra-pdf',  [DmsClaimOrderApiController::class, 'dealerGenerateSraPdf']);
+    Route::post('take-action-generate-sra', [DmsClaimOrderApiController::class, 'takeActionGenerateSra']);
+
+    Route::post('new-claim-details',        [DmsClaimOrderApiController::class, 'newClaimDetails']);
+    Route::post('create-multiple-batch',    [DmsClaimOrderApiController::class, 'createMultipleBatch']);
+    Route::post('multiple-batch-claim',     [DmsClaimOrderApiController::class, 'multipleBatchClaim']); // multipart
+
+    Route::post('scheme-details',           [DmsClaimOrderApiController::class, 'schemeDetails']);
+    Route::post('stock-check',              [DmsClaimOrderApiController::class, 'stockCheckDms']);
+});

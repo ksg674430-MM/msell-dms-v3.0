@@ -908,75 +908,128 @@ return response()->json([
     /*  13. takeActionGenerateCreditNoteDMS                                */
     /* ================================================================== */
 
-    public function takeActionGenerateCreditNoteDms(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+public function takeActionGenerateCreditNoteDms(Request $request)
+{
+    $ctx = $this->dealerContext($request);
 
-        $request->validate([
-            'checkedVals'        => 'required|array|min:1',
-            'filtered_dealer_id' => 'required|integer',
-        ]);
+    $request->validate([
+        'checkedVals'        => 'required|array|min:1',
+        'filtered_dealer_id' => 'required|integer',
+    ]);
 
-        $orderArray = $request->input('checkedVals');
-        $dealerId   = $request->input('filtered_dealer_id');
+    $orderArray = $request->input('checkedVals');
+    $dealerId   = (int) $request->input('filtered_dealer_id');
 
-        $dealerData     = $this->dealerLoginRow($ctx->dealer_id);
-        $company_id     = $dealerData->company_id;
-        $companyDetails = DB::table('company')->where('id', $company_id)->first();
+    // ------------------------------------------------------------------
+    // 1. Resolve context
+    // ------------------------------------------------------------------
+    $dealerData = $this->dealerLoginRow($ctx->dealer_id);
+    abort_if(!$dealerData, 422, "dealer_person_login missing for dealer {$ctx->dealer_id}");
 
-        $stateArr      = DB::table('location_3')->where('company_id', $company_id)->get()->keyBy('id');
-        $csaDetails    = DB::table('csa')->where('c_id', $ctx->csa_id)->first();
-        $dealerDetails = DB::table('dealer')->where('company_id', $company_id)->where('id', $dealerId)->first();
+    $company_id     = $dealerData->company_id;
+    $companyDetails = DB::table('company')->where('id', $company_id)->first();
+    abort_if(!$companyDetails, 422, "Company {$company_id} not found");
 
-        $mainData = DB::table('dms_retailer_images_amount_claim')
-            ->where('company_id', $company_id)
-            ->whereIn('order_id', $orderArray)
-            ->where('dealer_id', $dealerId)
-            ->groupBy('order_id')
-            ->get();
+    $stateArr = DB::table('location_3')
+        ->where('company_id', $company_id)
+        ->get()
+        ->keyBy('id');
 
-        $crnoRaw     = $mainData->pluck('id')->all();
-        $finalAmount = round($mainData->sum('claim_amount'), 2);
-        $finalAmountConvert = $this->getIndianCurrency($finalAmount);
+    // ------------------------------------------------------------------
+    // 2. Dealer row first (csa_id lives here)
+    // ------------------------------------------------------------------
+    $dealerDetails = DB::table('dealer')
+        ->where('company_id', $company_id)
+        ->where('id', $dealerId)
+        ->first();
 
-        $crno       = 'DMC-JPR-' . implode('-', $crnoRaw);
-        $orderNoPdf = date('YmdHis') . $ctx->dealer_id;
-        $pdfName    = date('YmdHis') . $ctx->dealer_id . '.pdf';
+    abort_if(!$dealerDetails, 422, "Dealer {$dealerId} not found for company {$company_id}");
 
-        DB::table('dms_retailer_images_amount_claim')
-            ->where('company_id', $company_id)
-            ->whereIn('order_id', $orderArray)
-            ->where('dealer_id', $dealerId)
-            ->update([
-                'claim_status'         => 1,
-                'claim_fulfill_on'     => now(),
-                'credit_note_order_id' => $orderNoPdf,
-                'credit_note_pdf'      => $pdfName,
-                'credit_note_no'       => $crno,
-            ]);
+    // ------------------------------------------------------------------
+    // 3. CSA
+    // ------------------------------------------------------------------
+    $csaId = $dealerDetails->csa_id ?: ($dealerData->csa_id ?? 0);
+    abort_if(empty($csaId), 422, "No CSA linked to dealer {$dealerId}");
 
-        $pdf = PDF::loadView('pdf.pdfDgrCreditNote', [
-            'company_details'     => $companyDetails,
-            'main_data'           => $mainData,
-            'dealerDetails'       => $dealerDetails,
-            // 'stateArr'            => $stateArr,
-            'csaDetails'          => $csaDetails,
-            'orderNoPdf'          => $orderNoPdf,
-            'crno'                => $crno,
-            'final_amount'        => $finalAmount,
-            'final_amount_conver' => $finalAmountConvert,
-        ]);
-        $pdf->setPaper([0, 0, 1240, 1748]);
-        $pdf->save(public_path('dms_pdf/' . $pdfName));
+    $csaDetails = DB::table('csa')->where('c_id', $csaId)->first();
+    abort_if(!$csaDetails, 422, "CSA {$csaId} not found in csa table");
 
+    // ------------------------------------------------------------------
+    // 4. Fetch claims (same filters as the legacy function)
+    // ------------------------------------------------------------------
+    $mainData = DB::table('dms_retailer_images_amount_claim')
+        ->where('company_id', $company_id)
+        ->whereIn('order_id', $orderArray)
+        ->where('dealer_id', $dealerId)
+        ->groupBy('order_id')
+        ->get();
+
+    // Legacy behavior: if nothing matched, still return a 200 with an empty PDF result.
+    // (Comment the block below if you'd rather 422 instead.)
+    if ($mainData->isEmpty()) {
         return response()->json([
             'code'     => 200,
-            'message'  => 'success',
-            'pdf_name' => $pdfName,
-            'pdf_url'  => url('dms_pdf/' . $pdfName),
+            'message'  => 'No matching claim orders — nothing to process',
+            'pdf_name' => '',
+            'pdf_url'  => '',
         ]);
     }
 
+    // ------------------------------------------------------------------
+    // 5. Totals
+    // ------------------------------------------------------------------
+    $crnoRaw            = $mainData->pluck('id')->all();
+    $finalAmount        = round($mainData->sum('claim_amount'), 2);
+    $finalAmountConvert = $this->getIndianCurrency($finalAmount);
+
+    $crno       = 'DMC-JPR-' . implode('-', $crnoRaw);
+    $orderNoPdf = date('YmdHis') . $ctx->dealer_id;
+    $pdfName    = date('YmdHis') . $ctx->dealer_id . '.pdf';
+
+    // ------------------------------------------------------------------
+    // 6. Mark claims fulfilled
+    // ------------------------------------------------------------------
+    DB::table('dms_retailer_images_amount_claim')
+        ->where('company_id', $company_id)
+        ->whereIn('order_id', $orderArray)
+        ->where('dealer_id', $dealerId)
+        ->update([
+            'claim_status'         => 1,
+            'claim_fulfill_on'     => now(),
+            'credit_note_order_id' => $orderNoPdf,
+            'credit_note_pdf'      => $pdfName,
+            'credit_note_no'       => $crno,
+        ]);
+
+    // ------------------------------------------------------------------
+    // 7. Ensure output dir exists, then build PDF
+    // ------------------------------------------------------------------
+    $pdfDir = public_path('dms_pdf');
+    if (!is_dir($pdfDir)) {
+        mkdir($pdfDir, 0755, true);
+    }
+
+    $pdf = PDF::loadView('pdf.pdfDgrCreditNote', [
+        'company_details'     => $companyDetails,
+        'main_data'           => $mainData,
+        'dealerDetails'       => $dealerDetails,
+        'stateArr'            => $stateArr,
+        'csaDetails'          => $csaDetails,
+        'orderNoPdf'          => $orderNoPdf,
+        'crno'                => $crno,
+        'final_amount'        => $finalAmount,
+        'final_amount_conver' => $finalAmountConvert,
+    ]);
+    $pdf->setPaper([0, 0, 1240, 1748]);
+    $pdf->save($pdfDir . '/' . $pdfName);
+
+    return response()->json([
+        'code'     => 200,
+        'message'  => 'success',
+        'pdf_name' => $pdfName,
+        'pdf_url'  => url('dms_pdf/' . $pdfName),
+    ]);
+}
     /* ================================================================== */
     /*  14. takeActionOnProcessChallanClaim                                */
     /* ================================================================== */
