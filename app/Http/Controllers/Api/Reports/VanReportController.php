@@ -67,15 +67,14 @@ class VanReportController extends Controller
 
         $secondary = Secondary_Sale::getSecondarySale($ids, $company);
 
-        $payments = DB::table('user_sales_order_extra_details as e')
-            ->join('van_sale_payment_details as p', 'p.order_id', '=', 'e.order_id')
-            ->whereIn('e.van_sale_order_id', $ids)
-            ->groupBy('e.van_sale_order_id')
-            ->select('e.van_sale_order_id as order_id',
-                DB::raw('SUM(p.cash_amount) as cash'),
-                DB::raw('SUM(p.online_amount) as online'),
-                DB::raw('SUM(p.credit_amount) as credit'))
-            ->get()->keyBy('order_id');
+        $vanOf = DB::table('user_sales_order_extra_details')->whereIn('van_sale_order_id', $ids)->pluck('van_sale_order_id', 'order_id');
+        $payments = [];
+        foreach ($this->payments($vanOf->keys()->all()) as $orderId => $p) {
+            $van = $vanOf[$orderId];
+            foreach (['cash', 'online', 'credit'] as $f) {
+                $payments[$van][$f] = ($payments[$van][$f] ?? 0) + (float) $p->$f;
+            }
+        }
 
         $rows = [];
         foreach ($details as $d) {
@@ -140,7 +139,7 @@ class VanReportController extends Controller
             if ($pay && $total > 0) {
                 $ratio = $row['sale_value'] / $total;
                 foreach (['cash', 'online', 'credit'] as $f) {
-                    $row[$f] = round((float) $pay->$f * $ratio, 2);
+                    $row[$f] = round($pay[$f] * $ratio, 2);
                 }
             }
             foreach (['load_qty', 'fulfilment_qty', 'fulfilment_value', 'ready_qty', 'ready_value', 'free_qty', 'sale_qty', 'sale_value'] as $f) {
