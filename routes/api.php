@@ -58,6 +58,9 @@ use App\Http\Controllers\Api\Reports\StockReportController;
 use App\Http\Controllers\Api\Reports\GstReportController;         
 use App\Http\Controllers\Api\Reports\LedgerReportController;
 
+use App\Http\Controllers\Api\SsVanSalesReportController;
+use App\Http\Controllers\Api\MainReportApiController;
+
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -273,6 +276,7 @@ Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
 Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
 
 
+
     // ========================================================
     // LOOKUP  → MENU: Generic (dropdowns, autocompletes)
     // ========================================================
@@ -298,6 +302,10 @@ Route::get ('dealer/challan-payment/list',      [DealerPaymentController::class,
 Route::get ('dealer/challan-payment/paid-list', [DealerPaymentController::class, 'paidChallanList']);
 
 Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::class, 'paymentCollectionSaveLegacy']);
+
+
+Route::get('/ss-van-sales',        [SsVanSalesReportController::class, 'index']);
+Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']);
 
 
 
@@ -392,6 +400,62 @@ Route::prefix('reports')->group(function () {
     Route::get('/ledger/retailer-payment',       [LedgerReportController::class, 'retailerPayment']);
 
      });
+    // Dispatch Order
+    Route::get ('reports/dispatch-order',          [MainReportApiController::class, 'dispatchOrderIndex']);
+    Route::post('reports/dispatch-order/data',     [MainReportApiController::class, 'dispatchOrderAjax']);
+
+    // Dispatch Amount
+    Route::get ('reports/dispatch-amount',         [MainReportApiController::class, 'dispatchAmountIndex']);
+    Route::post('reports/dispatch-amount/data',    [MainReportApiController::class, 'dispatchAmountAjax']);
+
+    // Dashboard zero-order
+    Route::get ('dashboard/zero-order',            [MainReportApiController::class, 'dashboardZeroOrder']);
+    Route::post('dashboard/zero-order/chart',      [MainReportApiController::class, 'dashboardZeroOrderChart']);
+    Route::post('dashboard/zero-order/users',      [MainReportApiController::class, 'dashboardUserZeroOrder']);
+    Route::post('dashboard/zero-order/reason-bar', [MainReportApiController::class, 'dashboardUserZeroOrderReasonBar']);
+
+    // Competitor
+    Route::get ('competitor/analysis',             [MainReportApiController::class, 'competitorAnalysisReport']);
+    Route::get ('competitor/products/{visitId}',   [MainReportApiController::class, 'getProducts']);
+    Route::get ('competitor/images/{visitId}',     [MainReportApiController::class, 'getImages']);
+
+    // Attendance export
+    Route::post('reports/attendance/export',       [MainReportApiController::class, 'simpleExport']);
+
+    // Retailer ledger / sales
+    Route::get ('reports/retailer-ledger',         [MainReportApiController::class, 'retailerLedgerIndex']);
+    Route::post('reports/retailer-ledger/data',    [MainReportApiController::class, 'retailerLedgerAjax']);
+    Route::get ('reports/retailer-sales',          [MainReportApiController::class, 'retailerWiseSalesIndex']);
+    Route::post('reports/retailer-sales/data',     [MainReportApiController::class, 'retailerWiseSalesAjax']);
+
+    // Van sale / settlement
+    Route::get ('reports/van-sale',                [MainReportApiController::class, 'vanSaleIndex']);
+    Route::post('reports/van-sale/data',           [MainReportApiController::class, 'vanSaleAjax']);
+    Route::get ('reports/van-settlement',          [MainReportApiController::class, 'vanSettlementIndex']);
+    Route::post('reports/van-settlement/data',     [MainReportApiController::class, 'vanSettlementAjax']);
+
+    // DB sales / DB van summary
+    Route::get ('reports/db-sales',                [MainReportApiController::class, 'dbSalesIndex']);
+    Route::post('reports/db-sales/data',           [MainReportApiController::class, 'dbSalesAjax']);
+    Route::get ('reports/db-van-summary',          [MainReportApiController::class, 'dbVanSummaryIndex']);
+    Route::post('reports/db-van-summary/data',     [MainReportApiController::class, 'dbVanSummaryAjax']);
+
+    // DGR
+    Route::get ('reports/dgr-claim',               [MainReportApiController::class, 'dgrClaimReport']);
+    Route::post('reports/dgr-claim/data',          [MainReportApiController::class, 'dgrClaimAjax']);
+
+    // Sales score card
+    Route::get ('reports/sales-score-card',        [MainReportApiController::class, 'salesScoreCard']);
+    Route::post('reports/sales-score-card/data',   [MainReportApiController::class, 'salesScoreCardData']);
+
+    // Complaint
+    Route::get   ('complaint/form',                [MainReportApiController::class, 'complaintForm']);
+    Route::post  ('complaint',                     [MainReportApiController::class, 'storeComplaint']);
+    Route::post  ('complaint/running',             [MainReportApiController::class, 'getRunningCase']);
+    Route::post  ('complaint/list',                [MainReportApiController::class, 'complaintList']);
+    Route::post  ('complaint/show',                [MainReportApiController::class, 'showComplaint']);
+    Route::put   ('complaint',                     [MainReportApiController::class, 'updateComplaint']);
+    Route::delete('complaint',                     [MainReportApiController::class, 'deleteComplaint']);
 });
 
 
