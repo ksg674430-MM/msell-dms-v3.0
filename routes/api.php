@@ -66,7 +66,7 @@ use App\Http\Controllers\Api\MainReportApiController;
 use App\Http\Controllers\Api\TallyViewController;
 
 use App\Http\Controllers\Api\DmsReportController;
-
+use App\Http\Controllers\Api\Sfa\ClaimController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -81,6 +81,8 @@ Route::prefix('tally-view')->group(function () {
     Route::get('sale',     [TallyViewController::class, 'tallySale']);
 });
 
+    Route::get('/claims/sfa',                [ClaimController::class, 'sfaClaims']);
+    Route::get('/claims/sfa/{replaceid}',    [ClaimController::class, 'sfaClaimDetails']);
 
 Route::prefix('dms-reports')->group(function () {
     Route::get('to-tally',           [DmsReportController::class, 'dmsToTallyReport']);

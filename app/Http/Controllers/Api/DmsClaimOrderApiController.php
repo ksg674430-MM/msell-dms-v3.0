@@ -413,7 +413,9 @@ class DmsClaimOrderApiController extends Controller
         $itemCodesStr = explode(',', $request->input('item_codes_str'));
         $catg         = $request->input('catg');
         $forSelfForDb = $request->input('for_self_for_db');
-        $nonsalableSalableStatus = $request->input('nonsalable_salable_status', '');
+        $raw = $request->input('nonsalable_salable_status');
+        $nonsalableSalableStatus = ($raw === null || $raw === '') ? null : (int) $raw;
+
 
         $dealerData    = $this->dealerLoginRow($ctx->dealer_id);
         abort_if(!$dealerData, 422, "dealer_person_login missing");
@@ -594,82 +596,153 @@ class DmsClaimOrderApiController extends Controller
     /*  6. UPDATE — fulfill retailer claim                                 */
     /* ================================================================== */
 
-    public function update(Request $request, $id)
-    {
-        $ctx = $this->dealerContext($request);
+   public function update(Request $request, $id)
+{
+    $ctx = $this->dealerContext($request);
 
-        $request->validate([
-            'order_id'                => 'required',
-            'product_id'              => 'required|array',
-            'damage_request_quantity' => 'required|array',
-            'rate'                    => 'required|array',
-            'mfg_date'                => 'required|array',
-            'batch_no'                => 'required|array',
-            'mrp'                     => 'required|array',
-        ]);
+    $request->validate([
+        'order_id'                  => 'required|integer',
+        'product_id'                => 'required|array|min:1',
+        'product_id.*'              => 'required|integer',
+        'damage_request_quantity'   => 'required|array|min:1',
+        'damage_request_quantity.*' => 'required|numeric|min:1',
+        'rate'                      => 'required|array|min:1',
+        'rate.*'                    => 'required|numeric|min:0',
+        'mfg_date'                  => 'required|array|min:1',
+        'mfg_date.*'                => 'required',
+        'batch_no'                  => 'required|array|min:1',
+        'batch_no.*'                => 'required',
+        'mrp'                       => 'required|array|min:1',
+        'mrp.*'                     => 'required|numeric|min:0',
+    ]);
 
-        $dealerData = $this->dealerLoginRow($ctx->dealer_id);
-        abort_if(!$dealerData, 422, "dealer_person_login missing");
-        $company_id = $dealerData->company_id;
+    $dealerData = $this->dealerLoginRow($ctx->dealer_id);
+    abort_if(!$dealerData, 422, "dealer_person_login missing");
+    $company_id = $dealerData->company_id;
 
-        $orderId = $request->input('order_id');
+    $orderId = $request->input('order_id');
 
-        DB::beginTransaction();
-        try {
-            DB::table('dms_retailer_claim')
-                ->where('order_id', $orderId)
-                ->where('company_id', $company_id)
-                ->update([
-                    'claim_status'     => 1,
-                    'claim_fulfill_on' => now(),
-                ]);
+    $productIds = array_values((array) $request->input('product_id'));
+    $damageQtys = array_values((array) $request->input('damage_request_quantity'));
+    $rates      = array_values((array) $request->input('rate'));
+    $mfgDates   = array_values((array) $request->input('mfg_date'));
+    $batchNos   = array_values((array) $request->input('batch_no'));
+    $mrps       = array_values((array) $request->input('mrp'));
 
-            $productIds = (array) $request->input('product_id');
-            $damageQtys = (array) $request->input('damage_request_quantity');
-            $rates      = (array) $request->input('rate');
-            $mfgDates   = (array) $request->input('mfg_date');
-            $batchNos   = (array) $request->input('batch_no');
-            $mrps       = (array) $request->input('mrp');
-
-            foreach ($productIds as $i => $pid) {
-                $stock = DB::table('stock')
-                    ->where('dealer_id', $ctx->dealer_id)
-                    ->where('product_id', $pid)
-                    ->where('mfg', $mfgDates[$i])
-                    ->where('mrp', $mrps[$i])
-                    ->where('batch_no', $batchNos[$i])
-                    ->first();
-
-                if (!$stock) continue;
-
-                DB::table('dms_retailer_claim_details')
-                    ->where('order_id', $orderId)
-                    ->where('product_id', $pid)
-                    ->where('company_id', $company_id)
-                    ->where('mfg_date', $mfgDates[$i])
-                    ->where('batch_no', $batchNos[$i])
-                    ->where('mrp', $mrps[$i])
-                    ->update([
-                        'claim_fulfill_qty'  => $damageQtys[$i],
-                        'claim_fulfill_rate' => $rates[$i],
-                    ]);
-
-                DB::table('stock')
-                    ->where('id', $stock->id)
-                    ->update([
-                        'qty'              => $stock->qty - $damageQtys[$i],
-                        'update_date_time' => now(),
-                    ]);
-            }
-
-            DB::commit();
-            return response()->json(['code' => 200, 'message' => 'success']);
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+    $n = count($productIds);
+    foreach ([$damageQtys, $rates, $mfgDates, $batchNos, $mrps] as $arr) {
+        if (count($arr) !== $n) {
+            return response()->json([
+                'code'    => 422,
+                'message' => 'product_id / damage_request_quantity / rate / mfg_date / batch_no / mrp must all be the same length',
+            ], 422);
         }
     }
+
+    DB::beginTransaction();
+
+    try {
+        // (a) Claim header: must exist, belong to THIS dealer, and still be open.
+        //     FOR UPDATE makes a concurrent retry wait, then see status = 1.
+        $claim = DB::table('dms_retailer_claim')
+            ->where('order_id', $orderId)
+            ->where('company_id', $company_id)
+            ->where('dealer_id', $ctx->dealer_id)
+            ->where('claim_status', 0)
+            ->lockForUpdate()
+            ->first();
+
+        if (!$claim) {
+            DB::rollBack();
+            return response()->json([
+                'code'    => 409,
+                'message' => 'Claim not found, does not belong to this dealer, or has already been fulfilled',
+            ], 409);
+        }
+
+        // (b) PASS 1 — validate every line. Nothing is written yet.
+        $lines = [];
+        foreach ($productIds as $i => $pid) {
+            $qty = (float) $damageQtys[$i];
+
+            $stock = DB::table('stock')
+                ->where('dealer_id', $ctx->dealer_id)
+                ->where('product_id', $pid)
+                ->where('mfg', $mfgDates[$i])
+                ->where('mrp', $mrps[$i])
+                ->where('batch_no', $batchNos[$i])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$stock) {
+                throw new \RuntimeException(
+                    "Stock not found for product {$pid} (batch {$batchNos[$i]}, mfg {$mfgDates[$i]}, mrp {$mrps[$i]})"
+                );
+            }
+
+            if ((float) $stock->qty < $qty) {
+                throw new \RuntimeException(
+                    "Insufficient stock for product {$pid} (batch {$batchNos[$i]}): available {$stock->qty}, requested {$qty}"
+                );
+            }
+
+            $lines[] = [
+                'product_id' => $pid,
+                'mfg_date'   => $mfgDates[$i],
+                'batch_no'   => $batchNos[$i],
+                'mrp'        => $mrps[$i],
+                'qty'        => $qty,
+                'rate'       => $rates[$i],
+                'stock_id'   => $stock->id,
+            ];
+        }
+
+        // (c) PASS 2 — apply. Every line is known-good by now.
+        foreach ($lines as $line) {
+            $detailUpdated = DB::table('dms_retailer_claim_details')
+                ->where('order_id', $orderId)
+                ->where('company_id', $company_id)
+                ->where('dealer_id', $ctx->dealer_id)
+                ->where('product_id', $line['product_id'])
+                ->where('mfg_date', $line['mfg_date'])
+                ->where('batch_no', $line['batch_no'])
+                ->where('mrp', $line['mrp'])
+                ->update([
+                    'claim_fulfill_qty'  => $line['qty'],
+                    'claim_fulfill_rate' => $line['rate'],
+                ]);
+
+            // NB: MySQL returns 0 affected rows when the values are unchanged.
+            // If that's possible here, replace this with an existence check.
+            if ($detailUpdated === 0) {
+                throw new \RuntimeException("Claim detail row missing for product {$line['product_id']}");
+            }
+
+            $this->stockService->deduct(
+                dealerId:  $ctx->dealer_id,
+                stockId:   $line['stock_id'],
+                qty:       $line['qty'],
+                reference: ['retailer_claim', $orderId],
+            );
+        }
+
+        // (d) Commit marker — flipped only after every line succeeded.
+        DB::table('dms_retailer_claim')
+            ->where('id', $claim->id)
+            ->update([
+                'claim_status'     => 1,
+                'claim_fulfill_on' => now(),
+            ]);
+
+        DB::commit();
+
+        return response()->json(['code' => 200, 'message' => 'success']);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+    }
+}
 
     /* ================================================================== */
     /*  7. PDF — retailer claim                                            */
@@ -790,121 +863,203 @@ class DmsClaimOrderApiController extends Controller
     /*  9. processClaimPreview                                             */
     /* ================================================================== */
 
-    public function processClaimPreview(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
-        $request->validate(['checkedVals' => 'required|string']);
+  public function processClaimPreview(Request $request)
+{
+    $ctx = $this->dealerContext($request);
+    $request->validate(['checkedVals' => 'required|string']);
 
-        $orderArray = explode(',', $request->input('checkedVals'));
-        $dealerId   = $ctx->dealer_id;
+    $orderArray = array_values(array_filter(
+        array_map('trim', explode(',', $request->input('checkedVals'))),
+        fn ($v) => $v !== ''
+    ));
 
-        $detailsData = DB::table('dms_retailer_claim_details')
-            ->join('dms_retailer_claim', 'dms_retailer_claim.order_id', '=', 'dms_retailer_claim_details.order_id')
-            ->join('catalog_product', 'catalog_product.id', '=', 'dms_retailer_claim_details.product_id')
-            ->select('dms_retailer_claim_details.*', 'catalog_product.name as product_name', DB::raw("SUM(claim_fulfill_qty) as claim_fulfill_qty"))
-            ->where('dms_retailer_claim.saleable_non_saleable', 2)
-            ->groupBy('mfg_date', 'mrp', 'batch_no', 'product_id')
-            ->whereIn('dms_retailer_claim_details.order_id', $orderArray)
-            ->get();
-
-        $itemArr = $detailsData->pluck('product_id')->all();
-
-        $getNonSalableStock = DB::table('stock')
-            ->where('dealer_id', $dealerId)
-            ->whereIn('product_id', $itemArr)
-            ->where('nonsalable_damage', 0)
-            ->groupBy('product_id', 'mfg', 'mrp', 'batch_no')
-            ->pluck(DB::raw("SUM(qty)"), DB::raw("CONCAT(product_id,mfg,mrp,batch_no) as q"));
-
-        return response()->json($this->utf8Clean([
-            'code'                 => 200,
-            'message'              => 'success',
-            'details_data'         => $detailsData,
-            'get_non_salable_stock'=> $getNonSalableStock,
-        ]));
+    if (empty($orderArray)) {
+        return response()->json(['code' => 422, 'message' => 'checkedVals must contain at least one order_id'], 422);
     }
 
+    $dealerId = $ctx->dealer_id;
+
+    $dealerData = $this->dealerLoginRow($dealerId);
+    abort_if(!$dealerData, 422, "dealer_person_login missing");
+    $companyId = $dealerData->company_id;
+
+    $detailsData = DB::table('dms_retailer_claim_details')
+        ->join('dms_retailer_claim', 'dms_retailer_claim.order_id', '=', 'dms_retailer_claim_details.order_id')
+        ->join('catalog_product', 'catalog_product.id', '=', 'dms_retailer_claim_details.product_id')
+        ->select([
+            'dms_retailer_claim_details.product_id',
+            'dms_retailer_claim_details.batch_no',
+            'dms_retailer_claim_details.mfg_date',
+            'dms_retailer_claim_details.mrp',
+            'dms_retailer_claim_details.rate as claim_fulfill_rate',
+            'catalog_product.name as product_name',
+            DB::raw('SUM(dms_retailer_claim_details.claim_fulfill_qty) as claim_fulfill_qty'),
+        ])
+        ->whereIn('dms_retailer_claim_details.order_id', $orderArray)
+        ->where('dms_retailer_claim.saleable_non_saleable', 2)
+        ->where('dms_retailer_claim.dealer_id', $dealerId)
+        ->where('dms_retailer_claim.company_id', $companyId)
+        ->groupBy(
+            'dms_retailer_claim_details.product_id',
+            'dms_retailer_claim_details.batch_no',
+            'dms_retailer_claim_details.mfg_date',
+            'dms_retailer_claim_details.mrp',
+            'dms_retailer_claim_details.rate',
+            'catalog_product.name'
+        )
+        ->get();
+
+    $itemArr = $detailsData->pluck('product_id')->unique()->all();
+
+    $getNonSalableStock = DB::table('stock')
+        ->select([
+            'product_id',
+            'mfg',
+            'mrp',
+            'batch_no',
+            DB::raw('SUM(nonsalable_damage) as qty'),
+        ])
+        ->where('dealer_id', $dealerId)
+        ->whereIn('product_id', $itemArr)
+        ->groupBy('product_id', 'mfg', 'mrp', 'batch_no')
+        ->get()
+        ->mapWithKeys(function ($row) {
+            return [
+                $row->product_id . $row->mfg . $row->mrp . $row->batch_no => $row->qty,
+            ];
+        });
+
+    return response()->json($this->utf8Clean([
+        'code'                  => 200,
+        'message'               => 'success',
+        'details_data'          => $detailsData,
+        'get_non_salable_stock' => $getNonSalableStock,
+    ]));
+}
     /* ================================================================== */
     /*  10. save_sra_generate_pdf                                          */
     /* ================================================================== */
 
-    public function saveSraGeneratePdf(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+  public function saveSraGeneratePdf(Request $request)
+{
+    $ctx = $this->dealerContext($request);
 
-        $request->validate([
-            'order_id'           => 'required|string',
-            'product_id'         => 'required|array',
-            'claim_fulfill_qty'  => 'required|array',
-            'claim_fulfill_rate' => 'required|array',
-            'batch_no'           => 'required|array',
-            'mfg_date'           => 'required|array',
-            'mrp'                => 'required|array',
-        ]);
+    $request->validate([
+        'order_id'           => 'required|string',
+        'product_id'         => 'required|array|min:1',
+        'product_id.*'       => 'required|integer',
+        'claim_fulfill_qty'  => 'required|array|min:1',
+        'claim_fulfill_qty.*'=> 'required|numeric|min:0',
+        'claim_fulfill_rate' => 'required|array|min:1',
+        'claim_fulfill_rate.*'=> 'required|numeric|min:0',
+        'batch_no'           => 'required|array|min:1',
+        'batch_no.*'         => 'required',
+        'mfg_date'           => 'required|array|min:1',
+        'mfg_date.*'         => 'required',
+        'mrp'                => 'required|array|min:1',
+        'mrp.*'              => 'required|numeric|min:0',
+    ]);
 
-        $orderArray = $request->input('order_id');
-        $orderId    = date('YmdHis') . $ctx->dealer_id;
-        $dealerId   = $ctx->dealer_id;
+    $orderArray = trim((string) $request->input('order_id'));
+    $orderIds   = array_values(array_filter(array_map('trim', explode(',', $orderArray)), fn ($v) => $v !== ''));
 
-        DB::beginTransaction();
-        try {
-            $dealerData = $this->dealerLoginRow($dealerId);
-            abort_if(!$dealerData, 422, "dealer_person_login missing");
+    if (empty($orderIds)) {
+        return response()->json(['code' => 422, 'message' => 'order_id must contain at least one MRC'], 422);
+    }
 
-            DB::table('dms_dealer_claim')->insert([
-                'order_id'         => $orderId,
-                'company_id'       => $dealerData->company_id,
-                'dealer_id'        => $dealerId,
-                'date'             => date('Y-m-d'),
-                'time'             => date('H:i:s'),
-                'order_id_string'  => $orderArray,
-                'server_date_time' => now(),
-                'claim_status'     => 0,
-            ]);
+    $dealerId = $ctx->dealer_id;
+    $newOrderId = date('YmdHis') . $dealerId;
 
-            $productIds = (array) $request->input('product_id');
-            $qtys       = (array) $request->input('claim_fulfill_qty');
-            $rates      = (array) $request->input('claim_fulfill_rate');
-            $batchNos   = (array) $request->input('batch_no');
-            $mfgDates   = (array) $request->input('mfg_date');
-            $mrps       = (array) $request->input('mrp');
+    $productIds = array_values((array) $request->input('product_id'));
+    $qtys       = array_values((array) $request->input('claim_fulfill_qty'));
+    $rates      = array_values((array) $request->input('claim_fulfill_rate'));
+    $batchNos   = array_values((array) $request->input('batch_no'));
+    $mfgDates   = array_values((array) $request->input('mfg_date'));
+    $mrps       = array_values((array) $request->input('mrp'));
 
-            $rows = [];
-            foreach ($qtys as $i => $q) {
-                $rows[] = [
-                    'order_id'   => $orderId,
-                    'company_id' => $dealerData->company_id,
-                    'product_id' => $productIds[$i],
-                    'quantity'   => $q,
-                    'mfg_date'   => $mfgDates[$i],
-                    'batch_no'   => $batchNos[$i],
-                    'rate'       => $rates[$i],
-                    'mrp'        => $mrps[$i],
-                    'reason'     => '',
-                ];
-            }
-
-            if (!empty($rows)) {
-                DB::table('dms_dealer_claim_details')->insert($rows);
-            }
-
-            DB::table('dms_retailer_claim')
-                ->whereIn('order_id', explode(',', $orderArray))
-                ->update(['sra_status' => 1]);
-
-            DB::commit();
-
+    $n = count($productIds);
+    foreach ([$qtys, $rates, $batchNos, $mfgDates, $mrps] as $arr) {
+        if (count($arr) !== $n) {
             return response()->json([
-                'code'     => 200,
-                'message'  => 'success',
-                'order_id' => $orderId,
-            ]);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+                'code'    => 422,
+                'message' => 'product_id / claim_fulfill_qty / claim_fulfill_rate / batch_no / mfg_date / mrp must all be the same length',
+            ], 422);
         }
     }
 
+    DB::beginTransaction();
+    try {
+        $dealerData = $this->dealerLoginRow($dealerId);
+        abort_if(!$dealerData, 422, "dealer_person_login missing");
+        $companyId = $dealerData->company_id;
+
+        // Lock and verify every MRC belongs to this dealer/company AND is still open.
+        $openCount = DB::table('dms_retailer_claim')
+            ->whereIn('order_id', $orderIds)
+            ->where('dealer_id', $dealerId)
+            ->where('company_id', $companyId)
+            ->where('sra_status', 0)
+            ->lockForUpdate()
+            ->count();
+
+        if ($openCount !== count($orderIds)) {
+            DB::rollBack();
+            return response()->json([
+                'code'    => 409,
+                'message' => 'One or more MRCs are missing, already used in another SRA, or do not belong to this dealer',
+            ], 409);
+        }
+
+        DB::table('dms_dealer_claim')->insert([
+            'order_id'         => $newOrderId,
+            'company_id'       => $companyId,
+            'dealer_id'        => $dealerId,
+            'date'             => date('Y-m-d'),
+            'time'             => date('H:i:s'),
+            'order_id_string'  => $orderArray,
+            'server_date_time' => now(),
+            'claim_status'     => 0,
+        ]);
+
+        $rows = [];
+        foreach ($productIds as $i => $pid) {
+            $rows[] = [
+                'order_id'   => $newOrderId,
+                'company_id' => $companyId,
+                'product_id' => $pid,
+                'quantity'   => $qtys[$i],
+                'mfg_date'   => $mfgDates[$i],
+                'batch_no'   => $batchNos[$i],
+                'rate'       => $rates[$i],
+                'mrp'        => $mrps[$i],
+                'reason'     => '',
+            ];
+        }
+
+        if (!empty($rows)) {
+            DB::table('dms_dealer_claim_details')->insert($rows);
+        }
+
+        // Scoped + status-guarded flip. Locked above, so this cannot race.
+        DB::table('dms_retailer_claim')
+            ->whereIn('order_id', $orderIds)
+            ->where('dealer_id', $dealerId)
+            ->where('company_id', $companyId)
+            ->where('sra_status', 0)
+            ->update(['sra_status' => 1]);
+
+        DB::commit();
+
+        return response()->json([
+            'code'     => 200,
+            'message'  => 'success',
+            'order_id' => $newOrderId,
+        ]);
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+    }
+}
     /* ================================================================== */
     /*  11. sra_report                                                     */
     /* ================================================================== */
@@ -1214,144 +1369,271 @@ class DmsClaimOrderApiController extends Controller
     /* ================================================================== */
     /*  17. multipleBatchClaim — creates claim with images                 */
     /* ================================================================== */
+public function multipleBatchClaim(Request $request)
+{
+    $ctx = $this->dealerContext($request);
 
-    public function multipleBatchClaim(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+    $request->validate([
+        'dealer_id_cus_select' => 'required|in:1,2',
+        'item_code'            => 'required|array|min:1',
+        'item_code.*'          => 'required|integer',
+        'product_rate'         => 'required|array|min:1',
+        'product_rate.*'       => 'required|numeric|min:0',
+        'qty'                  => 'required|array|min:1',
+        'remarks'              => 'nullable|array',
+        'order_date'           => 'nullable|date',
+        'dealer_id_cus'        => 'required_if:dealer_id_cus_select,2|integer',
+        'return_ch_no'         => 'nullable|integer',
+    ]);
 
-        $request->validate([
-            'dealer_id_cus_select' => 'required|in:1,2',
-            'item_code'            => 'required|array|min:1',
-            'product_rate'         => 'required|array',
-            'qty'                  => 'required|array',
-        ]);
+    $orderDate = $request->input('order_date', date('Y-m-d'));
+    $dealerId  = $ctx->dealer_id;
+    $orderId   = date('YmdHis') . $dealerId;   // see note 5
 
-        $orderDate = $request->input('order_date', date('Y-m-d'));
-        $orderId   = date('YmdHis') . $ctx->dealer_id;
-        $dealerId  = $ctx->dealer_id;
+    $dealerData = $this->dealerLoginRow($dealerId);
+    abort_if(!$dealerData, 422, "dealer_person_login missing");
+    $companyId = $dealerData->company_id;
 
-        $dealerData = $this->dealerLoginRow($dealerId);
-        abort_if(!$dealerData, 422, "dealer_person_login missing");
+    $itemCodes    = array_values((array) $request->input('item_code'));
+    $productRates = array_values((array) $request->input('product_rate'));
+    $qtyInput     = (array) $request->input('qty');
+    $remarks      = (array) $request->input('remarks', []);
 
-        $itemCode    = (array) $request->input('item_code');
-        $productRate = (array) $request->input('product_rate');
-        $qty         = (array) $request->input('qty');
-        $remarks     = (array) $request->input('remarks');
+    // ---- PASS 1: parse & validate every line. No writes. ----
+    $lines = [];
+    foreach ($itemCodes as $i => $pid) {
+        if (!array_key_exists($i, $productRates)) {
+            return response()->json([
+                'code'    => 422,
+                'message' => "product_rate missing for item_code[{$i}]",
+            ], 422);
+        }
+        $rate   = (float) $productRates[$i];
+        $reason = $remarks[$i] ?? 0;
 
-        DB::beginTransaction();
-        try {
-            if ($request->input('dealer_id_cus_select') == '2') {
-                $retailerId = $request->input('dealer_id_cus');
+        $batchMap = $qtyInput[$i] ?? [];
+        if (!is_array($batchMap)) {
+            return response()->json([
+                'code'    => 422,
+                'message' => "qty[{$i}] must be an object keyed by 'batch|mfg|mrp'",
+            ], 422);
+        }
 
-                $saleableNonSaleable = 0;
-                if (!empty($request->input('return_ch_no')) && !empty($request->input('request_retailer'))) {
-                    $DamageHead = DB::table('damage_order')->where('id', $request->input('return_ch_no'))->first();
-                    $saleableNonSaleable = $DamageHead->damage_order_type_id ?? 2;
-                }
+        foreach ($batchMap as $batchmfgmrp => $quantity) {
+            if ($quantity === null || $quantity === '') continue;
 
-                DB::table('dms_retailer_claim')->insert([
-                    'order_id'              => $orderId,
-                    'company_id'            => $dealerData->company_id,
-                    'dealer_id'             => $dealerId,
-                    'retailer_id'           => $retailerId,
-                    'date'                  => $orderDate,
-                    'time'                  => date('H:i:s'),
-                    'server_date_time'      => now(),
-                    'claim_status'          => 0,
-                    'return_ch_no'          => $request->input('return_ch_no', null),
-                    'saleable_non_saleable' => $saleableNonSaleable,
-                ]);
-
-                $this->handleMultipleImages($request, 'dms_retailer_claim', $orderId, $dealerId);
-
-                foreach ($itemCode as $i => $pid) {
-                    $rate   = $productRate[$i] ?? 0;
-                    $reason = $remarks[$i] ?? 0;
-                    if (empty($qty[$i])) continue;
-
-                    foreach ($qty[$i] as $batchmfgmrp => $quantity) {
-                        if (empty($quantity)) continue;
-                        $ex = explode('|', $batchmfgmrp);
-
-                        DB::table('dms_retailer_claim_details')->insert([
-                            'order_id'   => $orderId,
-                            'company_id' => $dealerData->company_id,
-                            'product_id' => $pid,
-                            'quantity'   => $quantity,
-                            'mfg_date'   => $ex[1] ?? null,
-                            'batch_no'   => $ex[0] ?? '',
-                            'rate'       => $rate,
-                            'mrp'        => $ex[2] ?? '',
-                            'reason'     => $reason,
-                        ]);
-                    }
-                }
-            } else {
-                DB::table('dms_dealer_claim')->insert([
-                    'order_id'         => $orderId,
-                    'company_id'       => $dealerData->company_id,
-                    'dealer_id'        => $dealerId,
-                    'date'             => $orderDate,
-                    'time'             => date('H:i:s'),
-                    'server_date_time' => now(),
-                    'claim_status'     => 0,
-                ]);
-
-                $this->handleMultipleImages($request, 'dms_dealer_claim', $orderId, $dealerId);
-
-                foreach ($itemCode as $i => $pid) {
-                    $rate   = $productRate[$i] ?? 0;
-                    $reason = $remarks[$i] ?? 0;
-                    if (empty($qty[$i])) continue;
-
-                    foreach ($qty[$i] as $batchmfgmrp => $quantity) {
-                        if (empty($quantity)) continue;
-                        $ex = explode('|', $batchmfgmrp);
-
-                        DB::table('dms_dealer_claim_details')->insert([
-                            'order_id'   => $orderId,
-                            'company_id' => $dealerData->company_id,
-                            'product_id' => $pid,
-                            'quantity'   => $quantity,
-                            'mfg_date'   => $ex[1] ?? '0',
-                            'batch_no'   => $ex[0] ?? '0',
-                            'rate'       => $rate,
-                            'mrp'        => $ex[2] ?? '0',
-                            'reason'     => $reason,
-                        ]);
-
-                        $stockQ = DB::table('stock')
-                            ->where('product_id', $pid)
-                            ->where('dealer_id', $dealerId)
-                            ->where('batch_no', $ex[0] ?? '')
-                            ->where('mrp', $ex[2] ?? '')
-                            ->where('mfg', date('Y-m-d', strtotime($ex[1] ?? '')))
-                            ->first();
-
-                        if ($stockQ) {
-                            DB::table('stock')
-                                ->where('id', $stockQ->id)
-                                ->update([
-                                    'nonsalable_damage' => ($stockQ->nonsalable_damage ?? 0) - $quantity,
-                                ]);
-                        }
-                    }
-                }
+            if (!is_numeric($quantity) || (float) $quantity <= 0) {
+                return response()->json([
+                    'code'    => 422,
+                    'message' => "Invalid qty for item_code[{$i}] key '{$batchmfgmrp}': must be > 0",
+                ], 422);
             }
 
-            DB::commit();
+            $parts   = explode('|', (string) $batchmfgmrp);
+            $batchNo = $parts[0] ?? '';
+            $mfgRaw  = $parts[1] ?? '';
+            $mrp     = $parts[2] ?? '';
 
-            return response()->json([
-                'code'     => 200,
-                'message'  => 'success',
-                'order_id' => $orderId,
-            ], 201);
+            if ($batchNo === '' || $mfgRaw === '' || $mrp === '') {
+                return response()->json([
+                    'code'    => 422,
+                    'message' => "Malformed batch key '{$batchmfgmrp}' for item_code[{$i}]",
+                ], 422);
+            }
 
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+            $mfgTs = strtotime($mfgRaw);
+            if ($mfgTs === false) {
+                return response()->json([
+                    'code'    => 422,
+                    'message' => "Invalid mfg_date '{$mfgRaw}' in key '{$batchmfgmrp}'",
+                ], 422);
+            }
+
+            $lines[] = [
+                'product_id' => (int) $pid,
+                'batch_no'   => $batchNo,
+                'mfg_date'   => date('Y-m-d', $mfgTs),
+                'mrp'        => $mrp,
+                'rate'       => $rate,
+                'reason'     => $reason,
+                'quantity'   => (float) $quantity,
+            ];
         }
     }
+
+    if (empty($lines)) {
+        return response()->json([
+            'code'    => 422,
+            'message' => 'At least one line with quantity > 0 is required',
+        ], 422);
+    }
+
+    $isRetailer = $request->input('dealer_id_cus_select') == '2';
+
+    DB::beginTransaction();
+
+    try {
+        if ($isRetailer) {
+            $retailerId = $request->input('dealer_id_cus');
+
+            // Ownership check — retailer must belong to this dealer.
+            $ownsRetailer = DB::table('retailer')          // adjust table name
+                ->where('id', $retailerId)
+                ->where('dealer_id', $dealerId)
+                ->exists();
+            if (!$ownsRetailer) {
+                DB::rollBack();
+                return response()->json([
+                    'code'    => 422,
+                    'message' => 'Invalid retailer for this dealer',
+                ], 422);
+            }
+
+            $saleableNonSaleable = 0;
+            $returnChNo = $request->input('return_ch_no');
+            if (!empty($returnChNo) && !empty($request->input('request_retailer'))) {
+                $DamageHead = DB::table('damage_order')
+                    ->where('id', $returnChNo)
+                    ->where('dealer_id', $dealerId)        // scope!
+                    ->first();
+                $saleableNonSaleable = $DamageHead->damage_order_type_id ?? 2;
+            }
+
+            DB::table('dms_retailer_claim')->insert([
+                'order_id'              => $orderId,
+                'company_id'            => $companyId,
+                'dealer_id'             => $dealerId,
+                'retailer_id'           => $retailerId,
+                'date'                  => $orderDate,
+                'time'                  => date('H:i:s'),
+                'server_date_time'      => now(),
+                'claim_status'          => 0,
+                'return_ch_no'          => $returnChNo,
+                'saleable_non_saleable' => $saleableNonSaleable,
+            ]);
+$replaceReturnId = (int) $request->input('replace_return_id', 0);
+
+foreach ($lines as $line) {
+    DB::table('dms_retailer_claim_details')->insert([
+        'order_id'   => $orderId,
+        'company_id' => $companyId,
+        'product_id' => $line['product_id'],
+        'quantity'   => $line['quantity'],
+        'mfg_date'   => $line['mfg_date'],
+        'batch_no'   => $line['batch_no'],
+        'rate'       => $line['rate'],
+        'mrp'        => $line['mrp'],
+        'reason'     => $line['reason'],
+    ]);
+
+    // ---- legacy replacement step: return damaged qty to stock ----
+    if ($replaceReturnId === 1) {
+        $stockRow = DB::table('stock')
+            ->where('product_id', $line['product_id'])
+            ->where('dealer_id', $dealerId)
+            ->where('batch_no', $line['batch_no'])
+            ->where('mrp', $line['mrp'])
+            ->where('mfg', $line['mfg_date'])
+            ->lockForUpdate()
+            ->first();
+
+        if (!$stockRow) {
+            throw new \RuntimeException(
+                "Stock not found for replacement return: product {$line['product_id']} batch {$line['batch_no']} mfg {$line['mfg_date']} mrp {$line['mrp']}"
+            );
+        }
+
+        // saleable_non_saleable == 1 → saleable bucket; else non-saleable.
+        // ADAPT the saleable column name to your schema ('qty' / 'saleable' / ...).
+        $column = ($saleableNonSaleable == 1) ? 'qty' : 'nonsalable_damage';
+
+        $this->stockService->increaseStock(
+            dealerId:  $dealerId,
+            stockId:   $stockRow->id,
+            column:    $column,
+            qty:       $line['quantity'],
+            reference: ['retailer_claim_return', $orderId],
+        );
+    }
+}
+        } else {
+            DB::table('dms_dealer_claim')->insert([
+                'order_id'         => $orderId,
+                'company_id'       => $companyId,
+                'dealer_id'        => $dealerId,
+                'date'             => $orderDate,
+                'time'             => date('H:i:s'),
+                'server_date_time' => now(),
+                'claim_status'     => 0,
+            ]);
+
+            foreach ($lines as $line) {
+                DB::table('dms_dealer_claim_details')->insert([
+                    'order_id'   => $orderId,
+                    'company_id' => $companyId,
+                    'product_id' => $line['product_id'],
+                    'quantity'   => $line['quantity'],
+                    'mfg_date'   => $line['mfg_date'],
+                    'batch_no'   => $line['batch_no'],
+                    'rate'       => $line['rate'],
+                    'mrp'        => $line['mrp'],
+                    'reason'     => $line['reason'],
+                ]);
+
+                $stockQ = DB::table('stock')
+                    ->where('product_id', $line['product_id'])
+                    ->where('dealer_id', $dealerId)
+                    ->where('batch_no', $line['batch_no'])
+                    ->where('mrp', $line['mrp'])
+                    ->where('mfg', $line['mfg_date'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$stockQ) {
+                    throw new \RuntimeException(
+                        "Stock not found for product {$line['product_id']} batch {$line['batch_no']} mfg {$line['mfg_date']} mrp {$line['mrp']}"
+                    );
+                }
+
+                $available = (float) ($stockQ->nonsalable_damage ?? 0);
+                if ($available < $line['quantity']) {
+                    throw new \RuntimeException(
+                        "Insufficient nonsalable_damage for product {$line['product_id']} batch {$line['batch_no']}: available {$available}, requested {$line['quantity']}"
+                    );
+                }
+
+                $this->stockService->adjustNonSalableDamage(
+                    dealerId:  $dealerId,
+                    stockId:   $stockQ->id,
+                    delta:     -$line['quantity'],           // negative = deduct
+                    reference: ['dealer_claim', $orderId],
+                );
+            }
+        }
+
+        $this->handleMultipleImages(
+            $request,
+            $isRetailer ? 'dms_retailer_claim' : 'dms_dealer_claim',
+            $orderId,
+            $dealerId
+        );
+
+        DB::commit();
+
+        return response()->json([
+            'code'     => 200,
+            'message'  => 'success',
+            'order_id' => $orderId,
+        ], 201);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json([
+            'code'    => 500,
+            'message' => $e->getMessage(),
+        ], 500);
+    }
+}
 
     private function handleMultipleImages(Request $request, string $table, string $orderId, int $dealerId)
     {

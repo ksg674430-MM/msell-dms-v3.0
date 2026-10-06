@@ -136,26 +136,35 @@ class DMSClaimReportController extends Controller
             $approvalData2[$row->order_id . $row->level_sequence] = $row;
         }
 
-        $samplingQuery = DB::table('samplingclaim')
-            ->join('samplingclaim_details', 'samplingclaim_details.sampling_id', '=', 'samplingclaim.id')
-            ->join('dealer', 'dealer.id', '=', 'samplingclaim.dealer_id')
-            ->select(
-                'samplingclaim.dealer_id',
-                'samplingclaim.order_id',
-                'dealer.name as dealer_name',
-                'dealer.state_id',
-                'dealer.town_id',
-                DB::raw("DATE_FORMAT(samplingclaim.date_time , '%Y-%m-%d') as date"),
-                DB::raw("SUM(rate_case*sampling_qty) as claim_amount"),
-                'dealer.dealer_code'
-            )
-            ->where('samplingclaim.dealer_id', $this->dealer_id)
-            ->where('samplingclaim.company_id', $companyId)
-            ->where('dealer.company_id', $companyId)
-            ->whereRaw("DATE_FORMAT(samplingclaim.date_time,'%Y-%m-%d') >='$fromDate' and DATE_FORMAT(samplingclaim.date_time,'%Y-%m-%d') <='$toDate'")
-            ->where('samplingclaim.claim_status', '=', '0')
-            ->groupBy('samplingclaim_details.product_id')
-            ->get();
+       $samplingQuery = DB::table('samplingclaim')
+    ->join('samplingclaim_details', 'samplingclaim_details.sampling_id', '=', 'samplingclaim.id')
+    ->join('dealer', 'dealer.id', '=', 'samplingclaim.dealer_id')
+    ->select([
+        'samplingclaim.dealer_id',
+        'samplingclaim.order_id',
+        'dealer.name as dealer_name',
+        'dealer.state_id',
+        'dealer.town_id',
+        'dealer.dealer_code',
+        DB::raw("DATE_FORMAT(samplingclaim.date_time, '%Y-%m-%d') as date"),
+        DB::raw("SUM(rate_case * sampling_qty) as claim_amount"),
+    ])
+    ->where('samplingclaim.dealer_id', $this->dealer_id)
+    ->where('samplingclaim.company_id', $companyId)
+    ->where('dealer.company_id', $companyId)
+    ->whereDate('samplingclaim.date_time', '>=', $fromDate)
+    ->whereDate('samplingclaim.date_time', '<=', $toDate)
+    ->where('samplingclaim.claim_status', '0')
+    ->groupBy(
+        'samplingclaim.order_id',
+        'samplingclaim.dealer_id',
+        'dealer.name',
+        'dealer.state_id',
+        'dealer.town_id',
+        'dealer.dealer_code',
+        DB::raw("DATE_FORMAT(samplingclaim.date_time, '%Y-%m-%d')")
+    )
+    ->get();
 
         $samplingData = [];
         foreach ($samplingQuery as $value) {
@@ -187,26 +196,34 @@ class DMSClaimReportController extends Controller
         }
 
         $rateDiffQuery = DB::table('dms_challan_claim')
-            ->join('dms_challan_claim_details', 'dms_challan_claim_details.order_id', '=', 'dms_challan_claim.order_id')
-            ->join('dealer', 'dealer.id', '=', 'dms_challan_claim.dealer_id')
-            ->select(
-                'dms_challan_claim.dealer_id',
-                'dms_challan_claim.order_id',
-                'dealer.name as dealer_name',
-                'dealer.state_id',
-                'dealer.town_id',
-                DB::raw("DATE_FORMAT(dms_challan_claim.date_time , '%Y-%m-%d') as date"),
-                DB::raw("SUM(challan_rate*challan_qty) as claim_amount"),
-                'dealer.dealer_code'
-            )
-            ->where('dms_challan_claim.company_id', $companyId)
-            ->where('dms_challan_claim.dealer_id', $this->dealer_id)
-            ->where('dealer.company_id', $companyId)
-            ->whereRaw("DATE_FORMAT(dms_challan_claim.date_time,'%Y-%m-%d') >='$fromDate' and DATE_FORMAT(dms_challan_claim.date_time,'%Y-%m-%d') <='$toDate'")
-            ->where('dms_challan_claim.claim_status', '=', '0')
-            ->groupBy('dms_challan_claim_details.product_id')
-            ->get();
-
+    ->join('dms_challan_claim_details', 'dms_challan_claim_details.order_id', '=', 'dms_challan_claim.order_id')
+    ->join('dealer', 'dealer.id', '=', 'dms_challan_claim.dealer_id')
+    ->select([
+        'dms_challan_claim.dealer_id',
+        'dms_challan_claim.order_id',
+        'dealer.name as dealer_name',
+        'dealer.state_id',
+        'dealer.town_id',
+        'dealer.dealer_code',
+        DB::raw("DATE_FORMAT(dms_challan_claim.date_time, '%Y-%m-%d') as date"),
+        DB::raw("SUM(challan_rate * challan_qty) as claim_amount"),
+    ])
+    ->where('dms_challan_claim.company_id', $companyId)
+    ->where('dms_challan_claim.dealer_id', $this->dealer_id)
+    ->where('dealer.company_id', $companyId)
+    ->whereDate('dms_challan_claim.date_time', '>=', $fromDate)
+    ->whereDate('dms_challan_claim.date_time', '<=', $toDate)
+    ->where('dms_challan_claim.claim_status', '0')
+    ->groupBy(
+        'dms_challan_claim.order_id',
+        'dms_challan_claim.dealer_id',
+        'dealer.name',
+        'dealer.state_id',
+        'dealer.town_id',
+        'dealer.dealer_code',
+        DB::raw("DATE_FORMAT(dms_challan_claim.date_time, '%Y-%m-%d')")
+    )
+    ->get();
         $rateDiffData = [];
         foreach ($rateDiffQuery as $value) {
             $out = [
@@ -270,7 +287,7 @@ class DMSClaimReportController extends Controller
         $orderId   = $request->input('order_id');
         $companyId = $this->company_id;
 
-        $checkLevelApproval = DB::table('dms_challan_claim_level_approval')
+        $checkLevelApproval = DB::table('dms_dealer_claim_level_approval')
             ->where('order_id', $orderId)
             ->where('company_id', $companyId)
             ->get();
@@ -343,7 +360,7 @@ class DMSClaimReportController extends Controller
         $orderId   = $request->input('order_id');
         $companyId = $this->company_id;
 
-        $checkLevelApproval = DB::table('dms_retailer_claim_level_approval')
+        $checkLevelApproval = DB::table('dms_retailer_images_amount_claim_level_approval')
             ->where('order_id', $orderId)
             ->where('company_id', $companyId)
             ->get();
