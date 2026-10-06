@@ -47,6 +47,7 @@ class DashboardController extends Controller
             'status' => true,
             'month'  => $month,
             'data'   => $this->mtdReport($dealerId, $month),
+            'target_vs_achieved' => $this->targetVsAchieved($dealerId, $month),
         ]);
     }
 
