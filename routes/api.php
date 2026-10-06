@@ -63,6 +63,10 @@ use App\Http\Controllers\Api\Reports\VanReportController;
 use App\Http\Controllers\Api\SsVanSalesReportController;
 use App\Http\Controllers\Api\MainReportApiController;
 
+use App\Http\Controllers\Api\TallyViewController;
+
+use App\Http\Controllers\Api\DmsReportController;
+
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -71,6 +75,25 @@ Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
 
+Route::prefix('tally-view')->group(function () {
+    Route::get('stock',    [TallyViewController::class, 'tallyStockView']);
+    Route::get('purchase', [TallyViewController::class, 'tallyPurchase']);
+    Route::get('sale',     [TallyViewController::class, 'tallySale']);
+});
+
+
+Route::prefix('dms-reports')->group(function () {
+    Route::get('to-tally',           [DmsReportController::class, 'dmsToTallyReport']);
+    Route::post('to-tally/data',     [DmsReportController::class, 'dmsToTally']);
+
+    Route::get('invoice-summary',        [DmsReportController::class, 'dmsInvoiceSummaryReport']);
+    Route::post('invoice-summary/data',  [DmsReportController::class, 'dmsInvoiceSummary']);
+
+    Route::get('purchase',           [DmsReportController::class, 'dmsPurchaseReport']);
+    Route::post('purchase/data',     [DmsReportController::class, 'dmsPurchase']);
+
+    Route::post('common-section',    [DmsReportController::class, 'dmsCommonReportSection']);
+});
     // ========================================================
     // AUTH  → MENU: App boot / Session
     // ========================================================
@@ -456,6 +479,8 @@ Route::prefix('reports')->group(function () {
     Route::put   ('complaint',                     [MainReportApiController::class, 'updateComplaint']);
     Route::delete('complaint',                     [MainReportApiController::class, 'deleteComplaint']);
 
+    
+
 });
 
 
@@ -535,6 +560,7 @@ Route::middleware('auth:sanctum')->prefix('dms/credit-note')->group(function () 
     Route::post('challan/details',               [DmsDgrCreditNoteApiController::class, 'mtChallanClaimDetailsSs']);
     Route::post('challan/update',                [DmsDgrCreditNoteApiController::class, 'mtChallanClaimUpdateSs']);
     Route::post('challan/generate-credit-note',  [DmsDgrCreditNoteApiController::class, 'takeActionGenerateChallanCreditNote']);
+    
 });
 
 
@@ -598,4 +624,30 @@ Route::middleware('auth:sanctum')->prefix('dms/claim-order')->group(function () 
 
     Route::post('scheme-details',           [DmsClaimOrderApiController::class, 'schemeDetails']);
     Route::post('stock-check',              [DmsClaimOrderApiController::class, 'stockCheckDms']);
+});
+
+use App\Http\Controllers\Api\DMSReportDealerController;
+use App\Http\Controllers\Api\DMSClaimReportController;
+
+Route::middleware('auth:sanctum')->group(function () {
+
+    /* ---------------- DMS Dealer Reports ---------------- */
+    Route::prefix('dms-report-dealer')->group(function () {
+        Route::get('short-item-list',           [DMSReportDealerController::class, 'shortItemListReport']);
+        Route::post('short-item-list-ajax',     [DMSReportDealerController::class, 'shortItemListReportAjax']);
+        Route::post('item-detailer-short-item', [DMSReportDealerController::class, 'itemDetailerShortItem']);
+        Route::post('change-date',              [DMSReportDealerController::class, 'changeDate']);
+
+        Route::get('dealer-sale-details',       [DMSReportDealerController::class, 'dealerSaleDetailsReport']);
+        Route::post('dealer-sale-details-ajax', [DMSReportDealerController::class, 'dealerSaleDetailsReportAjax']);
+    });
+
+    /* ---------------- DMS Claim Reports ---------------- */
+    Route::prefix('dms-claim')->group(function () {
+        Route::get('filters',            [DMSClaimReportController::class, 'dmsClaimReport']);
+        Route::post('report',            [DMSClaimReportController::class, 'dmsClaim']);
+        Route::post('approval/dealer',   [DMSClaimReportController::class, 'newClaimApproval']);
+        Route::post('approval/sampling', [DMSClaimReportController::class, 'newClaimApproval1']);
+        Route::post('approval/challan',  [DMSClaimReportController::class, 'newClaimApproval2']);
+    });
 });
