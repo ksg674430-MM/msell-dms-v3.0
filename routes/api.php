@@ -56,7 +56,8 @@ use App\Http\Controllers\Api\Reports\SalesReportController;
 use App\Http\Controllers\Api\Reports\PerformanceReportController;
 
 use App\Http\Controllers\Api\Reports\StockReportController;      
-use App\Http\Controllers\Api\Reports\GstReportController;         
+use App\Http\Controllers\Api\Reports\GstReportController;
+use App\Http\Controllers\Api\Reports\Gstr1Controller;         
 use App\Http\Controllers\Api\Reports\LedgerReportController;
 use App\Http\Controllers\Api\Reports\VanReportController;
 
@@ -428,6 +429,9 @@ Route::prefix('reports')->group(function () {
     Route::get('/gst/purchase-detailed',         [GstReportController::class, 'purchaseDetailed']);
     Route::get('/gst/book-wise',                 [GstReportController::class, 'bookWise']);
     Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
+    Route::get('/gst/gstr1-return',              [Gstr1Controller::class, 'index']);
+    Route::get('/gst/gstr1-return/json',         [Gstr1Controller::class, 'json']);
+    Route::get('/gst/gstr1-return/excel',        [Gstr1Controller::class, 'excel']);
 
     // ---------- LEDGER ----------
     Route::get('/ledger/party',                  [LedgerReportController::class, 'partyLedger']);
