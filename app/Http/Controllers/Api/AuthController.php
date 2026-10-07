@@ -116,6 +116,8 @@ class AuthController extends Controller
 
         $companyName  = DB::table('company')->where('id', $user->company_id)->value('title');
         $companyImage = DB::table('company')->where('id', $user->company_id)->value('company_image');
+        // $baseUrl      = DB::table('company')->where('id', $user->company_id)->value('base_url');
+        // dd($baseUrl);
 
         return response()->json([
             'status'  => true,
@@ -134,7 +136,7 @@ class AuthController extends Controller
                 'csa_id'            => $user->csa_id,
                 'company_id'        => $user->company_id,
                 'company_name'      => $companyName,
-                'company_image'     => "http://demo.msell.in/public/".$companyImage,
+                'company_image'     => "https://demo.msell.in/public/".$companyImage,
                 'domain_url'        => $comp->domain_url ?? null,
                 'state_id'          => $stid,
                 'quantity_type'     => $user->quantity_type,
