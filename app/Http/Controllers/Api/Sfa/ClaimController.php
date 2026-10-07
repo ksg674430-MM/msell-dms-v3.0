@@ -1,20 +1,14 @@
 <?php
-namespace App\Http\Controllers\API\Sfa;
+
+namespace App\Http\Controllers\Api\Sfa;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-
 class ClaimController extends Controller
 {
-    /**
-     * Resolve the logged-in dealer context (dealer_id + company_id) from the request.
-     * Adjust to match your existing helper/trait — this is a placeholder.
-     *
-     * @return object{dealer_id:int, company_id:int}
-     */
     protected function dealerContext(Request $request)
     {
         $dealerId  = $request->attributes->get('dealer_id')  ?? auth()->user()->dealer_id  ?? null;
@@ -28,32 +22,23 @@ class ClaimController extends Controller
         ];
     }
 
-    /**
-     * Build an absolute URL for a damage_replace_retailer image.
-     */
     protected function damageImageUrl(?string $filename): ?string
     {
         if (empty($filename)) {
             return null;
         }
-
-        // If the column already stores an absolute URL, return it as-is.
         if (preg_match('#^https?://#i', $filename)) {
             return $filename;
         }
-
+        // CONFIRM this folder — the DB stores just 'claim_100001_1.jpg'
         $base = rtrim(config('app.asset_url', url('/')), '/') . '/uploads/damage_replace_retailer';
 
         return $base . '/' . ltrim($filename, '/');
     }
 
-    /* =============================================================
+    /* =========================================================
      * GET /claims/sfa
-     * Query: from_date, to_date, user_ids[]
-     * Returns: { data: [{ replaceid, state, district, town, user_name,
-     *                     dealer_code, dealer_name, retailer_code,
-     *                     retailer_name, images: [absolute urls] }] }
-     * ============================================================= */
+     * ========================================================= */
     public function sfaClaims(Request $request)
     {
         $ctx = $this->dealerContext($request);
@@ -68,9 +53,9 @@ class ClaimController extends Controller
         $companyId = $ctx->company_id;
         $dealerId  = $ctx->dealer_id;
 
-        $from = date('Y-m-d', strtotime($request->input('from_date')));
-        $to   = date('Y-m-d', strtotime($request->input('to_date')));
-
+        $from = date('Y-m-d', strtotime($request->input('from_date'))) . ' 00:00:00';
+        $to   = date('Y-m-d', strtotime($request->input('to_date')))   . ' 23:59:59';
+        
         try {
             $rows = DB::table('damage_replace_retailer as drr')
                 ->join('person',     'person.id',     '=', 'drr.user_id')
@@ -90,34 +75,27 @@ class ClaimController extends Controller
                     'location_4.name as district',
                     'location_6.name as town',
                     DB::raw("CONCAT_WS(' ', person.first_name, person.middle_name, person.last_name) as user_name"),
-                    'drr.image_name1',
-                    'drr.image_name2',
-                    'drr.image_name3',
-                    'drr.image_name4',
-                    'drr.image_name5',
+                    'drr.image',
                 ])
                 ->where('drr.company_id',    $companyId)
                 ->where('person.company_id', $companyId)
                 ->where('dealer.company_id', $companyId)
                 ->where('dealer.id',         $dealerId)
-                ->whereDate('drr.date_time', '>=', $from)
-                ->whereDate('drr.date_time', '<=', $to)
+                ->where('drr.date_time', '>=', $from)
+                ->where('drr.date_time', '<=', $to)
                 ->when($request->filled('user_ids'), function ($q) use ($request) {
                     $q->whereIn('person.id', (array) $request->input('user_ids'));
                 })
                 ->orderBy('drr.replaceid')
                 ->get();
-
             $data = $rows->groupBy('replaceid')->map(function ($group) {
                 $first = $group->first();
 
                 $images = [];
-                foreach (['image_name1', 'image_name2', 'image_name3', 'image_name4', 'image_name5'] as $col) {
-                    foreach ($group as $row) {
-                        $url = $this->damageImageUrl($row->{$col} ?? null);
-                        if ($url !== null) {
-                            $images[] = $url;
-                        }
+                foreach ($group as $row) {
+                    $url = $this->damageImageUrl($row->image);
+                    if ($url !== null) {
+                        $images[] = $url;
                     }
                 }
 
@@ -138,7 +116,10 @@ class ClaimController extends Controller
             return response()->json(['data' => $data]);
 
         } catch (\Throwable $e) {
-            Log::error('sfaClaims failed', ['error' => $e->getMessage()]);
+            Log::error('sfaClaims failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return response()->json([
                 'code'    => 500,
@@ -147,11 +128,9 @@ class ClaimController extends Controller
         }
     }
 
-    /* =============================================================
+    /* =========================================================
      * GET /claims/sfa/{replaceid}
-     * Returns: { data: [{ sku_name, mfg_date, mrp, batch_no,
-     *                     prod_qty, prod_value }] }
-     * ============================================================= */
+     * ========================================================= */
     public function sfaClaimDetails(Request $request, $replaceid)
     {
         $ctx = $this->dealerContext($request);
@@ -160,7 +139,6 @@ class ClaimController extends Controller
         $dealerId  = $ctx->dealer_id;
 
         try {
-            // Ownership check — don't leak existence of another dealer's replaceid.
             $owns = DB::table('damage_replace_retailer')
                 ->where('replaceid',  $replaceid)
                 ->where('company_id', $companyId)
@@ -178,12 +156,7 @@ class ClaimController extends Controller
                 ->join('catalog_product', 'catalog_product.id', '=', 'drr.prod_code')
                 ->select([
                     'catalog_product.name as sku_name',
-                    'drr.batch_no',
                     'drr.mrp',
-                    DB::raw("CASE
-                                WHEN drr.mfg_date IS NULL OR drr.mfg_date = '0000-00-00' THEN ''
-                                ELSE DATE_FORMAT(drr.mfg_date, '%d-%m-%y')
-                             END as mfg_date"),
                     DB::raw('SUM(drr.prod_qty)   as prod_qty'),
                     DB::raw('SUM(drr.prod_value) as prod_value'),
                 ])
@@ -193,18 +166,16 @@ class ClaimController extends Controller
                 ->groupBy(
                     'catalog_product.id',
                     'catalog_product.name',
-                    'drr.mrp',
-                    'drr.batch_no',
-                    'drr.mfg_date'
+                    'drr.mrp'
                 )
                 ->get()
                 ->map(function ($row) {
                     return [
                         'sku_name'   => $row->sku_name,
-                        'mfg_date'   => $row->mfg_date ?: '',
-                        'mrp'        => is_null($row->mrp) ? 0 : (float) $row->mrp,
-                        'batch_no'   => $row->batch_no,
-                        'prod_qty'   => is_null($row->prod_qty) ? 0 : (float) $row->prod_qty,
+                        'mfg_date'   => null,   // column does not exist on damage_replace_retailer
+                        'mrp'        => is_null($row->mrp)        ? 0 : (float) $row->mrp,
+                        'batch_no'   => null,   // column does not exist on damage_replace_retailer
+                        'prod_qty'   => is_null($row->prod_qty)   ? 0 : (float) $row->prod_qty,
                         'prod_value' => is_null($row->prod_value) ? 0 : (float) $row->prod_value,
                     ];
                 })
@@ -216,6 +187,7 @@ class ClaimController extends Controller
             Log::error('sfaClaimDetails failed', [
                 'replaceid' => $replaceid,
                 'error'     => $e->getMessage(),
+                'trace'     => $e->getTraceAsString(),
             ]);
 
             return response()->json([

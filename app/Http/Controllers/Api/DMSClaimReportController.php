@@ -11,22 +11,32 @@ use Illuminate\Support\Facades\DB;
 class DMSClaimReportController extends Controller
 {
     protected $dealer_id;
-    protected $company_id = 213;
+protected $company_id;
 
-    public function __construct()
-    {
-        // $this->middleware('auth:sanctum');
+public function __construct()
+{
+    // $this->middleware('auth:sanctum');
+}
+
+private function initAuth(Request $request): void
+{
+    $user = $request->user();
+
+    if (!$user) {
+        abort(401, 'Unauthenticated.');
     }
 
-    private function initAuth(Request $request): void
-    {
-        $user = $request->user();
-        if (!$user) {
-            abort(401, 'Unauthenticated.');
-        }
-        $this->dealer_id  = $user->dealer_id ?? 0;
-        $this->company_id = $user->company_id ?? 213;
+    if (empty($user->company_id)) {
+        abort(403, 'User is not assigned to a company.');
     }
+
+    if (empty($user->dealer_id)) {
+        abort(403, 'User is not assigned to a dealer.');
+    }
+
+    $this->dealer_id  = (int) $user->dealer_id;
+    $this->company_id = (int) $user->company_id;
+}
 
     private function resolveDateRange(Request $request): array
     {
@@ -371,6 +381,7 @@ class DMSClaimReportController extends Controller
             ->where('order_id', $orderId)
             ->where('samplingclaim.company_id', $companyId)
             ->where('dealer.company_id', $companyId)
+            ->where('samplingclaim.dealer_id', $this->dealer_id)
             ->first();
 
         if (!$challan) {

@@ -41,19 +41,27 @@ class DmsClaimOrderApiController extends Controller
         return DB::table('dealer_person_login')->where('dealer_id', $dealerId)->first();
     }
 
-    private function parseRange(?string $range): array
-    {
-        if (empty($range)) {
-            $today = date('Y-m-d');
-            return [$today, $today];
-        }
-        $parts = preg_split('/\s*-\s*/', trim($range));
-        if (count($parts) < 2) abort(422, 'Invalid date_range_picker.');
-        return [
-            date('Y-m-d', strtotime(trim($parts[0]))),
-            date('Y-m-d', strtotime(trim($parts[1]))),
-        ];
+   private function parseRange(?string $range): array
+{
+    if (empty($range)) {
+        return [date('Y-m') . '-01', date('Y-m-d')];
     }
+
+    $parts = explode(' - ', trim($range));
+
+    if (count($parts) !== 2) {
+        abort(422, 'Invalid date_range_picker. Expected "YYYY-MM-DD - YYYY-MM-DD".');
+    }
+
+    $from = date('Y-m-d', strtotime(trim($parts[0])));
+    $to   = date('Y-m-d', strtotime(trim($parts[1])));
+
+    if (!$from || !$to) {
+        abort(422, 'Invalid date_range_picker.');
+    }
+
+    return [$from, $to];
+}
 
     private function utf8Clean($value)
     {
@@ -82,7 +90,7 @@ class DmsClaimOrderApiController extends Controller
     public function index(Request $request)
     {
         $ctx = $this->dealerContext($request);
-        [$to_date,$from_date] = $this->parseRange($request->input('date_range_picker'));
+        [$from_date,$to_date] = $this->parseRange($request->input('date_range_picker'));
 
         $orderNo   = $request->input('order_no');
         $claimType = $request->input('claim_type', 2);

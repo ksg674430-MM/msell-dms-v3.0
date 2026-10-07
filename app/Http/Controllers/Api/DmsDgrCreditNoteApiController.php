@@ -53,20 +53,27 @@ class DmsDgrCreditNoteApiController extends Controller
     /**
      * Parse "YYYY-MM-DD - YYYY-MM-DD"; default to current month.
      */
-    private function parseRange(?string $range): array
-    {
-        if (empty($range)) {
-            return [date('Y-m') . '-01', date('Y-m-d')];
-        }
-        $parts = preg_split('/\s*-\s*/', trim($range));
-        if (count($parts) < 2) {
-            abort(422, 'Invalid date_range_picker.');
-        }
-        return [
-            date('Y-m-d', strtotime(trim($parts[0]))),
-            date('Y-m-d', strtotime(trim($parts[1]))),
-        ];
+  private function parseRange(?string $range): array
+{
+    if (empty($range)) {
+        return [date('Y-m') . '-01', date('Y-m-d')];
     }
+
+    $parts = explode(' - ', trim($range));
+
+    if (count($parts) !== 2) {
+        abort(422, 'Invalid date_range_picker. Expected "YYYY-MM-DD - YYYY-MM-DD".');
+    }
+
+    $from = date('Y-m-d', strtotime(trim($parts[0])));
+    $to   = date('Y-m-d', strtotime(trim($parts[1])));
+
+    if (!$from || !$to) {
+        abort(422, 'Invalid date_range_picker.');
+    }
+
+    return [$from, $to];
+}
 
     /* ================================================================== */
     /*  1. INDEX — dealer-wise claim list (Retailer amount claim)          */
@@ -75,7 +82,7 @@ class DmsDgrCreditNoteApiController extends Controller
     public function index(Request $request)
     {
         $ctx = $this->dealerContext($request);
-        [$to_date,$from_date] = $this->parseRange($request->input('date_range_picker'));
+        [$from_date,$to_date] = $this->parseRange($request->input('date_range_picker'));
         // dd($this->parseRange($request->input('date_range_picker')));
 
         $order_no  = $request->input('order_no');

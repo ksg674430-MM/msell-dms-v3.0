@@ -225,9 +225,9 @@ return [
             // ['slug' => 'payment_history', 'label' => 'Payment History', 'icon' => 'fa-caret-right', 'route' => '/payments',        'exclude_companies' => [213]],
         ],
     ],
-    [
-        'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
-    ],
+    // [
+    //     'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
+    // ],
 
     // ============================================================
     // Claim  (companies 213, 215 only)
