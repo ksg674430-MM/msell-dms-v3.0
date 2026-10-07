@@ -8,10 +8,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use PDF;
 
 class MtImagesClaimApiController extends Controller
 {
+    private const SAMPLING_MAX_IMAGES = 17;
+
     /* ------------------------------------------------------------------ */
     /*  Context helpers                                                    */
     /* ------------------------------------------------------------------ */
@@ -84,7 +88,7 @@ class MtImagesClaimApiController extends Controller
     public function index(Request $request)
     {
         $ctx = $this->dealerContext($request);
-        [$to_date, $from_date] = $this->parseRange($request->input('date_range_picker'));
+        [$from_date, $to_date] = $this->parseRange($request->input('date_range_picker'));
 
         $orderNo = $request->input('order_no');
 
@@ -826,84 +830,107 @@ class MtImagesClaimApiController extends Controller
     {
         $ctx = $this->dealerContext($request);
 
-        $request->validate([
-            'item_code'          => 'required|array|min:1',
-            'total_claim_amount' => 'required|numeric|min:0',
-        ]);
+        $itemCodes = (array) $request->input('item_code');
+        $rules = [
+            'retailer_id' => ['required', Rule::exists('retailer', 'id')->where('company_id', $ctx->company_id)],
+            'item_code'   => 'required|array|min:1',
+        ];
+        $names = ['retailer_id' => 'retailer'];
+        foreach (array_keys($itemCodes) as $i => $key) {
+            $row = 'Item ' . ($i + 1);
+            $rules["item_code.$key"]          = 'required|integer|distinct';
+            $rules["product_rate.$key"]       = 'required|numeric|min:0';
+            $rules["qty.$key"]                = 'required|numeric|gt:0';
+            $rules["discount_percent.$key"]   = 'nullable|numeric|between:0,100';
+            $rules["sampling_qty.$key"]       = 'required|numeric|gt:0';
+            $rules["invoice_no.$key"]         = 'nullable|string|max:100';
+            $rules["remarks.$key"]            = 'nullable|string|max:25';
+            $rules["document_array.$key"]     = 'required|array|min:1|max:' . self::SAMPLING_MAX_IMAGES;
+            $rules["document_array.$key.*"]   = 'required|file|image|max:10240';
+            $names += [
+                "item_code.$key"        => "$row item",
+                "product_rate.$key"     => "$row rate per case",
+                "qty.$key"              => "$row Qty (CASE)",
+                "discount_percent.$key" => "$row Disc %",
+                "sampling_qty.$key"     => "$row Mkt Sampling in Pcs",
+                "invoice_no.$key"       => "$row invoice no",
+                "remarks.$key"          => "$row reason",
+                "document_array.$key"   => "$row images",
+                "document_array.$key.*" => "$row image",
+            ];
+        }
+        Validator::make($request->all(), $rules, [], $names)->validate();
 
         $dealerData = $this->dealerLoginRow($ctx->dealer_id);
         abort_if(!$dealerData, 422, "dealer_person_login missing");
 
-        $orderId = date('YmdHis') . $ctx->dealer_id;
+        $packs = DB::table('catalog_product')
+            ->where('company_id', $ctx->company_id)
+            ->whereIn('id', $itemCodes)
+            ->pluck('quantity_per_case', 'id');
 
-        $itemCodes         = (array) $request->input('item_code');
-        $mrps              = (array) $request->input('mrp');
-        $rates             = (array) $request->input('product_rate');
-        $sizeUms           = (array) $request->input('unit_configuration');
-        $basicValues       = (array) $request->input('basic_value');
-        $discountValues    = (array) $request->input('discount_value');
-        $discountPercents  = (array) $request->input('discount_percent');
-        $invoiceNos        = (array) $request->input('invoice_no');
-        $claimAmounts      = (array) $request->input('claim_amount');
-        $samplingQtys      = (array) $request->input('sampling_qty');
-        $remarks           = (array) $request->input('remarks');
-        $qtyCases          = (array) $request->input('qty');
-        $qtyPcs            = (array) $request->input('quantity_in_pcs');
-        $grossValues       = (array) $request->input('total_rs');
-        $documentArrays    = (array) $request->file('document_array', []);
+        $now = now('Asia/Kolkata');
+        $rows = [];
+        foreach ($itemCodes as $i => $itemCode) {
+            $perCase = (float) ($packs[$itemCode] ?? 0);
+            abort_if($perCase <= 0, 422, 'Item ' . (count($rows) + 1) . ': product not found or its pack size is missing.');
 
+            $qtyCase    = (float) $request->input("qty.$i");
+            $rate       = (float) $request->input("product_rate.$i");
+            $discPct    = (float) $request->input("discount_percent.$i", 0);
+            $samplingQt = (float) $request->input("sampling_qty.$i");
+            $gross      = round($rate * $qtyCase, 2);
+            $qtyPcs     = $qtyCase * $perCase;
+            $discValue  = round($gross * $discPct / 100, 2);
+            $basic      = round($gross - $discValue, 2);
+
+            $rows[$i] = [
+                'product_id'       => $itemCode,
+                'mrp'              => $request->input("mrp.$i"),
+                'rate_case'        => $rate,
+                'qty_case'         => $qtyCase,
+                'qty_pcs'          => $qtyPcs,
+                'discount_percent' => $discPct,
+                'discount_value'   => $discValue,
+                'gross_value'      => $gross,
+                'basic_value'      => $basic,
+                'size_um'          => $request->input("unit_configuration.$i"),
+                'invoice_no'       => $request->input("invoice_no.$i"),
+                'sampling_qty'     => $samplingQt,
+                'claim_amount'     => round($basic / $qtyPcs * $samplingQt, 2),
+                'remarks'          => $request->input("remarks.$i"),
+                'date_time'        => $now,
+            ];
+        }
+        $totalClaim = round(array_sum(array_column($rows, 'claim_amount')), 2);
+        $orderId = $now->format('YmdHis') . $ctx->dealer_id;
+
+        $uploadDir = public_path('mt_images_claim');
+        if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+
+        $moved = [];
+        $uploadedAll = [];
         DB::beginTransaction();
         try {
-            DB::table('samplingclaim')->insert([
+            $samplingId = DB::table('samplingclaim')->insertGetId([
                 'order_id'     => $orderId,
                 'company_id'   => $dealerData->company_id,
                 'dealer_id'    => $ctx->dealer_id,
-                'retailer_id'  => $request->input('retailer_id', 0),
-                'claim_amount' => $request->input('total_claim_amount'),
-                'date_time'    => now(),
+                'retailer_id'  => $request->input('retailer_id'),
+                'claim_amount' => $totalClaim,
+                'date_time'    => $now,
             ]);
 
-            $lastEntry = DB::table('samplingclaim')->orderBy('id', 'DESC')->first();
+            foreach ($rows as $key => $temp) {
+                $temp['sampling_id'] = $samplingId;
+                foreach (array_values((array) $request->file("document_array.$key", [])) as $n => $file) {
+                    $name = $now->format('YmdHis') . '_' . Str::uuid() . '.' . $file->extension();
+                    $file->move($uploadDir, $name);
+                    $moved[] = $uploadDir . DIRECTORY_SEPARATOR . $name;
 
-            $uploadDir = public_path('mt_images_claim');
-            if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-
-            $uploadedAll = [];
-            foreach ($itemCodes as $key => $itmCode) {
-                $temp = [
-                    'sampling_id'      => $lastEntry->id,
-                    'product_id'       => $itmCode,
-                    'mrp'              => $mrps[$key]             ?? null,
-                    'rate_case'        => $rates[$key]            ?? null,
-                    'qty_case'         => $qtyCases[$key]         ?? null,
-                    'qty_pcs'          => $qtyPcs[$key]           ?? null,
-                    'discount_percent' => $discountPercents[$key] ?? null,
-                    'discount_value'   => $discountValues[$key]   ?? null,
-                    'gross_value'      => $grossValues[$key]      ?? null,
-                    'basic_value'      => $basicValues[$key]      ?? null,
-                    'size_um'          => $sizeUms[$key]          ?? null,
-                    'invoice_no'       => $invoiceNos[$key]       ?? null,
-                    'sampling_qty'     => $samplingQtys[$key]     ?? null,
-                    'claim_amount'     => $claimAmounts[$key]     ?? null,
-                    'remarks'          => $remarks[$key]          ?? null,
-                    'date_time'        => now(),
-                ];
-
-                // document_array is a nested array: document_array[<item_index>][<file_index>] => UploadedFile
-                if (!empty($documentArrays[$key]) && is_array($documentArrays[$key])) {
-                    $docIndex = 1;
-                    foreach ($documentArrays[$key] as $file) {
-                        if ($file && $file->isValid()) {
-                            $rand = substr(str_shuffle('12345678901234567890'), 0, 2);
-                            $name = date('YmdHis') . $rand . '.' . $file->getClientOriginalExtension();
-                            $file->move($uploadDir, $name);
-
-                            $column = 'doc_' . $docIndex;
-                            $temp[$column] = 'mt_images_claim/' . $name;
-                            $uploadedAll[$key][$column] = 'mt_images_claim/' . $name;
-                            $docIndex++;
-                        }
-                    }
+                    $column = 'doc_' . ($n + 1);
+                    $temp[$column] = 'mt_images_claim/' . $name;
+                    $uploadedAll[$key][$column] = 'mt_images_claim/' . $name;
                 }
 
                 DB::table('samplingclaim_details')->insert($temp);
@@ -915,11 +942,13 @@ class MtImagesClaimApiController extends Controller
                 'code'           => 200,
                 'message'        => 'Successfully Submitted',
                 'order_id'       => $orderId,
+                'claim_amount'   => $totalClaim,
                 'uploaded_files' => $uploadedAll,
             ], 201);
 
         } catch (\Throwable $e) {
             DB::rollBack();
+            foreach ($moved as $path) @unlink($path);
             return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
         }
     }
@@ -931,7 +960,7 @@ class MtImagesClaimApiController extends Controller
     public function newMtImagesIndex(Request $request)
     {
         $ctx = $this->dealerContext($request);
-        [$to_date, $from_date] = $this->parseRange($request->input('date_range_picker'));
+        [$from_date, $to_date] = $this->parseRange($request->input('date_range_picker'));
 
         $orderNo = $request->input('order_no');
 
