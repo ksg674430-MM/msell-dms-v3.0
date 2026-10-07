@@ -118,6 +118,7 @@ Route::prefix('dms-reports')->group(function () {
     // ========================================================
     Route::get('/dashboard',     [DashboardController::class, 'index']);  // cards, today's sale
     Route::get('/dashboard/mtd', [DashboardController::class, 'mtd']);    // month-to-date view
+    Route::get('/dashboard/payment-collection', [DashboardController::class, 'paymentCollection']);
 
     // ========================================================
     // PROFILE  → MENU: My Profile
