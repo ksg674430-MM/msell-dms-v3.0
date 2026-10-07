@@ -168,6 +168,8 @@ Route::prefix('dms-reports')->group(function () {
         Route::post  ('/query',      [RetailerController::class, 'query']);     // filtered search
         Route::get   ('/form-data',  [RetailerController::class, 'formData']);  // dropdowns (beat, class, route…)
         Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
+        Route::get   ('/credit-limits', [RetailerController::class, 'creditLimits']);
+        Route::put   ('/credit-limits', [RetailerController::class, 'saveCreditLimits']);
         Route::post  ('/',           [RetailerController::class, 'store']);     // create retailer
         Route::get   ('/{id}',       [RetailerController::class, 'show']);      // retailer detail
         Route::put   ('/{id}',       [RetailerController::class, 'update']);    // edit

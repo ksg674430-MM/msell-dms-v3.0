@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -95,6 +96,66 @@ class RetailerController extends Controller
             'status' => true,
             'rows'   => $rows,
             'count'  => count($rows),
+        ]);
+    }
+
+    public function creditLimits(Request $request): JsonResponse
+    {
+        $dealerId = (int) $request->user()->dealer_id;
+
+        $rows = DB::select(
+            "SELECT r.id, r.retailer_code, r.name, l7.name AS beat_name, r.credit_time_limit
+               FROM retailer r
+               LEFT JOIN location_7 l7 ON l7.id = r.location_id
+              WHERE r.dealer_id = ? AND r.retailer_status = '1'
+              ORDER BY r.name ASC",
+            [$dealerId]
+        );
+
+        $outstanding = app(InvoiceService::class)->outstanding($dealerId, array_column($rows, 'id'));
+
+        return response()->json([
+            'status' => true,
+            'rows'   => array_map(fn ($r) => [
+                'id'            => (string) $r->id,
+                'retailer_code' => $r->retailer_code,
+                'name'          => $r->name,
+                'beat_name'     => $r->beat_name,
+                'credit_limit'  => InvoiceService::parseCreditLimit($r->credit_time_limit),
+                'outstanding'   => $outstanding[(string) $r->id] ?? 0.0,
+            ], $rows),
+        ]);
+    }
+
+    public function saveCreditLimits(Request $request): JsonResponse
+    {
+        $dealerId = (int) $request->user()->dealer_id;
+
+        $data = $request->validate([
+            'limits'                => ['required', 'array', 'min:1', 'max:5000'],
+            'limits.*.retailer_id'  => ['required', 'regex:/^\d+$/', 'distinct'],
+            'limits.*.credit_limit' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
+        ]);
+
+        $ids   = array_map(fn ($l) => (string) $l['retailer_id'], $data['limits']);
+        $owned = DB::table('retailer')->where('dealer_id', $dealerId)->whereIn('id', $ids)->pluck('id')->map(fn ($v) => (string) $v)->all();
+        if ($missing = array_values(array_diff($ids, $owned))) {
+            return response()->json(['status' => false, 'message' => 'Retailer not found for this distributor: ' . implode(', ', array_slice($missing, 0, 5))], 422);
+        }
+
+        DB::transaction(function () use ($data, $dealerId) {
+            foreach ($data['limits'] as $l) {
+                $limit = $l['credit_limit'] ?? null;
+                DB::table('retailer')
+                    ->where('id', (string) $l['retailer_id'])
+                    ->where('dealer_id', $dealerId)
+                    ->update(['credit_time_limit' => $limit === null ? null : number_format((float) $limit, 2, '.', '')]);
+            }
+        });
+
+        return response()->json([
+            'status'  => true,
+            'message' => count($data['limits']) . ' credit limit(s) saved.',
         ]);
     }
 

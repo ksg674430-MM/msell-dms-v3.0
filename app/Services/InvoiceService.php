@@ -62,6 +62,39 @@ class InvoiceService
         return $map;
     }
 
+    public static function parseCreditLimit($value): ?float
+    {
+        $v = trim((string) $value);
+        return is_numeric($v) && (float) $v >= 0 ? round((float) $v, 2) : null;
+    }
+
+    public function creditLimits(array $retailerIds): array
+    {
+        $ids = array_values(array_unique(array_map('strval', $retailerIds)));
+        if (!$ids) return [];
+
+        return DB::table('retailer')
+            ->whereIn('id', $ids)
+            ->pluck('credit_time_limit', 'id')
+            ->map(fn ($v) => self::parseCreditLimit($v))
+            ->all();
+    }
+
+    public function creditBlock(int $dealerId, string $retailerId): ?string
+    {
+        $limit = $this->creditLimits([$retailerId])[$retailerId] ?? null;
+        if ($limit === null) return null;
+
+        $outstanding = $this->outstanding($dealerId, [$retailerId])[$retailerId] ?? 0.0;
+        if ($outstanding <= $limit) return null;
+
+        return sprintf(
+            'Credit limit exceeded: outstanding balance Rs. %s is more than the credit limit Rs. %s. Collect payment or raise the credit limit before making an invoice.',
+            number_format($outstanding, 2),
+            number_format($limit, 2)
+        );
+    }
+
     public function fulfilSalesOrder(int $dealerId, string $orderId, array $invoicedQty): void
     {
         $order = DB::selectOne(

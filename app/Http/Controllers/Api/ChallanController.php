@@ -293,6 +293,10 @@ class ChallanController extends Controller
             ], 404);
         }
 
+        if ($creditBlock = app(InvoiceService::class)->creditBlock($dealerId, (string) $retailerId)) {
+            return response()->json(['status' => false, 'message' => $creditBlock], 422);
+        }
+
         $items       = $request->input('items');
         $discountPer = (float) ($request->input('discount_per') ?? 0);
         $remark      = (string) $request->input('remark', '');
@@ -567,6 +571,10 @@ class ChallanController extends Controller
                     // cannot be turned into two challans.
                     if ((string) $orderRow->order_status === '1') {
                         throw new \RuntimeException("Order {$orderId} is already processed.");
+                    }
+
+                    if ($creditBlock = app(InvoiceService::class)->creditBlock($dealerId, (string) $orderRow->retailer_id)) {
+                        throw new \RuntimeException("Order {$orderId}: {$creditBlock}");
                     }
 
                     // Allocate unique challan id

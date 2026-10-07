@@ -131,6 +131,7 @@ return [
                 'slug' => 'reports_gst', 'label' => 'GST Reports', 'icon' => 'fa-caret-right',
                 'children' => [
                     ['slug' => 'gst_return_summary', 'label' => 'GSTR1 Report',   'icon' => 'fa-caret-right', 'route' => '/reports/gstr1'],
+                    // ['slug' => 'gstr1_return',       'label' => 'GSTR-1 Return',  'icon' => 'fa-caret-right', 'route' => '/reports/gstr1-return'],
                     ['slug' => 'purchase_register',  'label' => 'GSTR2 Report',   'icon' => 'fa-caret-right', 'route' => '/reports/gstr2'],
                     ['slug' => 'gstr_report',        'label' => 'GSTR 3B Report', 'icon' => 'fa-caret-right', 'route' => '/reports/gstr3b'],
                 ],
@@ -204,6 +205,7 @@ return [
         'slug' => 'misc', 'label' => 'Miscellaneous', 'icon' => 'fa-server',
         'children' => [
             ['slug' => 'help',            'label' => 'Help Desk',       'icon' => 'fa-caret-right', 'route' => '/help'],
+            ['slug' => 'credit_limit',    'label' => 'Credit Limit Master', 'icon' => 'fa-caret-right', 'route' => '/misc/credit-limits'],
             ['slug' => 'feedback',        'label' => 'Feedback',        'icon' => 'fa-caret-right', 'route' => '/feedback'],
             ['slug' => 'change_password', 'label' => 'Change Password', 'icon' => 'fa-caret-right', 'route' => '/account/password'],
             // ['slug' => 'backup_db',       'label' => 'Backup Database', 'icon' => 'fa-caret-right', 'route' => '/admin/backup', 'local_only' => true],

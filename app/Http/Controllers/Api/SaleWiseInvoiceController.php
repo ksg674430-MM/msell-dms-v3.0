@@ -222,6 +222,12 @@ public function save(Request $request): JsonResponse
     $orderResults      = [];
     $uniqueChIds       = [];
 
+    foreach ($orders as $order) {
+        if ($creditBlock = app(InvoiceService::class)->creditBlock($dealerId, (string) $order['retailer_id'])) {
+            return response()->json(['status' => false, 'message' => "Order {$order['order_id']}: {$creditBlock}"], 422);
+        }
+    }
+
     DB::beginTransaction();
     try {
         foreach ($orders as $order) {
@@ -609,6 +615,7 @@ public function save(Request $request): JsonResponse
             'billed'    => round($billedAmt, 2),
             'collected' => round($paidAmt, 2),
             'balance'   => app(InvoiceService::class)->outstanding($dealerId, [$retailerId])[(string) $retailerId] ?? 0.0,
+            'credit_limit' => app(InvoiceService::class)->creditLimits([$retailerId])[(string) $retailerId] ?? null,
         ];
     }
 
