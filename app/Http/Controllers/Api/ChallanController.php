@@ -188,6 +188,7 @@ class ChallanController extends Controller
         $products = DB::select(
             "SELECT cp.id,
                     CONCAT(cp.name, '[', cp.quantity_per_case, ']') AS name,
+                    cp.itemcode,
                     cp.quantity_per_case,
                     cp.hsn_code,
                     SUM(s.qty) AS available_stock

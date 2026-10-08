@@ -32,6 +32,7 @@ return [
             ['slug' => 'add_threshold',   'label' => 'Stock Threshold', 'icon' => 'fa-caret-right', 'route' => '/master/threshold'],
             ['slug' => 'catalog_product', 'label' => 'Item List',       'icon' => 'fa-caret-right', 'route' => '/master/products'],
             ['slug' => 'retailer_add',    'label' => 'Retailer',        'icon' => 'fa-caret-right', 'route' => '/master/retailers'],
+            ['slug' => 'credit_limit',    'label' => 'Credit Limit Master', 'icon' => 'fa-caret-right', 'route' => '/master/credit-limits'],
             // ['slug' => 'add_user',        'label' => 'Field Staff',     'icon' => 'fa-caret-right', 'route' => '/master/users'],
             // ['slug' => 'dispatch_beat',   'label' => 'Dispatch Route',  'icon' => 'fa-caret-right', 'route' => '/master/dispatch-route'],
         ],
@@ -205,7 +206,6 @@ return [
         'slug' => 'misc', 'label' => 'Miscellaneous', 'icon' => 'fa-server',
         'children' => [
             ['slug' => 'help',            'label' => 'Help Desk',       'icon' => 'fa-caret-right', 'route' => '/help'],
-            ['slug' => 'credit_limit',    'label' => 'Credit Limit Master', 'icon' => 'fa-caret-right', 'route' => '/misc/credit-limits'],
             ['slug' => 'feedback',        'label' => 'Feedback',        'icon' => 'fa-caret-right', 'route' => '/feedback'],
             ['slug' => 'change_password', 'label' => 'Change Password', 'icon' => 'fa-caret-right', 'route' => '/account/password'],
             // ['slug' => 'backup_db',       'label' => 'Backup Database', 'icon' => 'fa-caret-right', 'route' => '/admin/backup', 'local_only' => true],
