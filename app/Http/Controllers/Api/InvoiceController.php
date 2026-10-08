@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use App\Services\InvoiceService;
 use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class InvoiceController extends Controller
 {
@@ -178,18 +179,9 @@ class InvoiceController extends Controller
             [$id]
         );
 
-        // Drug licence — latest registration row for this dealer_code
-        $reg = null;
-        if (!empty($header->dealer_code)) {
-            $reg = DB::selectOne(
-                "SELECT dl_no_wholesale, dl_no_retail
-                   FROM dms_registration
-                  WHERE dealer_code = ?
-                  ORDER BY id DESC
-                  LIMIT 1",
-                [$header->dealer_code]
-            );
-        }
+        $drugLicence = Schema::hasColumn('dealer', 'drug_lic_no')
+            ? DB::table('dealer')->where('id', $dealerId)->value('drug_lic_no')
+            : null;
 
         // po_no — company 213 only
         $poNo = null;
@@ -246,8 +238,8 @@ class InvoiceController extends Controller
                 'landline'          => $header->dealer_landline,
                 'other_numbers'     => $header->dealer_other_numbers,
                 'pin_no'            => $header->dealer_pin_no,
-                'drug_licence_no'   => $reg->dl_no_wholesale ?? null,
-                'drug_licence_no_2' => $reg->dl_no_retail    ?? null,
+                'drug_licence_no'   => $drugLicence,
+                'drug_licence_no_2' => null,
             ],
             'retailer_pin_no' => $header->retailer_pin_no,
             'po_no'           => $poNo,
