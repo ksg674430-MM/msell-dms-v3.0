@@ -1323,10 +1323,7 @@ class DmsClaimOrderApiController extends Controller
 
         $dealerData = $this->dealerLoginRow($ctx->dealer_id);
 
-        $divCodeEntry = DB::table('ACC_MAST')->where('ACC_CODE', $ctx->dealer_code)->first();
-        $divCodeLogin = DB::table('dealer_person_login')->where('dealer_id', $ctx->dealer_id)->first();
-        $divCodeElse  = $divCodeLogin->div_code_main ?? '0';
-        $divCode      = $divCodeEntry->DIV_CODE ?? $divCodeElse;
+        $divCode = $ctx->dealer_erp_div_code ?? '0';
 
         $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
         $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
