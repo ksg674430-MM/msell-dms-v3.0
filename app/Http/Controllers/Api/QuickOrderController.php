@@ -18,74 +18,9 @@ class QuickOrderController extends Controller
      * ============================================================ */
 
     /**
-     * Push an order to the external DMS endpoint.
+     * Resolve the logged in dealer / user context.
+     * Assumes the Sanctum user has a `dealer_id` column.
      */
-    private function sendOrderToExternalApi(string $orderId, string $accCode, $companyId, array $lines): array
-    {
-        if (empty($lines)) {
-            return ['sent' => false, 'reason' => 'empty'];
-        }
-
-        productIds =arrayvalues(arrayunique(arraycolumn(lines, 'product_id')));
-        $itemCodeMap = DB::table('catalog_product')
-            ->whereIn('id', $productIds)
-            ->pluck('itemcode', 'id')
-            ->toArray();
-
-        $itemDetails = [];
-        foreach ($lines as $l) {
-            $itemDetails[] = [
-                'ITEM_CODE' => (string) (itemCodeMap[l['product_id']] ?? $l['product_id']),
-                'RATE'      => (float)  $l['rate'],
-                'QTY'       => (string) $l['quantity'],
-                'REMARKS'   => (string) (($l['remarks'] ?? '') !== '' ? $l['remarks'] : 'NA'),
-                'UM'        => (string) ($l['order_unit'] ?? 'BOX'),
-            ];
-        }
-
-        $payload = [
-            'DMS_ORDER_ID' => (string) $orderId,
-            'ACC_CODE'     => (string) $accCode,
-            'company_id'   => (string) $companyId,
-            'item_details' => $itemDetails,
-        ];
-
-        $url = config('services.dms_order.url');
-        if (empty($url)) {
-            Log::warning('DMS order sync skipped — no URL configured', ['order_id' => $orderId]);
-            return ['sent' => false, 'reason' => 'no_url'];
-        }
-
-        try {
-            $response = Http::timeout(15)
-                ->acceptJson()
-                ->asJson()
-                ->post($url, $payload);
-
-            Log::info('DMS order sync', [
-                'order_id' => $orderId,
-                'status'   => $response->status(),
-                'body'     => $response->body(),
-            ]);
-
-            return [
-                'sent'   => $response->successful(),
-                'status' => $response->status(),
-                'body'   => $response->json() ?? $response->body(),
-            ];
-        } catch (\Throwable $e) {
-            Log::error('DMS order sync failed', [
-                'order_id' => $orderId,
-                'error'    => $e->getMessage(),
-            ]);
-            return ['sent' => false, 'reason' => $e->getMessage()];
-        }
-    }
-
-    /* ============================================================
-     |  CONTEXT HELPERS
-     * ============================================================ */
-
     private function context(Request $request): array
     {
         $user = $request->user();
@@ -95,14 +30,14 @@ class QuickOrderController extends Controller
         $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
 
         return [
-            'user'          => $user,
-            'dealer'        => $dealer,
-            'dealer_id'     => $dealer_id,
-            'company_id'    => dealer->companyid ??(user->company_id  ?? 0),
-            'dealer_code'   => dealer->dealercode??(user->dealer_code ?? ''),
-            'csa_id'        => dealer->csaid   ??(user->csa_id      ?? 0),
-            'role_id'       => user->roleid    ??(dealer->role_id   ?? 0),
-            'domain_url'    => $user->domain_url    ?? '',
+            'user'        => $user,
+            'dealer'      => $dealer,
+            'dealer_id'   => $dealer_id,
+            'company_id'  => $dealer->company_id  ?? ($user->company_id  ?? 0),
+            'dealer_code' => $dealer->dealer_code ?? ($user->dealer_code ?? ''),
+            'csa_id'      => $dealer->csa_id      ?? ($user->csa_id      ?? 0),
+            'role_id'     => $user->role_id       ?? ($dealer->role_id   ?? 0),
+            'domain_url'  => $user->domain_url    ?? '',
             'quantity_type' => $dealer->quantity_type ?? 0,
             'date'          => date('Y-m-d'),
         ];
@@ -625,10 +560,11 @@ class QuickOrderController extends Controller
                     ]);
             }
 
-            rawitems=(array)(request->item_code ?? []);
-            qty    =arrayvalues((array)(request->qty ?? []));
-            remarks  =arrayvalues((array)(request->remarks ?? []));
-            rawitems=arrayvalues(raw_items);
+            // ---- Insert new rows ----
+            $raw_items = (array) ($request->item_code ?? []);
+            $qty       = array_values((array) ($request->qty ?? []));
+            $remarks   = array_values((array) ($request->remarks ?? []));
+            $raw_items = array_values($raw_items);
 
             $in_cart = DB::table('demand_order_details_cart')
                 ->where('order_id', $order_id)
@@ -653,8 +589,8 @@ class QuickOrderController extends Controller
                     DB::rollBack();
                     return response()->json(['status' => false, 'message' => "Rate not found for product {$value}."], 422);
                 }
-                $scheme     = this->dealerScheme(ctx, $value, $line_qty, $base['rate']);
-                $line_total = this->lineTotal(scheme['rate'], $line_qty, $scheme['percent']);
+                $scheme   = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
+                $line_total = $this->lineTotal($scheme['rate'], $line_qty, $scheme['percent']);
 
                 if ($base['um'] === 'PCS') {
                     $order_conv = $line_qty;
@@ -701,7 +637,8 @@ class QuickOrderController extends Controller
 
             DB::commit();
 
-            $final_out = this->buildCartPayload(dealer_id_cus, $uid, $company_id);
+            // ---------- Return grouped cart payload ----------
+            $final_out = $this->buildCartPayload($dealer_id_cus, $uid, $company_id);
 
             return response()->json([
                 'status'  => true,
@@ -1040,10 +977,6 @@ class QuickOrderController extends Controller
 
             DB::commit();
 
-            // Push to external ERP after successful commit
-            $accCode = DB::table('dealer')->where('id', $dealer_id)->value('dealer_code') ?? '';
-            this->sendOrderToExternalApi(order_id, $accCode, $company_id, $detailRows);
-
             return response()->json([
                 'status'  => true,
                 'message' => 'Order finalized',
@@ -1084,7 +1017,8 @@ class QuickOrderController extends Controller
         $final_out  = [];
 
         if ($uid) {
-            $final_out = this->buildCartPayload(dealer_id_cus, $uid, $company_id, $order_date);
+            $dealer = DB::table('dealer')->where('id', $head->dealer_code ?? 0)->first();
+            $final_out = $this->buildCartPayload($dealer_id_cus, $uid, $company_id, $order_date);
         }
 
         return response()->json([
@@ -1102,32 +1036,36 @@ class QuickOrderController extends Controller
         ]);
     }
 
-    private function buildCartPayload($dealer_id_cus, $uid, companyid,&order_date = null)
-    {
-        $rows = DB::table('demand_order_cart')
-            ->join('demand_order_details_cart',
-                   'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
-            ->leftJoin('catalog_product',
-                   'catalog_product.id', '=', 'demand_order_details_cart.product_id')
-            ->leftJoin('catalog_2',
-                   'catalog_2.id', '=', 'catalog_product.catalog_id')
-            ->select(
-                'demand_order_cart.order_id     as cart_order_id',
-                'demand_order_cart.order_date   as cart_order_date',
-                'demand_order_details_cart.*',
-                'demand_order_details_cart.id   as pid',
-                ...$this->orderLineColumns()
-            )
-            ->where('demand_order_cart.dealer_id', $dealer_id_cus)
-            ->where('demand_order_cart.id', $uid)
-            ->orderBy('catalog_2.id')
-            ->orderBy('demand_order_details_cart.id')
-            ->get();
+    /**
+     * Build the nested cart payload (grouped by catalog_2).
+     */
+    private function buildCartPayload($dealer_id_cus, $uid, $company_id, &$order_date = null)
+{
+    // 1) All rows query in one go (with category)
+    $rows = DB::table('demand_order_cart')
+        ->join('demand_order_details_cart',
+               'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
+        ->leftJoin('catalog_product',
+               'catalog_product.id', '=', 'demand_order_details_cart.product_id')
+        ->leftJoin('catalog_2',
+               'catalog_2.id', '=', 'catalog_product.catalog_id')
+        ->select(
+            'demand_order_cart.order_id     as cart_order_id',
+            'demand_order_cart.order_date   as cart_order_date',
+            'demand_order_details_cart.*',
+            'demand_order_details_cart.id   as pid',
+            ...$this->orderLineColumns()
+        )
+        ->where('demand_order_cart.dealer_id', $dealer_id_cus)
+        ->where('demand_order_cart.id', $uid)
+        ->orderBy('catalog_2.id')
+        ->orderBy('demand_order_details_cart.id')
+        ->get();
 
         $order_date = $rows->first()->cart_order_date ?? $order_date;
 
-        return this->groupOrderLines(rows);
-    }
+    return $this->groupOrderLines($rows);
+}
 
     private function orderLineColumns(): array
     {
@@ -1148,28 +1086,28 @@ class QuickOrderController extends Controller
             $catId   = $v->cat2_id   ?: 'uncategorized';
             $catName = $v->cat2_name ?: 'Uncategorized';
 
-            if (!isset(finalout[catId])) {
-                finalout[catId] = ['name' => $catName, 'rows' => []];
-            }
-
-            finalout[catId]['rows'][] = [
-                'total_rs'               => $v->total_rs,
-                'pid'                    => $v->pid,
-                'order_id'               => $v->cart_order_id,
-                'order_converstion_unit' => $v->order_converstion_unit,
-                'ITEM_CODE'              => $v->cp_id ?? $v->product_id,
-                'ITEM_NAME'              => $v->cp_name ?? ('Product #' . $v->product_id),
-                'rate'                   => $v->rate,
-                'order_unit'             => $v->order_unit,
-                'quantity'               => $v->quantity,
-                'quantity_per_case'      => $v->cp_qty_per_case,
-                'gst_percent'            => $v->cp_gst ?? '0',
-                'free_qty'               => $v->free_qty,
-                'remarks'                => $v->remarks,
-                't1_rate'                => $v->t1_rate,
-                'atd_rate'               => $v->atd_rate,
-            ];
+        if (!isset($final_out[$catId])) {
+            $final_out[$catId] = ['name' => $catName, 'rows' => []];
         }
+
+        $final_out[$catId]['rows'][] = [
+            'total_rs'               => $v->total_rs,
+            'pid'                    => $v->pid,
+            'order_id'               => $v->cart_order_id,
+            'order_converstion_unit' => $v->order_converstion_unit,
+            'ITEM_CODE'              => $v->cp_id ?? $v->product_id,
+            'ITEM_NAME'              => $v->cp_name ?? ('Product #' . $v->product_id),
+            'rate'                   => $v->rate,
+            'order_unit'             => $v->order_unit,
+            'quantity'               => $v->quantity,
+            'quantity_per_case'      => $v->cp_qty_per_case,
+            'gst_percent'            => $v->cp_gst ?? '0',
+            'free_qty'               => $v->free_qty,
+            'remarks'                => $v->remarks,
+            't1_rate'                => $v->t1_rate,
+            'atd_rate'               => $v->atd_rate,
+        ];
+    }
 
         return $final_out;
     }
@@ -1202,8 +1140,8 @@ class QuickOrderController extends Controller
             'total_value' => DB::table('demand_order_details_cart')->where('order_id', $cart->order_id)->sum('total_rs'),
         ]);
 
-        $final_out = this->buildCartPayload(cart->dealer_id, $request->order_id, $ctx['company_id'], $order_date);
-        $head      = DB::table('demand_order_cart')->where('id', $request->order_id)->first();
+        $final_out  = $this->buildCartPayload($cart->dealer_id, $request->order_id, $ctx['company_id'], $order_date);
+        $head       = DB::table('demand_order_cart')->where('id', $request->order_id)->first();
 
         return response()->json([
             'status'  => true,
@@ -1227,7 +1165,8 @@ class QuickOrderController extends Controller
         $ctx        = this->context(request);
         $company_id = $ctx['company_id'];
 
-        try { uid=Crypt::decryptString(id); } catch (\Throwable $e) { $uid = (int) $id; }
+        // encrypted id from UI → decrypt
+        try { $uid = Crypt::decryptString($id); } catch (\Throwable $e) { $uid = (int) $id; }
 
         if (!this->canAccessOrder(ctx, DB::table('demand_order')->where('id', $uid)->first())) {
             return response()->json(['status' => false, 'message' => 'Order not found'], 404);
@@ -1472,11 +1411,393 @@ class QuickOrderController extends Controller
      |  14) Dealer Dashboard
      * ============================================================ */
 
-    public function dealerDashboard(Request $request)
+    private function resolveReportScope(Request $request, array $ctx): array
     {
-        $ctx       = this->context(request);
-        $dealerId  = (int) $ctx['dealer_id'];
-        $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
+        if ($request->check_status == '1') {
+            $dealer_id_cus = $request->filled('dealer_id_cus') ? explode(',', $request->dealer_id_cus) : [];
+            $terr_id       = $request->filled('terr_id')       ? explode(',', $request->terr_id)       : [];
+            $div_code_cus  = $request->filled('div_code_cus')  ? explode(',', $request->div_code_cus)  : [];
+
+            $sec = DB::table('dealer_report_section_data')
+                ->where('dealer_id', $ctx['dealer_id'])
+                ->where('location_2', '!=', '0')
+                ->groupBy('location_2');
+            if ($terr_id) $sec->whereIn('location_2', $terr_id);
+            $section = $sec->take(1)->pluck('location_2')->toArray();
+
+            $dealerQ = DB::table('dealer_location_rate_list')
+                ->join('location_view', 'location_view.l5_id', '=', 'dealer_location_rate_list.location_id')
+                ->join('dealer', 'dealer_location_rate_list.dealer_id', '=', 'dealer.id');
+            if ($dealer_id_cus) $dealerQ->whereIn('dealer_id', $dealer_id_cus);
+            if ($terr_id)       $dealerQ->whereIn('l2_id', $terr_id);
+            else                $dealerQ->whereIn('l2_id', $section);
+
+            $dealer_ids = $dealerQ->groupBy('dealer_id')->pluck('dealer_id')->toArray();
+
+            $divQ = DB::table('dealer_person_login')->whereIn('dealer_id', $dealer_ids);
+            if ($div_code_cus) $divQ->whereIn('div_code_main', $div_code_cus);
+            $div_code = $divQ->pluck('div_code_main')->toArray();
+
+            $codeQ = DB::table('dealer')->whereIn('dealer.id', $dealer_ids);
+            if ($div_code_cus) {
+                $codeQ->join('dealer_person_login', 'dealer_person_login.dealer_id', '=', 'dealer.id')
+                      ->whereIn('div_code_main', $div_code_cus);
+            }
+            $dealer_code = $codeQ->pluck('dealer_code')->toArray();
+        } else {
+            $dealer_code = [$ctx['dealer_code']];
+            $acc = DB::table('acc_mast')->where('ACC_CODE', $ctx['dealer_code'])->first();
+            $login = DB::table('dealer_person_login')->where('dealer_id', $ctx['dealer_id'])->first();
+            $div_code = [$acc->DIV_CODE ?? ($login->div_code_main ?? '0')];
+        }
+
+        return [$dealer_code, $div_code];
+    }
+
+    /* ---------- OTC ---------- */
+    // public function otc(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'OTC report',
+            // 'data'    => $this->buildMarketReport('OTC', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /* ---------- OT2 ---------- */
+    // public function ot2(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'OT2 report',
+            // 'data'    => $this->buildMarketReport('OT2', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /* ---------- Ethical (JPS) ---------- */
+    // public function ethical(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Ethical report',
+            // 'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /* ---------- FMCG ---------- */
+    // public function fmcg(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'FMCG report',
+            // 'data'    => $this->buildMarketReport('FMC', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /* ---------- JPS ---------- */
+    // public function jps(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'JPS report',
+            // 'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /* ---------- JP2 ---------- */
+    // public function jp2(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'JP2 report',
+            // 'data'    => $this->buildMarketReport('JP2', $dealer_code, $div_code),
+        // ]);
+    // }
+
+    /**
+     * Common market/category-wise target vs achievement data builder.
+     */
+    private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
+    {
+        $from_target_date = "01-APR-" . date('y');
+        $to_target_date   = "31-MAR-" . (date('y') + 1);
+        $from_sale_date   = date('Y') . "-04-01";
+        $to_sale_date     = (date('Y') + 1) . "-03-31";
+        $month_from       = date('Y-m') . '-01';
+        $month_to         = date('Y-m-t');
+
+        $quarter = DB::table('_quater_master')->where('details_month', date('Y-m'))->first();
+        $q_from  = $quarter->quater_from_date ?? $month_from;
+        $q_to    = $quarter->quater_to_date   ?? $month_to;
+
+        $prod_catg_mast_array = DB::table('prod_catg_mast')
+            ->where('MKTG_CATG', $mktg_catg)
+            ->orderBy('USER_SEQ', 'ASC')
+            ->get();
+
+        $um_array = DB::table('prod_catg_mast')
+            ->join('item_mast',     'item_mast.PROD_CATG',     '=', 'prod_catg_mast.PROD_CATG')
+            ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
+            ->pluck('item_aum_mast.AUM', 'prod_catg_mast.PROD_CATG');
+
+        $targets = DB::table('dealer_target_mast')
+            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'dealer_target_mast.PROD_CATG')
+            ->where('dealer_target_mast.FROM_DATE', $from_target_date)
+            ->where('dealer_target_mast.TO_DATE',   $to_target_date)
+            ->whereIn('dealer_target_mast.ACC_CODE', $dealer_code)
+            ->groupBy('dealer_target_mast.PROD_CATG')
+            ->pluck(DB::raw('SUM(dealer_target_mast.TARGET_QTY) as TARGET_QTY'), 'dealer_target_mast.PROD_CATG');
+
+        $salesQtyYtd = DB::table('itemtran_body')
+            ->join('itemtran_head','itemtran_head.VRNO','=','itemtran_body.VRNO')
+            ->join('item_mast','item_mast.ITEM_CODE','=','itemtran_body.ITEM_CODE')
+            ->join('item_aum_mast','item_aum_mast.ITEM_CODE','=','item_mast.ITEM_CODE')
+            ->join('prod_catg_mast','prod_catg_mast.PROD_CATG','=','item_mast.PROD_CATG')
+            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
+            ->whereIn('itemtran_head.DIV_CODE', $div_code)
+            ->whereIn('itemtran_body.DIV_CODE', $div_code)
+            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+            ->groupBy('prod_catg_mast.PROD_CATG')
+            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+
+        $salesValYtd = DB::table('itemtran_body')
+            ->join('itemtran_head','itemtran_head.VRNO','=','itemtran_body.VRNO')
+            ->join('item_mast','item_mast.ITEM_CODE','=','itemtran_body.ITEM_CODE')
+            ->join('prod_catg_mast','prod_catg_mast.PROD_CATG','=','item_mast.PROD_CATG')
+            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
+            ->whereIn('itemtran_head.DIV_CODE', $div_code)
+            ->whereIn('itemtran_body.DIV_CODE', $div_code)
+            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+            ->groupBy('prod_catg_mast.PROD_CATG')
+            ->pluck(DB::raw('SUM(itemtran_body.VALISSUED) as VALISSUED'), 'prod_catg_mast.PROD_CATG');
+
+        $salesQtyMonth = DB::table('itemtran_body')
+            ->join('itemtran_head','itemtran_head.VRNO','=','itemtran_body.VRNO')
+            ->join('item_mast','item_mast.ITEM_CODE','=','itemtran_body.ITEM_CODE')
+            ->join('item_aum_mast','item_aum_mast.ITEM_CODE','=','item_mast.ITEM_CODE')
+            ->join('prod_catg_mast','prod_catg_mast.PROD_CATG','=','item_mast.PROD_CATG')
+            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$month_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$month_to'")
+            ->whereIn('itemtran_head.DIV_CODE', $div_code)
+            ->whereIn('itemtran_body.DIV_CODE', $div_code)
+            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+            ->groupBy('prod_catg_mast.PROD_CATG')
+            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+
+        $salesQtyQuat = DB::table('itemtran_body')
+            ->join('itemtran_head','itemtran_head.VRNO','=','itemtran_body.VRNO')
+            ->join('item_mast','item_mast.ITEM_CODE','=','itemtran_body.ITEM_CODE')
+            ->join('item_aum_mast','item_aum_mast.ITEM_CODE','=','item_mast.ITEM_CODE')
+            ->join('prod_catg_mast','prod_catg_mast.PROD_CATG','=','item_mast.PROD_CATG')
+            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$q_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$q_to'")
+            ->whereIn('itemtran_head.DIV_CODE', $div_code)
+            ->whereIn('itemtran_body.DIV_CODE', $div_code)
+            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+            ->groupBy('prod_catg_mast.PROD_CATG')
+            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+
+        return [
+            'prod_catg_mast_array'              => $prod_catg_mast_array,
+            'um_array'                          => $um_array,
+            'prod_wise_target_mast'             => $targets,
+            'prod_wise_sales_mast_data_qty'     => $salesQtyYtd,
+            'prod_wise_sales_mast_data_val'     => $salesValYtd,
+            'month_prod_wise_sales_mast_data_qty' => $salesQtyMonth,
+            'quad_prod_wise_sales_mast_data_qty'  => $salesQtyQuat,
+        ];
+    }
+
+    /* ---------- Sale Statement ---------- */
+    // public function saleStatement(Request $request)
+    // {
+        // $ctx = $this->context($request);
+
+        // $dms_division = DB::table('mktg_catg_mast')
+            // ->where('flag', '=', 'Y')
+            // ->pluck('MKTG_CATG_NAME', 'MKTG_CATG');
+
+        // $locQ = DB::table('location_2')->where('status', 1);
+        // if ($ctx['role_id'] != 1) {
+            // $locQ->join('dealer_report_section_data', 'dealer_report_section_data.location_2', '=', 'location_2.id')
+                 // ->where('dealer_id', $ctx['dealer_id']);
+        // }
+        // $locations = $locQ->groupBy('location_2.id')->pluck('location_2.name', 'location_2.id');
+
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Sale statement meta',
+            // 'data'    => [
+                // 'dms_division' => $dms_division,
+                // 'locations'    => $locations,
+            // ],
+        // ]);
+    // }
+
+    // public function saleStatementEthical(Request $request)
+    // {
+        // return $this->saleStatement($request);
+    // }
+
+    /* ---------- DMS to Tally report ---------- */
+    // public function dmsToTally(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
+
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+
+        // $q = DB::table('challan_order')
+            // ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
+            // ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
+            // ->join('dealer',   'dealer.id',   '=', 'challan_order.ch_dealer_id')
+            // ->select(
+                // 'ch_retailer_id as retailer_id',
+                // 'ch_date as challan_date',
+                // 'state_id_retailer',
+                // 'product_id',
+                // 'hsn_code',
+                // 'retailer.name as retailer_name',
+                // 'challan_order.ch_no as challan_id',
+                // 'dealer.state_id as state_id_dealer',
+                // 'product_rate', 'qty', 'free_qty',
+                // 'retailer.tin_no as gst_no',
+                // 'taxable_amt'
+            // )
+            // ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('retailer.company_id', $company_id)
+            // ->where('dealer.company_id',   $company_id)
+            // ->where('challan_order.ch_dealer_id', $dealer_id);
+
+        // if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
+
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Tally data',
+            // 'data'    => [
+                // 'main_data'    => $q->get(),
+                // 'states'       => DB::table('location_3')->where('company_id', $company_id)->where('status', 1)->pluck('name', 'id'),
+                // 'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
+            // ],
+        // ]);
+    // }
+
+    /* ---------- Invoice Summary ---------- */
+    // public function invoiceSummary(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
+
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+
+        // $q = DB::table('challan_order')
+            // ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
+            // ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
+            // ->join('dealer_location_rate_list', 'dealer_location_rate_list.location_id', '=', 'retailer.location_id')
+            // ->join('location_7', 'location_7.id', '=', 'dealer_location_rate_list.location_id')
+            // ->join('location_6', 'location_7.location_6_id', '=', 'location_6.id')
+            // ->join('location_5', 'location_6.location_5_id', '=', 'location_5.id')
+            // ->join('location_4', 'location_5.location_4_id', '=', 'location_4.id')
+            // ->select(
+                // 'ch_retailer_id as retailer_id',
+                // 'ch_date as challan_date',
+                // 'product_id',
+                // 'challan_order.ch_no as challan_number',
+                // 'challan_order.id as challan_id',
+                // 'retailer.name as retailer_name',
+                // 'ch_dealer_id as dealer_id',
+                // 'qty', 'taxable_amt'
+            // )
+            // ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('retailer.company_id', $company_id)
+            // ->where('challan_order.ch_dealer_id', $dealer_id);
+
+        // if ($request->filled('location_4')) $q->whereIn('location_4.id', (array) $request->location_4);
+        // if ($request->filled('location_5')) $q->whereIn('location_5.id', (array) $request->location_5);
+        // if ($request->filled('location_6')) $q->whereIn('location_6.id', (array) $request->location_6);
+
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Invoice summary',
+            // 'data'    => ['main_data' => $q->groupBy('challan_id')->get()],
+        // ]);
+    // }
+
+    /* ---------- Purchase Report ---------- */
+    // public function purchaseReport(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
+
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+
+        // $q = DB::table('demand_order')
+            // ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+            // ->join('dealer_location_rate_list', 'dealer_location_rate_list.dealer_id', '=', 'demand_order.dealer_id')
+            // ->join('retailer', 'retailer.location_id', '=', 'dealer_location_rate_list.location_id')
+            // ->select(
+                // 'demand_order.order_id',
+                // 'demand_order_details.product_id',
+                // 'challan_no', 'order_date',
+                // 'retailer.name as retailer_name',
+                // 'retailer.tin_no as gst_no',
+                // 'retailer.location_id as beat_id',
+                // 'quantity', 'free_qty', 'pr_rate', 'total_rs'
+            // )
+            // ->whereRaw("DATE_FORMAT(order_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(order_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('demand_order.dealer_id', $dealer_id)
+            // ->where('dealer_location_rate_list.dealer_id', $dealer_id)
+            // ->where('dealer_location_rate_list.company_id', $company_id)
+            // ->where('retailer.company_id', $company_id)
+            // ->where('demand_order.company_id', $company_id);
+
+        // if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
+
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Purchase report',
+            // 'data'    => [
+                // 'main_data'    => $q->get(),
+                // 'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
+            // ],
+        // ]);
+    // }
+//---Dealer Dashboard
+public function dealerDashboard(Request $request)
+{
+    $ctx       = $this->context($request);
+    $dealerId  = (int) $ctx['dealer_id'];
+    $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
 
         $banners = DB::table('image_mast')
             ->where('img_locn', 'Dashboard')
@@ -1494,15 +1815,15 @@ class QuickOrderController extends Controller
             ->orderBy('id')
             ->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
 
-        $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
-        $rows    = entries->whereNotNull('transdate')->values()->map(fn(r) => [
-            'date'       => $r->trans_date,
-            'voucher_no' => $r->vocuher_number,
-            'vch_type'   => $r->vocuher_type,
-            'account'    => $r->narration,
-            'amount'     => (float) $r->amount,
-        ]);
-        $summary = DB::table('dealer_ledger_busy')->where('dealer_id', $dealerId)->orderByDesc('end_date')->first(['closing_balance', 'server_date_time']);
+    $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
+    $rows    = $entries->whereNotNull('trans_date')->values()->map(fn ($r) => [
+        'date'       => $r->trans_date,
+        'voucher_no' => $r->vocuher_number,
+        'vch_type'   => $r->vocuher_type,
+        'account'    => $r->narration,
+        'amount'     => (float) $r->amount,
+    ]);
+    $summary = DB::table('dealer_ledger_busy')->where('dealer_id', $dealerId)->orderByDesc('end_date')->first(['closing_balance', 'server_date_time']);
 
         return response()->json([
             'status'  => true,
@@ -1530,5 +1851,11 @@ class QuickOrderController extends Controller
             echo "SNO,Product Id,Quantity\n";
         }, 'orderFormat.csv', ['Content-Type' => 'text/csv']);
     }
-}
 
+    // public function dmsChallanFormat()
+    // {
+        // return response()->streamDownload(function () {
+            // echo "Date,Order Id,Retailer Id,Retailer Name,User Id,User Name,Product Id,Product Name,Quantity,Rate,Direct Invoice(1)/Through SFA(0)\n";
+        // }, 'DMSchallanFormat.csv', ['Content-Type' => 'text/csv']);
+    // }
+}

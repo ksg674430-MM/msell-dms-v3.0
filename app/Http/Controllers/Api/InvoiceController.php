@@ -8,7 +8,6 @@ use Illuminate\Http\Request;
 use App\Services\InvoiceService;
 use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class InvoiceController extends Controller
 {
@@ -179,9 +178,7 @@ class InvoiceController extends Controller
             [$id]
         );
 
-        $drugLicence = Schema::hasColumn('dealer', 'drug_lic_no')
-            ? DB::table('dealer')->where('id', $dealerId)->value('drug_lic_no')
-            : null;
+        // Drug licence — latest registration row for this dealer_code
 
         // po_no — company 213 only
         $poNo = null;
@@ -238,13 +235,11 @@ class InvoiceController extends Controller
                 'landline'          => $header->dealer_landline,
                 'other_numbers'     => $header->dealer_other_numbers,
                 'pin_no'            => $header->dealer_pin_no,
-                'drug_licence_no'   => $drugLicence,
-                'drug_licence_no_2' => null,
             ],
             'retailer_pin_no' => $header->retailer_pin_no,
             'po_no'           => $poNo,
 
-            // claim form ke fields
+            // claim form fields
             'depot_name'        => $header->dealer_name,
             'ss_stockist_town'  => $header->dealer_town_name,
             'retailer_category' => $header->retailer_class,
