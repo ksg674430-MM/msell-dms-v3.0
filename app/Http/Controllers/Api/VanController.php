@@ -51,28 +51,28 @@ class VanController extends Controller
         ]);
     }
 
-    /**
-     * GET /api/vans/{id}
-     */
-    public function show(Request $request, int $id): JsonResponse
-    {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
+    // /**
+     // * GET /api/vans/{id}
+     // */
+    // public function show(Request $request, int $id): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $dealerId  = (int) $user->dealer_id;
 
-        $row = DB::selectOne(
-            "SELECT id, vanId, van_no, driver_name, mobile, license_no,
-                    vtype, capacity, status, address
-               FROM van
-              WHERE id = ? AND dealer_id = ? LIMIT 1",
-            [$id, $dealerId]
-        );
+        // $row = DB::selectOne(
+            // "SELECT id, vanId, van_no, driver_name, mobile, license_no,
+                    // vtype, capacity, status, address
+               // FROM van
+              // WHERE id = ? AND dealer_id = ? LIMIT 1",
+            // [$id, $dealerId]
+        // );
 
-        if (!$row) {
-            return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
-        }
+        // if (!$row) {
+            // return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
+        // }
 
-        return response()->json(['status' => true, 'row' => $row]);
-    }
+        // return response()->json(['status' => true, 'row' => $row]);
+    // }
 
     /**
      * POST /api/vans
@@ -223,31 +223,31 @@ class VanController extends Controller
         return response()->json(['status' => true, 'message' => 'Van updated successfully.']);
     }
 
-    /**
-     * DELETE /api/vans/{id}
-     * Soft delete — sets status = 0
-     */
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
+    // /**
+     // * DELETE /api/vans/{id}
+     // * Soft delete — sets status = 0
+     // */
+    // public function destroy(Request $request, int $id): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $dealerId  = (int) $user->dealer_id;
 
-        $exists = DB::selectOne(
-            "SELECT id FROM van
-              WHERE id = ? AND dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$exists) {
-            return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
-        }
+        // $exists = DB::selectOne(
+            // "SELECT id FROM van
+              // WHERE id = ? AND dealer_id = ?
+              // LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$exists) {
+            // return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
+        // }
 
-        DB::update(
-            "UPDATE van SET status = 0
-              WHERE id = ? AND dealer_id = ?",
-            [$id, $dealerId]
-        );
+        // DB::update(
+            // "UPDATE van SET status = 0
+              // WHERE id = ? AND dealer_id = ?",
+            // [$id, $dealerId]
+        // );
 
-        return response()->json(['status' => true, 'message' => 'Van deleted successfully.']);
-    }
+        // return response()->json(['status' => true, 'message' => 'Van deleted successfully.']);
+    // }
 }

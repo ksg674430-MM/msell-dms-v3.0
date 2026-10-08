@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ScopesProducts;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Services\StockService;
@@ -9,6 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 class DepotDamageLookupController extends Controller
 {
+    use ScopesProducts;
+
     /** CSA list for the current dealer */
     public function csas(Request $request)
     {
@@ -85,6 +88,7 @@ class DepotDamageLookupController extends Controller
                      ->where('prl.state_id', $stateId);
             }
 
+            $this->ownProduct($base, $companyIdCus, $dealerId);
             $row = $base->first([
                 'p.id as product_id',
                 DB::raw("CAST(prl.{$mrpCol} AS DECIMAL(16,2)) as mrp"),
@@ -140,6 +144,7 @@ class DepotDamageLookupController extends Controller
                 $j->where('prl.state_id', $stateId);
             }
         });
+        $this->ownProduct($rate, $companyIdCus, $dealerId);
         $row = $rate->first([
             DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
             DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
@@ -171,22 +176,22 @@ class DepotDamageLookupController extends Controller
         ]]);
     }
 
-    public function productDealerRate(Request $request, int $id)
-    {
-        // same as dealer version — reuse that controller if you want
-        return app(\App\Http\Controllers\Api\DamageLookupController::class)
-            ->productDealerRate($request, $id);
-    }
+    // public function productDealerRate(Request $request, int $id)
+    // {
+        // // same as dealer version — reuse that controller if you want
+        // return app(\App\Http\Controllers\Api\DamageLookupController::class)
+            // ->productDealerRate($request, $id);
+    // }
 
-    public function productGst(Request $request, int $id)
-    {
-        return app(\App\Http\Controllers\Api\DamageLookupController::class)
-            ->productGst($request, $id);
-    }
+    // public function productGst(Request $request, int $id)
+    // {
+        // return app(\App\Http\Controllers\Api\DamageLookupController::class)
+            // ->productGst($request, $id);
+    // }
 
-    public function saleableNonSaleable(Request $request)
-    {
-        $rows = DB::table('saleable_non_saleable')->orderBy('id')->get(['id', 'name']);
-        return response()->json(['data' => $rows]);
-    }
+    // public function saleableNonSaleable(Request $request)
+    // {
+        // $rows = DB::table('saleable_non_saleable')->orderBy('id')->get(['id', 'name']);
+        // return response()->json(['data' => $rows]);
+    // }
 }

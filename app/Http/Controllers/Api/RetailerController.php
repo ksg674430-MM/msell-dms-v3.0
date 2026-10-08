@@ -7,6 +7,7 @@ use App\Services\InvoiceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Validator;
 
 class RetailerController extends Controller
@@ -297,52 +298,52 @@ class RetailerController extends Controller
      |  - level=1: parent_id ignored, all top-level rows
      |  - level>1: requires parent_id
      | ========================================================= */
-    public function locations(Request $request): JsonResponse
-    {
-        $user      = $request->user();
-        $companyId = (int) $user->company_id;
+    // public function locations(Request $request): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $companyId = (int) $user->company_id;
 
-        $level = (int) $request->input('level', 1);
-        if ($level < 1 || $level > 7) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Invalid level. Use 1-7.',
-            ], 422);
-        }
+        // $level = (int) $request->input('level', 1);
+        // if ($level < 1 || $level > 7) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Invalid level. Use 1-7.',
+            // ], 422);
+        // }
 
-        $table = "location_{$level}";
+        // $table = "location_{$level}";
 
-        if ($level === 1) {
-            $rows = DB::select(
-                "SELECT id, name FROM {$table}
-                  WHERE company_id = ?
-                  ORDER BY name",
-                [$companyId]
-            );
-        } else {
-            $parentId = $request->input('parent_id');
-            if ($parentId === null || $parentId === '') {
-                return response()->json([
-                    'status'  => false,
-                    'message' => "parent_id is required for level {$level}.",
-                ], 422);
-            }
-            $parentCol = "location_" . ($level - 1) . "_id";
-            $rows = DB::select(
-                "SELECT id, name FROM {$table}
-                  WHERE {$parentCol} = ? AND company_id = ?
-                  ORDER BY name",
-                [(int) $parentId, $companyId]
-            );
-        }
+        // if ($level === 1) {
+            // $rows = DB::select(
+                // "SELECT id, name FROM {$table}
+                  // WHERE company_id = ?
+                  // ORDER BY name",
+                // [$companyId]
+            // );
+        // } else {
+            // $parentId = $request->input('parent_id');
+            // if ($parentId === null || $parentId === '') {
+                // return response()->json([
+                    // 'status'  => false,
+                    // 'message' => "parent_id is required for level {$level}.",
+                // ], 422);
+            // }
+            // $parentCol = "location_" . ($level - 1) . "_id";
+            // $rows = DB::select(
+                // "SELECT id, name FROM {$table}
+                  // WHERE {$parentCol} = ? AND company_id = ?
+                  // ORDER BY name",
+                // [(int) $parentId, $companyId]
+            // );
+        // }
 
-        return response()->json([
-            'status' => true,
-            'level'  => $level,
-            'rows'   => $rows,
-            'count'  => count($rows),
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'level'  => $level,
+            // 'rows'   => $rows,
+            // 'count'  => count($rows),
+        // ]);
+    // }
 
     /* =========================================================
      |  CREATE
@@ -367,10 +368,10 @@ class RetailerController extends Controller
             'contact_per_name'  => ['nullable', 'string', 'max:80'],
             'pin_no'            => ['nullable', 'string', 'max:20'],
             'tin_no'            => ['nullable', 'string', 'max:20'],
-            'outlet_type_id'    => ['nullable', 'integer'],
+            'outlet_type_id'    => ['nullable', 'integer', Rule::exists('_retailer_outlet_type', 'id')->where('company_id', (int) $request->user()->company_id)],
             'class'             => ['nullable', 'integer'],
             'avg_per_month_pur' => ['nullable', 'numeric'],
-            'location_id'       => ['nullable', 'integer'],
+            'location_id'       => ['nullable', 'integer', Rule::exists('location_7', 'id')->where('company_id', (int) $request->user()->company_id)],
             'state_id'          => ['nullable', 'integer'],
             'lat_long'          => ['nullable', 'string', 'max:30'],
             'track_address'     => ['nullable', 'string'],
@@ -482,7 +483,7 @@ class RetailerController extends Controller
             DB::rollBack();
             return response()->json([
                 'status'  => false,
-                'message' => 'Retailer could not be created: ' . $e->getMessage(),
+                'message' => 'Retailer could not be created: ' . safe_error_message($e),
             ], 500);
         }
     }
@@ -518,10 +519,10 @@ class RetailerController extends Controller
             'contact_per_name'  => ['nullable', 'string', 'max:80'],
             'pin_no'            => ['nullable', 'string', 'max:20'],
             'tin_no'            => ['nullable', 'string', 'max:20'],
-            'outlet_type_id'    => ['nullable', 'integer'],
+            'outlet_type_id'    => ['nullable', 'integer', Rule::exists('_retailer_outlet_type', 'id')->where('company_id', (int) $request->user()->company_id)],
             'class'             => ['nullable', 'integer'],
             'avg_per_month_pur' => ['nullable', 'numeric'],
-            'location_id'       => ['nullable', 'integer'],
+            'location_id'       => ['nullable', 'integer', Rule::exists('location_7', 'id')->where('company_id', (int) $request->user()->company_id)],
             'state_id'          => ['nullable', 'integer'],
             'lat_long'          => ['nullable', 'string', 'max:30'],
             'track_address'     => ['nullable', 'string'],
@@ -611,7 +612,7 @@ class RetailerController extends Controller
             DB::rollBack();
             return response()->json([
                 'status'  => false,
-                'message' => 'Retailer could not be updated: ' . $e->getMessage(),
+                'message' => 'Retailer could not be updated: ' . safe_error_message($e),
             ], 500);
         }
     }
@@ -690,33 +691,33 @@ class RetailerController extends Controller
         return ($name !== null && $name !== '') ? (string) $name : null;
     }
 
-    public function query(Request $request): JsonResponse
-{
-    $user      = $request->user();
-    $dealerId  = (int) $user->dealer_id;
-    $companyId = (int) $user->company_id;
+    // public function query(Request $request): JsonResponse
+// {
+    // $user      = $request->user();
+    // $dealerId  = (int) $user->dealer_id;
+    // $companyId = (int) $user->company_id;
 
-    $fb = $this->filterRequest('retailer', $request)
-        ->hardScope('r.dealer_id = ?', [$dealerId]);
+    // $fb = $this->filterRequest('retailer', $request)
+        // ->hardScope('r.dealer_id = ?', [$dealerId]);
 
-    if ($companyId > 0) {
-        $fb->hardScope('r.company_id = ?', [$companyId]);
-    }
+    // if ($companyId > 0) {
+        // $fb->hardScope('r.company_id = ?', [$companyId]);
+    // }
 
-    if ($fb->errors()) {
-        return response()->json([
-            'status'  => false,
-            'message' => 'Invalid filter.',
-            'errors'  => $fb->errors(),
-        ], 422);
-    }
+    // if ($fb->errors()) {
+        // return response()->json([
+            // 'status'  => false,
+            // 'message' => 'Invalid filter.',
+            // 'errors'  => $fb->errors(),
+        // ], 422);
+    // }
 
-    $result = $fb->run();
+    // $result = $fb->run();
 
-    return response()->json([
-        'status' => true,
-        'data'   => $result['rows'],
-        'meta'   => $result['meta'],
-    ]);
-}
+    // return response()->json([
+        // 'status' => true,
+        // 'data'   => $result['rows'],
+        // 'meta'   => $result['meta'],
+    // ]);
+// }
 }

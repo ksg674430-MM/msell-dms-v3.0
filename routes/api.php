@@ -73,35 +73,35 @@ use App\Http\Controllers\Api\Sfa\ClaimController;
 // PUBLIC (no auth)
 // ============================================================
 // MENU: Login screen
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
 Route::middleware('auth:sanctum')->group(function () {
 
 Route::prefix('tally-view')->group(function () {
-    Route::get('stock',    [TallyViewController::class, 'tallyStockView']);
-    Route::get('purchase', [TallyViewController::class, 'tallyPurchase']);
-    Route::get('sale',     [TallyViewController::class, 'tallySale']);
+    // Route::get('stock',    [TallyViewController::class, 'tallyStockView']);
+    // Route::get('purchase', [TallyViewController::class, 'tallyPurchase']);
+    // Route::get('sale',     [TallyViewController::class, 'tallySale']);
 });
 
     Route::get('/claims/sfa',                [ClaimController::class, 'sfaClaims']);
     Route::get('/claims/sfa/{replaceid}',    [ClaimController::class, 'sfaClaimDetails']);
 
 Route::prefix('dms-reports')->group(function () {
-    Route::get('to-tally',           [DmsReportController::class, 'dmsToTallyReport']);
-    Route::post('to-tally/data',     [DmsReportController::class, 'dmsToTally']);
+    // Route::get('to-tally',           [DmsReportController::class, 'dmsToTallyReport']);
+    // Route::post('to-tally/data',     [DmsReportController::class, 'dmsToTally']);
 
-    Route::get('invoice-summary',        [DmsReportController::class, 'dmsInvoiceSummaryReport']);
-    Route::post('invoice-summary/data',  [DmsReportController::class, 'dmsInvoiceSummary']);
+    // Route::get('invoice-summary',        [DmsReportController::class, 'dmsInvoiceSummaryReport']);
+    // Route::post('invoice-summary/data',  [DmsReportController::class, 'dmsInvoiceSummary']);
 
-    Route::get('purchase',           [DmsReportController::class, 'dmsPurchaseReport']);
-    Route::post('purchase/data',     [DmsReportController::class, 'dmsPurchase']);
+    // Route::get('purchase',           [DmsReportController::class, 'dmsPurchaseReport']);
+    // Route::post('purchase/data',     [DmsReportController::class, 'dmsPurchase']);
 
-    Route::post('common-section',    [DmsReportController::class, 'dmsCommonReportSection']);
+    // Route::post('common-section',    [DmsReportController::class, 'dmsCommonReportSection']);
 });
     // ========================================================
     // AUTH  → MENU: App boot / Session
     // ========================================================
-    Route::get('/me',      [AuthController::class, 'me']);       // app load pe user info
+    // Route::get('/me',      [AuthController::class, 'me']);       // app load pe user info
     Route::post('/logout', [AuthController::class, 'logout']);   // MENU: Logout button
     Route::post('/change-password', [ChangePasswordController::class, 'update']);
     Route::get('/feedback/types', [FeedbackController::class, 'types']);
@@ -138,10 +138,10 @@ Route::prefix('dms-reports')->group(function () {
     // VAN  → MENU: Master → Supply vehicle
     // --------------------------------------------------------
     Route::get   ('/vans',      [VanController::class, 'index']);   // van list
-    Route::get   ('/vans/{id}', [VanController::class, 'show']);    // van detail
+    // Route::get   ('/vans/{id}', [VanController::class, 'show']);    // van detail
     Route::post  ('/vans',      [VanController::class, 'store']);   // add van
     Route::put   ('/vans/{id}', [VanController::class, 'update']);  // edit van
-    Route::delete('/vans/{id}', [VanController::class, 'destroy']); // delete van
+    // Route::delete('/vans/{id}', [VanController::class, 'destroy']); // delete van
 
     // --------------------------------------------------------
     // THRESHOLD  → MENU: Master → Threshold / Low-stock alert
@@ -149,29 +149,29 @@ Route::prefix('dms-reports')->group(function () {
     Route::get   ('/thresholds',          [ThresholdController::class, 'index']);    // list
     Route::get   ('/thresholds/products', [ThresholdController::class, 'products']); // product dropdown
     Route::get   ('/thresholds/low-stock', [ThresholdController::class, 'lowStock']); // header low stock list
-    Route::get   ('/thresholds/{id}',     [ThresholdController::class, 'show']);     // detail
+    // Route::get   ('/thresholds/{id}',     [ThresholdController::class, 'show']);     // detail
     Route::post  ('/thresholds',          [ThresholdController::class, 'store']);    // create
     Route::put   ('/thresholds/{id}',     [ThresholdController::class, 'update']);   // edit
-    Route::delete('/thresholds/{id}',     [ThresholdController::class, 'destroy']);  // delete
+    // Route::delete('/thresholds/{id}',     [ThresholdController::class, 'destroy']);  // delete
 
     // --------------------------------------------------------
     // CATALOG PRODUCT  → MENU: Master → Products
     // --------------------------------------------------------
     Route::get   ('/catalog-products',         [CatalogProductController::class, 'index']);   // product list
-    Route::get   ('/catalog-products/filters', [CatalogProductController::class, 'filters']); // filter dropdowns
-    Route::get   ('/catalog-products/{id}',    [CatalogProductController::class, 'show']);    // product detail
-    Route::post  ('/catalog-products',         [CatalogProductController::class, 'store']);   // add product
-    Route::put   ('/catalog-products/{id}',    [CatalogProductController::class, 'update']);  // edit
-    Route::delete('/catalog-products/{id}',    [CatalogProductController::class, 'destroy']); // delete
+    // Route::get   ('/catalog-products/filters', [CatalogProductController::class, 'filters']); // filter dropdowns
+    // Route::get   ('/catalog-products/{id}',    [CatalogProductController::class, 'show']);    // product detail
+    // Route::post  ('/catalog-products',         [CatalogProductController::class, 'store']);   // add product
+    // Route::put   ('/catalog-products/{id}',    [CatalogProductController::class, 'update']);  // edit
+    // Route::delete('/catalog-products/{id}',    [CatalogProductController::class, 'destroy']); // delete
 
     // --------------------------------------------------------
     // RETAILER  → MENU: Master → Retailers
     // --------------------------------------------------------
     Route::prefix('retailers')->group(function () {
         Route::get   ('/',           [RetailerController::class, 'index']);     // retailer list
-        Route::post  ('/query',      [RetailerController::class, 'query']);     // filtered search
+        // Route::post  ('/query',      [RetailerController::class, 'query']);     // filtered search
         Route::get   ('/form-data',  [RetailerController::class, 'formData']);  // dropdowns (beat, class, route…)
-        Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
+        // Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
         Route::get   ('/credit-limits', [RetailerController::class, 'creditLimits']);
         Route::put   ('/credit-limits', [RetailerController::class, 'saveCreditLimits']);
         Route::post  ('/',           [RetailerController::class, 'store']);     // create retailer
@@ -188,7 +188,7 @@ Route::prefix('dms-reports')->group(function () {
     // BALANCE STOCK  → MENU: Reports → Current Stock / Balance Stock
     // --------------------------------------------------------
     Route::get('/reports/balance-stock',                 [BalanceStockController::class, 'index']);          // main report
-    Route::get('/reports/balance-stock/filters',         [BalanceStockController::class, 'filters']);        // all filters
+    // Route::get('/reports/balance-stock/filters',         [BalanceStockController::class, 'filters']);        // all filters
     Route::get('/filters/classifications',               [BalanceStockController::class, 'classifications']); // filter: class
     Route::get('/filters/categories',                    [BalanceStockController::class, 'categories']);      // filter: category
     Route::get('/filters/product-names',                 [BalanceStockController::class, 'productNames']);    // filter: name
@@ -199,7 +199,7 @@ Route::prefix('dms-reports')->group(function () {
     // --------------------------------------------------------
     // IMPORT  → MENU: Stock → Import (Bulk upload)
     // --------------------------------------------------------
-     Route::get('/opening-stocks/import-format', [StockImportController::class,'importFormat']);  // Export Excel 
+     // Route::get('/opening-stocks/import-format', [StockImportController::class,'importFormat']);  // Export Excel 
     Route::post('/opening-stocks/import',          [StockImportController::class, 'openingStock']);  // Excel upload → opening stock
     Route::post('/purchase-orders/import-receive', [StockImportController::class, 'receiveStock']);  // Excel upload → receive stock
 
@@ -208,11 +208,11 @@ Route::prefix('dms-reports')->group(function () {
     // --------------------------------------------------------
     Route::get   ('/opening-stocks/products', [OpeningStockController::class, 'products']); // product picker
     Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);    // opening stock list
-    Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);     // detail
+    // Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);     // detail
     Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);    // add opening stock
-    Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);   // edit
-    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
-    Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
+    // Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);   // edit
+    // Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
+    // Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
 
     
 
@@ -224,7 +224,7 @@ Route::prefix('dms-reports')->group(function () {
         Route::get ('/form-data',     [PurchaseOrderController::class, 'formData']);  // supplier/product dropdowns
         Route::post('/',              [PurchaseOrderController::class, 'store']);     // create PO
         Route::get ('/{id}',          [PurchaseOrderController::class, 'show']);      // PO detail
-        Route::put ('/{id}',          [PurchaseOrderController::class, 'update']);    // edit PO
+        // Route::put ('/{id}',          [PurchaseOrderController::class, 'update']);    // edit PO
         Route::post('/{id}/receive',  [PurchaseOrderController::class, 'receive']);   // receive → stock in
         // Route::post('/query',         [PurchaseOrderController::class, 'query']);     // filtered search
     });
@@ -240,16 +240,16 @@ Route::prefix('dms-reports')->group(function () {
     Route::get ('/challans/form-data',              [ChallanController::class, 'formData']);          // retailer, salesman, beat dropdowns
     Route::post('/challans/scheme-qty',             [ChallanHelperController::class, 'schemeQty']);   // scheme qty calc
     Route::get ('/challans/product-stock/{id}',     [ChallanHelperController::class, 'productStock']);// batch + mrp + rate + stock
-    Route::post('/challans/query',                  [ChallanController::class, 'query']);             // filtered challan search
+    // Route::post('/challans/query',                  [ChallanController::class, 'query']);             // filtered challan search
 
     // --------------------------------------------------------
     // CHALLAN CRUD  → MENU: Invoice → Direct Invoice
     // --------------------------------------------------------
-    Route::get   ('/challans',                [ChallanController::class, 'index']);   // challan list
-    Route::get   ('/challans/{id}',           [ChallanController::class, 'show']);    // challan detail
+    // Route::get   ('/challans',                [ChallanController::class, 'index']);   // challan list
+    // Route::get   ('/challans/{id}',           [ChallanController::class, 'show']);    // challan detail
     Route::post  ('/challans',                [ChallanController::class, 'store']);   // create direct invoice
-    Route::put   ('/challans/{id}',           [ChallanController::class, 'update']);  // edit invoice
-    Route::post  ('/challans/{id}/cancel',    [ChallanController::class, 'cancel']);  // cancel (move to _cancel table)
+    // Route::put   ('/challans/{id}',           [ChallanController::class, 'update']);  // edit invoice
+    // Route::post  ('/challans/{id}/cancel',    [ChallanController::class, 'cancel']);  // cancel (move to _cancel table)
     Route::post('/challans/process-claim', [ChallanController::class, 'takeActionOnProcessChallanClaim']);
 
     // ========================================================
@@ -258,19 +258,19 @@ Route::prefix('dms-reports')->group(function () {
     Route::get ('/sales-orders',           [SalesOrderController::class, 'index']);  // order list
     Route::get ('/sales-orders/cancel-reasons', [SalesOrderController::class, 'cancelReasons']); // cancel reason list
     Route::get ('/sales-orders/{orderId}', [SalesOrderController::class, 'show']);   // order detail
-    Route::post('/sales-orders/query',     [SalesOrderController::class, 'query']);  // filtered search
+    // Route::post('/sales-orders/query',     [SalesOrderController::class, 'query']);  // filtered search
     Route::post('/sales-orders/cancel',    [SalesOrderController::class, 'cancel']); // cancel order
 
-    Route::get ('/sale-wise-invoice/orders',      [SaleWiseInvoiceController::class, 'orders']);
-Route::get ('/sale-wise-invoice/mrp-options', [SaleWiseInvoiceController::class, 'mrpOptions']);
-Route::get ('/sale-wise-invoice/next-ch-no',  [SaleWiseInvoiceController::class, 'nextChNo']);
+    // Route::get ('/sale-wise-invoice/orders',      [SaleWiseInvoiceController::class, 'orders']);
+// Route::get ('/sale-wise-invoice/mrp-options', [SaleWiseInvoiceController::class, 'mrpOptions']);
+// Route::get ('/sale-wise-invoice/next-ch-no',  [SaleWiseInvoiceController::class, 'nextChNo']);
 Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class, 'outstanding']);
-Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class, 'save']);
+// Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class, 'save']);
 
     // --------------------------------------------------------
     // CHALLAN FROM ORDERS  → MENU: Order → Convert to Invoice
     // --------------------------------------------------------
-    Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);  // selected orders → invoices
+    // Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);  // selected orders → invoices
 
     // ========================================================
     // INVOICE (rich list)  → MENU: Invoice → Invoice Details
@@ -278,7 +278,7 @@ Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class,
     // ========================================================
     Route::get   ('/invoices',              [InvoiceController::class, 'index']);   // invoice list with items+claim
     Route::get   ('/invoices/{id}',         [InvoiceController::class, 'show']);    // invoice detail
-    Route::post  ('/invoices/query',        [InvoiceController::class, 'query']);   // filtered search
+    // Route::post  ('/invoices/query',        [InvoiceController::class, 'query']);   // filtered search
     Route::match(['PUT','PATCH'], 'invoices/{id}', [InvoiceController::class, 'update']); // edit invoice
     Route::post  ('invoices/{id}/cancel',   [InvoiceController::class, 'cancel']);  // cancel (challan_order → _cancel)
     Route::delete('invoices/{id}',          [InvoiceController::class, 'destroy']); // delete (challan_order → _cancel with DELETE)
@@ -288,18 +288,18 @@ Route::post('/sale-wise-invoice/save',        [SaleWiseInvoiceController::class,
     // ========================================================
     // E-INVOICE (IRN)  → MENU: Invoice → Generate IRN
     // ========================================================
-    Route::post('/invoices/{challanId}/irn', [IrnController::class, 'generate']);   // GST portal IRN
+    // Route::post('/invoices/{challanId}/irn', [IrnController::class, 'generate']);   // GST portal IRN
 
     // ========================================================
     // DGR CLAIM  → MENU: Claims → DGR Claim
     // ========================================================
-    Route::get  ('/dgr-claims',          [DgrClaimController::class, 'index']);   // claim list
-    Route::get  ('/dgr-claims/check',    [DgrClaimController::class, 'check']);   // eligibility check
-    Route::get  ('/dgr-claims/details',  [DgrClaimController::class, 'details']); // line detail
-    Route::post ('/dgr-claims',          [DgrClaimController::class, 'store']);   // create claim
-    Route::post ('/dgr-claims/process',  [DgrClaimController::class, 'process']); // process claim
-    Route::post ('/dgr-claims/approve',  [DgrClaimController::class, 'approve']); // approve claim
-    Route::post ('/dgr-claims/query',    [DgrClaimController::class, 'query']);   // filtered search
+    // Route::get  ('/dgr-claims',          [DgrClaimController::class, 'index']);   // claim list
+    // Route::get  ('/dgr-claims/check',    [DgrClaimController::class, 'check']);   // eligibility check
+    // Route::get  ('/dgr-claims/details',  [DgrClaimController::class, 'details']); // line detail
+    // Route::post ('/dgr-claims',          [DgrClaimController::class, 'store']);   // create claim
+    // Route::post ('/dgr-claims/process',  [DgrClaimController::class, 'process']); // process claim
+    // Route::post ('/dgr-claims/approve',  [DgrClaimController::class, 'approve']); // approve claim
+    // Route::post ('/dgr-claims/query',    [DgrClaimController::class, 'query']);   // filtered search
 
     //===================================================
     // Dialy Dispatch
@@ -310,9 +310,9 @@ Route::get   ('/dispatches/next-no',    [DispatchController::class, 'nextNo']);
 Route::get   ('/dispatches/report/products', [DispatchController::class, 'products']);
 Route::get   ('/dispatches/report/invoices', [DispatchController::class, 'invoices']);
 Route::post  ('/dispatches',            [DispatchController::class, 'store']);
-Route::get   ('/dispatches/{id}',       [DispatchController::class, 'show']);
-Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
-Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
+// Route::get   ('/dispatches/{id}',       [DispatchController::class, 'show']);
+// Route::put   ('/dispatches/{id}',       [DispatchController::class, 'update']);
+// Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
 
 
 
@@ -320,9 +320,9 @@ Route::delete('/dispatches/{id}',       [DispatchController::class, 'destroy']);
     // LOOKUP  → MENU: Generic (dropdowns, autocompletes)
     // ========================================================
     Route::prefix('lookup')->group(function () {
-        Route::get ('/',                [LookupController::class, 'directory']); // all entities list
-        Route::get ('/{entity}/schema', [LookupController::class, 'schema']);    // column definitions
-        Route::post('/',                [LookupController::class, 'run']);       // run dynamic query
+        // Route::get ('/',                [LookupController::class, 'directory']); // all entities list
+        // Route::get ('/{entity}/schema', [LookupController::class, 'schema']);    // column definitions
+        // Route::post('/',                [LookupController::class, 'run']);       // run dynamic query
     });
 // Old Dues
 Route::get ('dealer/old-payment/retailers', [DealerPaymentController::class, 'oldPaymentRetailers']);
@@ -333,18 +333,18 @@ Route::post('dealer/old-payment/save',      [DealerPaymentController::class, 'ol
 Route::get ('dealer/payment-collection/beats', [DealerPaymentController::class, 'paymentCollectionBeats']);
 Route::get ('dealer/payment-collection/list',  [DealerPaymentController::class, 'paymentCollectionList']);
 Route::get ('dealer/payment-collection/dues',  [DealerPaymentController::class, 'paymentCollectionRetailerDues']);
-Route::get('dealer/payment-collection/dues/{retailer_id}', [DealerPaymentController::class, 'paymentCollectionRetailerDues']);
+// Route::get('dealer/payment-collection/dues/{retailer_id}', [DealerPaymentController::class, 'paymentCollectionRetailerDues']);
 Route::post('dealer/payment-collection/save',  [DealerPaymentController::class, 'paymentCollectionSave']);
 
 // Challan Payment Reports
-Route::get ('dealer/challan-payment/list',      [DealerPaymentController::class, 'challanPaymentList']);
-Route::get ('dealer/challan-payment/paid-list', [DealerPaymentController::class, 'paidChallanList']);
+// Route::get ('dealer/challan-payment/list',      [DealerPaymentController::class, 'challanPaymentList']);
+// Route::get ('dealer/challan-payment/paid-list', [DealerPaymentController::class, 'paidChallanList']);
 
-Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::class, 'paymentCollectionSaveLegacy']);
+// Route::post('dealer/payment-collection/save-legacy', [DealerPaymentController::class, 'paymentCollectionSaveLegacy']);
 
 
-Route::get('/ss-van-sales',        [SsVanSalesReportController::class, 'index']);
-Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']);
+// Route::get('/ss-van-sales',        [SsVanSalesReportController::class, 'index']);
+// Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']);
 
 
 
@@ -354,18 +354,18 @@ Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']
     Route::get   ('damage-invoices',             [DamageInvoiceController::class, 'index']);
     Route::post  ('damage-invoices',             [DamageInvoiceController::class, 'store']);
     Route::get   ('damage-invoices/{id}',        [DamageInvoiceController::class, 'show']);
-    Route::put   ('damage-invoices/{id}',        [DamageInvoiceController::class, 'update']);
-    Route::delete('damage-invoices/{id}',        [DamageInvoiceController::class, 'destroy']);
+    // Route::put   ('damage-invoices/{id}',        [DamageInvoiceController::class, 'update']);
+    // Route::delete('damage-invoices/{id}',        [DamageInvoiceController::class, 'destroy']);
 
     /* ------------- Lookups ------------- */
     Route::prefix('damage-lookups')->group(function () {
         Route::get('retailers',                        [DamageLookupController::class, 'retailers']);
-        Route::get('retailers/{id}/location',          [DamageLookupController::class, 'retailerLocation']);
+        // Route::get('retailers/{id}/location',          [DamageLookupController::class, 'retailerLocation']);
         Route::get('products',                         [DamageLookupController::class, 'products']);
         Route::get('products/{id}/mrp',                [DamageLookupController::class, 'productMrp']);
         Route::get('products/{id}/rate-stock',         [DamageLookupController::class, 'productRateStock']);
-        Route::get('products/{id}/dealer-rate',        [DamageLookupController::class, 'productDealerRate']);
-        Route::get('products/{id}/gst',                [DamageLookupController::class, 'productGst']);
+        // Route::get('products/{id}/dealer-rate',        [DamageLookupController::class, 'productDealerRate']);
+        // Route::get('products/{id}/gst',                [DamageLookupController::class, 'productGst']);
         Route::get('saleable-non-saleable',            [DamageLookupController::class, 'saleableNonSaleable']);
     });
 
@@ -376,8 +376,8 @@ Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']
     Route::get   ('depot-damage-invoices',             [DepotDamageInvoiceController::class, 'index']);
     Route::post  ('depot-damage-invoices',             [DepotDamageInvoiceController::class, 'store']);
     Route::get   ('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'show']);
-    Route::put   ('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'update']);
-    Route::delete('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'destroy']);
+    // Route::put   ('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'update']);
+    // Route::delete('depot-damage-invoices/{id}',        [DepotDamageInvoiceController::class, 'destroy']);
 
     /* ------------- Depot Lookups ------------- */
     Route::prefix('depot-damage-lookups')->group(function () {
@@ -385,9 +385,9 @@ Route::get('/ss-van-sales/report', [SsVanSalesReportController::class, 'report']
         Route::get('products',                      [DepotDamageLookupController::class, 'products']);
         Route::get('products/{id}/mrp',             [DepotDamageLookupController::class, 'productMrp']);
         Route::get('products/{id}/rate-stock',      [DepotDamageLookupController::class, 'productRateStock']);
-        Route::get('products/{id}/dealer-rate',     [DepotDamageLookupController::class, 'productDealerRate']);
-        Route::get('products/{id}/gst',             [DepotDamageLookupController::class, 'productGst']);
-        Route::get('saleable-non-saleable',         [DepotDamageLookupController::class, 'saleableNonSaleable']);
+        // Route::get('products/{id}/dealer-rate',     [DepotDamageLookupController::class, 'productDealerRate']);
+        // Route::get('products/{id}/gst',             [DepotDamageLookupController::class, 'productGst']);
+        // Route::get('saleable-non-saleable',         [DepotDamageLookupController::class, 'saleableNonSaleable']);
     });
 
 
@@ -401,47 +401,47 @@ Route::prefix('reports')->group(function () {
     Route::get('/sales/item-wise',                    [SalesReportController::class, 'itemWise']);
     Route::get('/sales/item-summary',                 [SalesReportController::class, 'itemSummary']);
     Route::get('/sales/product-sale',                 [SalesReportController::class, 'productSale']);
-    Route::get('/sales/item-sale',                    [SalesReportController::class, 'itemSale']);
-    Route::get('/sales/item-challan',                 [SalesReportController::class, 'itemChallan']);
+    // Route::get('/sales/item-sale',                    [SalesReportController::class, 'itemSale']);
+    // Route::get('/sales/item-challan',                 [SalesReportController::class, 'itemChallan']);
     Route::get('/sales/retailer-bill-summary',        [SalesReportController::class, 'retailerBillSummary']);
     Route::get('/sales/retailer-dues-ageing',         [SalesReportController::class, 'retailerDuesAgeing']);
-    Route::get('/sales/sales-purchase-performance',   [SalesReportController::class, 'salesPurchasePerformance']);
-    Route::get('/sales/sales-purchase-list',          [SalesReportController::class, 'salesPurchaseList']);
+    // Route::get('/sales/sales-purchase-performance',   [SalesReportController::class, 'salesPurchasePerformance']);
+    // Route::get('/sales/sales-purchase-list',          [SalesReportController::class, 'salesPurchaseList']);
     Route::get('/sales/retailer-category',            [SalesReportController::class, 'retailerCategorySale']);
     Route::get('/sales/challan-vs-sale',              [SalesReportController::class, 'challanVsSale']);
     Route::get('/sales/dsr',                          [SalesReportController::class, 'dsr']);
     Route::get('/sales/filters',                      [SalesReportController::class, 'filters']);
 
     // ---------- PERFORMANCE ----------
-    Route::get('/performance/user-sales',             [PerformanceReportController::class, 'userSales']);
-    Route::get('/performance/user-bill',              [PerformanceReportController::class, 'userBill']);
+    // Route::get('/performance/user-sales',             [PerformanceReportController::class, 'userSales']);
+    // Route::get('/performance/user-bill',              [PerformanceReportController::class, 'userBill']);
     Route::get('/performance/retailer-sales',         [PerformanceReportController::class, 'retailerSales']);
     Route::get('/performance/secondary-sales-book',   [PerformanceReportController::class, 'secondarySalesBook']);
        // ---------- STOCK ----------
-    Route::get('/stock/balance',                 [StockReportController::class, 'balanceStock']);
-    Route::get('/stock/balance/edit',            [StockReportController::class, 'balanceStockEdit']);
-    Route::get('/stock/primary',                 [StockReportController::class, 'primaryStock']);
-    Route::get('/stock/item-opening',            [StockReportController::class, 'itemOpeningStock']);
+    // Route::get('/stock/balance',                 [StockReportController::class, 'balanceStock']);
+    // Route::get('/stock/balance/edit',            [StockReportController::class, 'balanceStockEdit']);
+    // Route::get('/stock/primary',                 [StockReportController::class, 'primaryStock']);
+    // Route::get('/stock/item-opening',            [StockReportController::class, 'itemOpeningStock']);
     Route::get('/stock/summary',                 [StockReportController::class, 'stockSummary']);
     Route::get('/stock/opening-closing',         [StockReportController::class, 'openingClosingStock']);
-    Route::get('/stock/ledger',                  [StockReportController::class, 'stockLedger']);
-    Route::get('/stock/category-qty-value',      [StockReportController::class, 'categoryQtyValue']);
+    // Route::get('/stock/ledger',                  [StockReportController::class, 'stockLedger']);
+    // Route::get('/stock/category-qty-value',      [StockReportController::class, 'categoryQtyValue']);
 
     // ---------- GST ----------
     Route::get('/gst/return-summary',            [GstReportController::class, 'gstReturnSummary']);
     Route::get('/gst/gstr-3b',                   [GstReportController::class, 'gstr3b']);
     Route::get('/gst/hsn-summary',               [GstReportController::class, 'hsnSummary']);
-    Route::get('/gst/hsn-detail',                [GstReportController::class, 'hsnDetail']);
+    // Route::get('/gst/hsn-detail',                [GstReportController::class, 'hsnDetail']);
     Route::get('/gst/bill-detailed',             [GstReportController::class, 'billDetailed']);
     Route::get('/gst/purchase-detailed',         [GstReportController::class, 'purchaseDetailed']);
-    Route::get('/gst/book-wise',                 [GstReportController::class, 'bookWise']);
-    Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
+    // Route::get('/gst/book-wise',                 [GstReportController::class, 'bookWise']);
+    // Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
     Route::get('/gst/gstr1-return',              [Gstr1Controller::class, 'index']);
     Route::get('/gst/gstr1-return/json',         [Gstr1Controller::class, 'json']);
     Route::get('/gst/gstr1-return/excel',        [Gstr1Controller::class, 'excel']);
 
     // ---------- LEDGER ----------
-    Route::get('/ledger/party',                  [LedgerReportController::class, 'partyLedger']);
+    // Route::get('/ledger/party',                  [LedgerReportController::class, 'partyLedger']);
     Route::get('/ledger/retailer',               [LedgerReportController::class, 'retailerLedger']);
     Route::get('/ledger/retailer-payment',       [LedgerReportController::class, 'retailerPayment']);
     Route::get('/van/ss-sales',                  [VanReportController::class, 'ssVanSales']);
@@ -453,44 +453,44 @@ Route::prefix('reports')->group(function () {
 
      });
     // Dispatch Order
-    Route::get ('reports/dispatch-order',          [MainReportApiController::class, 'dispatchOrderIndex']);
-    Route::post('reports/dispatch-order/data',     [MainReportApiController::class, 'dispatchOrderAjax']);
+    // Route::get ('reports/dispatch-order',          [MainReportApiController::class, 'dispatchOrderIndex']);
+    // Route::post('reports/dispatch-order/data',     [MainReportApiController::class, 'dispatchOrderAjax']);
 
     // Dispatch Amount
-    Route::get ('reports/dispatch-amount',         [MainReportApiController::class, 'dispatchAmountIndex']);
-    Route::post('reports/dispatch-amount/data',    [MainReportApiController::class, 'dispatchAmountAjax']);
+    // Route::get ('reports/dispatch-amount',         [MainReportApiController::class, 'dispatchAmountIndex']);
+    // Route::post('reports/dispatch-amount/data',    [MainReportApiController::class, 'dispatchAmountAjax']);
 
     // Dashboard zero-order
-    Route::get ('dashboard/zero-order',            [MainReportApiController::class, 'dashboardZeroOrder']);
-    Route::post('dashboard/zero-order/chart',      [MainReportApiController::class, 'dashboardZeroOrderChart']);
-    Route::post('dashboard/zero-order/users',      [MainReportApiController::class, 'dashboardUserZeroOrder']);
-    Route::post('dashboard/zero-order/reason-bar', [MainReportApiController::class, 'dashboardUserZeroOrderReasonBar']);
+    // Route::get ('dashboard/zero-order',            [MainReportApiController::class, 'dashboardZeroOrder']);
+    // Route::post('dashboard/zero-order/chart',      [MainReportApiController::class, 'dashboardZeroOrderChart']);
+    // Route::post('dashboard/zero-order/users',      [MainReportApiController::class, 'dashboardUserZeroOrder']);
+    // Route::post('dashboard/zero-order/reason-bar', [MainReportApiController::class, 'dashboardUserZeroOrderReasonBar']);
 
     // Competitor
-    Route::get ('competitor/analysis',             [MainReportApiController::class, 'competitorAnalysisReport']);
-    Route::get ('competitor/products/{visitId}',   [MainReportApiController::class, 'getProducts']);
-    Route::get ('competitor/images/{visitId}',     [MainReportApiController::class, 'getImages']);
+    // Route::get ('competitor/analysis',             [MainReportApiController::class, 'competitorAnalysisReport']);
+    // Route::get ('competitor/products/{visitId}',   [MainReportApiController::class, 'getProducts']);
+    // Route::get ('competitor/images/{visitId}',     [MainReportApiController::class, 'getImages']);
 
     // Attendance export
-    Route::post('reports/attendance/export',       [MainReportApiController::class, 'simpleExport']);
+    // Route::post('reports/attendance/export',       [MainReportApiController::class, 'simpleExport']);
 
 
     // DGR
-    Route::get ('reports/dgr-claim',               [MainReportApiController::class, 'dgrClaimReport']);
-    Route::post('reports/dgr-claim/data',          [MainReportApiController::class, 'dgrClaimAjax']);
+    // Route::get ('reports/dgr-claim',               [MainReportApiController::class, 'dgrClaimReport']);
+    // Route::post('reports/dgr-claim/data',          [MainReportApiController::class, 'dgrClaimAjax']);
 
     // Sales score card
-    Route::get ('reports/sales-score-card',        [MainReportApiController::class, 'salesScoreCard']);
-    Route::post('reports/sales-score-card/data',   [MainReportApiController::class, 'salesScoreCardData']);
+    // Route::get ('reports/sales-score-card',        [MainReportApiController::class, 'salesScoreCard']);
+    // Route::post('reports/sales-score-card/data',   [MainReportApiController::class, 'salesScoreCardData']);
 
     // Complaint
-    Route::get   ('complaint/form',                [MainReportApiController::class, 'complaintForm']);
-    Route::post  ('complaint',                     [MainReportApiController::class, 'storeComplaint']);
-    Route::post  ('complaint/running',             [MainReportApiController::class, 'getRunningCase']);
-    Route::post  ('complaint/list',                [MainReportApiController::class, 'complaintList']);
-    Route::post  ('complaint/show',                [MainReportApiController::class, 'showComplaint']);
-    Route::put   ('complaint',                     [MainReportApiController::class, 'updateComplaint']);
-    Route::delete('complaint',                     [MainReportApiController::class, 'deleteComplaint']);
+    // Route::get   ('complaint/form',                [MainReportApiController::class, 'complaintForm']);
+    // Route::post  ('complaint',                     [MainReportApiController::class, 'storeComplaint']);
+    // Route::post  ('complaint/running',             [MainReportApiController::class, 'getRunningCase']);
+    // Route::post  ('complaint/list',                [MainReportApiController::class, 'complaintList']);
+    // Route::post  ('complaint/show',                [MainReportApiController::class, 'showComplaint']);
+    // Route::put   ('complaint',                     [MainReportApiController::class, 'updateComplaint']);
+    // Route::delete('complaint',                     [MainReportApiController::class, 'deleteComplaint']);
 
     
 
@@ -509,32 +509,32 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
     Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);             // perfoma / view order
-    Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
+    // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
     Route::post  ('/send-to-erp',     [QuickOrderController::class, 'sendToErp']);        // mark for ERP
 
     // ---------- HELPERS ----------
     Route::get   ('/helpers/product-rate',       [QuickOrderController::class, 'productRate']);
-    Route::post  ('/helpers/check-scheme',       [QuickOrderController::class, 'checkScheme']);
-    Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
+    // Route::post  ('/helpers/check-scheme',       [QuickOrderController::class, 'checkScheme']);
+    // Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
 
     // ---------- REPORTS ----------
-    Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
-    Route::get('/reports/ot2',                    [QuickOrderController::class, 'ot2']);
-    Route::get('/reports/ethical',                [QuickOrderController::class, 'ethical']);
-    Route::get('/reports/fmcg',                   [QuickOrderController::class, 'fmcg']);
-    Route::get('/reports/jps',                    [QuickOrderController::class, 'jps']);
-    Route::get('/reports/jp2',                    [QuickOrderController::class, 'jp2']);
-    Route::get('/reports/sale-statement',         [QuickOrderController::class, 'saleStatement']);
-    Route::get('/reports/sale-statement-ethical', [QuickOrderController::class, 'saleStatementEthical']);
-    Route::get('/reports/dms-to-tally',           [QuickOrderController::class, 'dmsToTally']);
-    Route::get('/reports/invoice-summary',        [QuickOrderController::class, 'invoiceSummary']);
-    Route::get('/reports/purchase',               [QuickOrderController::class, 'purchaseReport']);
+    // Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
+    // Route::get('/reports/ot2',                    [QuickOrderController::class, 'ot2']);
+    // Route::get('/reports/ethical',                [QuickOrderController::class, 'ethical']);
+    // Route::get('/reports/fmcg',                   [QuickOrderController::class, 'fmcg']);
+    // Route::get('/reports/jps',                    [QuickOrderController::class, 'jps']);
+    // Route::get('/reports/jp2',                    [QuickOrderController::class, 'jp2']);
+    // Route::get('/reports/sale-statement',         [QuickOrderController::class, 'saleStatement']);
+    // Route::get('/reports/sale-statement-ethical', [QuickOrderController::class, 'saleStatementEthical']);
+    // Route::get('/reports/dms-to-tally',           [QuickOrderController::class, 'dmsToTally']);
+    // Route::get('/reports/invoice-summary',        [QuickOrderController::class, 'invoiceSummary']);
+    // Route::get('/reports/purchase',               [QuickOrderController::class, 'purchaseReport']);
     Route::get('/reports/dealer-dashboard',       [QuickOrderController::class, 'dealerDashboard']);
-    Route::post('/reports/common',                [QuickOrderController::class, 'commonReportSection']);
+    // Route::post('/reports/common',                [QuickOrderController::class, 'commonReportSection']);
 
     // ---------- CSV FORMATS ----------
     Route::get('/formats/order',        [QuickOrderController::class, 'orderFormat']);
-    Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
+    // Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
 });
 
 //------------ Claim Api's --------------
@@ -545,34 +545,34 @@ Route::middleware('auth:sanctum')->prefix('dms/credit-note')->group(function () 
 
     // 1. Listing + filter data
     Route::post('index',           [DmsDgrCreditNoteApiController::class, 'index']);       // retailer claim list (dealer claims)
-    Route::post('create',          [DmsDgrCreditNoteApiController::class, 'create']);      // new claim form data
-    Route::post('store',           [DmsDgrCreditNoteApiController::class, 'store']);       // create claim
-    Route::get ('edit/{id}',       [DmsDgrCreditNoteApiController::class, 'edit']);        // edit claim by encrypted id
-    Route::put ('update/{id}',     [DmsDgrCreditNoteApiController::class, 'update']);      // fulfill retailer claim
+    // Route::post('create',          [DmsDgrCreditNoteApiController::class, 'create']);      // new claim form data
+    // Route::post('store',           [DmsDgrCreditNoteApiController::class, 'store']);       // create claim
+    // Route::get ('edit/{id}',       [DmsDgrCreditNoteApiController::class, 'edit']);        // edit claim by encrypted id
+    // Route::put ('update/{id}',     [DmsDgrCreditNoteApiController::class, 'update']);      // fulfill retailer claim
 
     // 2. Product rates
-    Route::post('claim-product-rates',           [DmsDgrCreditNoteApiController::class, 'claimProductRates']);
-    Route::post('non-saleable-qty',              [DmsDgrCreditNoteApiController::class, 'getNonSaleableQty']);
-    Route::post('rasna-scheme-qty',              [DmsDgrCreditNoteApiController::class, 'getRasnaSchemeQty']);
+    // Route::post('claim-product-rates',           [DmsDgrCreditNoteApiController::class, 'claimProductRates']);
+    // Route::post('non-saleable-qty',              [DmsDgrCreditNoteApiController::class, 'getNonSaleableQty']);
+    // Route::post('rasna-scheme-qty',              [DmsDgrCreditNoteApiController::class, 'getRasnaSchemeQty']);
 
     // 3. PDF
-    Route::post('pdf/retailer-claim',            [DmsDgrCreditNoteApiController::class, 'pdfGenerationRetailerClaim']);
+    // Route::post('pdf/retailer-claim',            [DmsDgrCreditNoteApiController::class, 'pdfGenerationRetailerClaim']);
 
     // 4. Dealer claims — credit note
     Route::post('generate-credit-note',          [DmsDgrCreditNoteApiController::class, 'takeActionGenerateCreditNote']);
 
     // 5. Retailer images/amount claim
-    Route::post('mt-images',                     [DmsDgrCreditNoteApiController::class, 'creditNoteMtImages']);
-    Route::post('mt-images/details',             [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimDetailsDms']);
-    Route::post('mt-images/update',              [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimUpdateDms']); // multipart
-    Route::post('mt-images/generate-credit-note',[DmsDgrCreditNoteApiController::class, 'takeActionGenerateCreditNoteDms']);
+    // Route::post('mt-images',                     [DmsDgrCreditNoteApiController::class, 'creditNoteMtImages']);
+    // Route::post('mt-images/details',             [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimDetailsDms']);
+    // Route::post('mt-images/update',              [DmsDgrCreditNoteApiController::class, 'mtRetailerClaimUpdateDms']); // multipart
+    // Route::post('mt-images/generate-credit-note',[DmsDgrCreditNoteApiController::class, 'takeActionGenerateCreditNoteDms']);
 
     // 6. Challan claim
-    Route::post('challan/process',               [DmsDgrCreditNoteApiController::class, 'takeActionOnProcessChallanClaim']);
-    Route::post('challan/list',                  [DmsDgrCreditNoteApiController::class, 'creditNoteChallan']);
-    Route::post('challan/details',               [DmsDgrCreditNoteApiController::class, 'mtChallanClaimDetailsSs']);
-    Route::post('challan/update',                [DmsDgrCreditNoteApiController::class, 'mtChallanClaimUpdateSs']);
-    Route::post('challan/generate-credit-note',  [DmsDgrCreditNoteApiController::class, 'takeActionGenerateChallanCreditNote']);
+    // Route::post('challan/process',               [DmsDgrCreditNoteApiController::class, 'takeActionOnProcessChallanClaim']);
+    // Route::post('challan/list',                  [DmsDgrCreditNoteApiController::class, 'creditNoteChallan']);
+    // Route::post('challan/details',               [DmsDgrCreditNoteApiController::class, 'mtChallanClaimDetailsSs']);
+    // Route::post('challan/update',                [DmsDgrCreditNoteApiController::class, 'mtChallanClaimUpdateSs']);
+    // Route::post('challan/generate-credit-note',  [DmsDgrCreditNoteApiController::class, 'takeActionGenerateChallanCreditNote']);
     
 });
 
@@ -583,19 +583,19 @@ use App\Http\Controllers\Api\MtImagesClaimApiController;
 Route::middleware('auth:sanctum')->prefix('mt-images-claim')->group(function () {
 
     // Listing / form data
-    Route::post('index',                  [MtImagesClaimApiController::class, 'index']);
-    Route::post('create',                 [MtImagesClaimApiController::class, 'create']);
-    Route::post('store',                  [MtImagesClaimApiController::class, 'store']);           // multipart
-    Route::get ('edit/{id}',              [MtImagesClaimApiController::class, 'edit']);
-    Route::put ('update/{id}',            [MtImagesClaimApiController::class, 'update']);
+    // Route::post('index',                  [MtImagesClaimApiController::class, 'index']);
+    // Route::post('create',                 [MtImagesClaimApiController::class, 'create']);
+    // Route::post('store',                  [MtImagesClaimApiController::class, 'store']);           // multipart
+    // Route::get ('edit/{id}',              [MtImagesClaimApiController::class, 'edit']);
+    // Route::put ('update/{id}',            [MtImagesClaimApiController::class, 'update']);
 
     // Product rates & stock
-    Route::post('claim-product-rates',    [MtImagesClaimApiController::class, 'claimProductRates']);
-    Route::post('non-saleable-qty',       [MtImagesClaimApiController::class, 'getNonSaleableQty']);
+    // Route::post('claim-product-rates',    [MtImagesClaimApiController::class, 'claimProductRates']);
+    // Route::post('non-saleable-qty',       [MtImagesClaimApiController::class, 'getNonSaleableQty']);
 
     // PDF + credit note
-    Route::post('pdf/retailer-claim',     [MtImagesClaimApiController::class, 'pdfGenerationRetailerClaim']);
-    Route::post('generate-credit-note',   [MtImagesClaimApiController::class, 'takeActionGenerateCreditNote']);
+    // Route::post('pdf/retailer-claim',     [MtImagesClaimApiController::class, 'pdfGenerationRetailerClaim']);
+    // Route::post('generate-credit-note',   [MtImagesClaimApiController::class, 'takeActionGenerateCreditNote']);
 
     // New MT images (samplingclaim)
     Route::post('new/create',             [MtImagesClaimApiController::class, 'newMtImages']);
@@ -603,9 +603,9 @@ Route::middleware('auth:sanctum')->prefix('mt-images-claim')->group(function () 
     Route::post('new/index',              [MtImagesClaimApiController::class, 'newMtImagesIndex']);
 
     // DGR claim (invoice + claim)
-    Route::post('dgr/details',            [MtImagesClaimApiController::class, 'getDgrClaimDetails']);
-    Route::post('dgr/submit',             [MtImagesClaimApiController::class, 'submitDgrClaim']);        // multipart
-    Route::post('dgr/invoice-details',    [MtImagesClaimApiController::class, 'getInvoiceDetails']);
+    // Route::post('dgr/details',            [MtImagesClaimApiController::class, 'getDgrClaimDetails']);
+    // Route::post('dgr/submit',             [MtImagesClaimApiController::class, 'submitDgrClaim']);        // multipart
+    // Route::post('dgr/invoice-details',    [MtImagesClaimApiController::class, 'getInvoiceDetails']);
 });
 
 
@@ -614,13 +614,13 @@ use App\Http\Controllers\Api\DmsClaimOrderApiController;
 Route::middleware('auth:sanctum')->prefix('dms/claim-order')->group(function () {
 
     Route::post('index',                    [DmsClaimOrderApiController::class, 'index']);
-    Route::post('create',                   [DmsClaimOrderApiController::class, 'create']);
-    Route::post('store',                    [DmsClaimOrderApiController::class, 'store']);           // multipart
+    // Route::post('create',                   [DmsClaimOrderApiController::class, 'create']);
+    // Route::post('store',                    [DmsClaimOrderApiController::class, 'store']);           // multipart
     Route::get ('edit/{id}',                [DmsClaimOrderApiController::class, 'edit']);
     Route::put ('update/{id}',              [DmsClaimOrderApiController::class, 'update']);
 
     Route::post('claim-product-rates',      [DmsClaimOrderApiController::class, 'claimProductRates']);
-    Route::post('non-saleable-qty',         [DmsClaimOrderApiController::class, 'getNonSaleableQty']);
+    // Route::post('non-saleable-qty',         [DmsClaimOrderApiController::class, 'getNonSaleableQty']);
 
     Route::post('pdf/retailer-claim',       [DmsClaimOrderApiController::class, 'pdfGenerationRetailerClaim']);
 
@@ -629,14 +629,14 @@ Route::middleware('auth:sanctum')->prefix('dms/claim-order')->group(function () 
     Route::post('sra-report',               [DmsClaimOrderApiController::class, 'sraReport']);
     Route::post('generate-sra-pdf',         [DmsClaimOrderApiController::class, 'generateSraPdf']);
     Route::post('dealer-generate-sra-pdf',  [DmsClaimOrderApiController::class, 'dealerGenerateSraPdf']);
-    Route::post('take-action-generate-sra', [DmsClaimOrderApiController::class, 'takeActionGenerateSra']);
+    // Route::post('take-action-generate-sra', [DmsClaimOrderApiController::class, 'takeActionGenerateSra']);
 
-    Route::post('new-claim-details',        [DmsClaimOrderApiController::class, 'newClaimDetails']);
+    // Route::post('new-claim-details',        [DmsClaimOrderApiController::class, 'newClaimDetails']);
     Route::post('create-multiple-batch',    [DmsClaimOrderApiController::class, 'createMultipleBatch']);
     Route::post('multiple-batch-claim',     [DmsClaimOrderApiController::class, 'multipleBatchClaim']); // multipart
 
-    Route::post('scheme-details',           [DmsClaimOrderApiController::class, 'schemeDetails']);
-    Route::post('stock-check',              [DmsClaimOrderApiController::class, 'stockCheckDms']);
+    // Route::post('scheme-details',           [DmsClaimOrderApiController::class, 'schemeDetails']);
+    // Route::post('stock-check',              [DmsClaimOrderApiController::class, 'stockCheckDms']);
 });
 
 use App\Http\Controllers\Api\DMSReportDealerController;
@@ -646,18 +646,18 @@ Route::middleware('auth:sanctum')->group(function () {
 
     /* ---------------- DMS Dealer Reports ---------------- */
     Route::prefix('dms-report-dealer')->group(function () {
-        Route::get('short-item-list',           [DMSReportDealerController::class, 'shortItemListReport']);
-        Route::post('short-item-list-ajax',     [DMSReportDealerController::class, 'shortItemListReportAjax']);
-        Route::post('item-detailer-short-item', [DMSReportDealerController::class, 'itemDetailerShortItem']);
-        Route::post('change-date',              [DMSReportDealerController::class, 'changeDate']);
+        // Route::get('short-item-list',           [DMSReportDealerController::class, 'shortItemListReport']);
+        // Route::post('short-item-list-ajax',     [DMSReportDealerController::class, 'shortItemListReportAjax']);
+        // Route::post('item-detailer-short-item', [DMSReportDealerController::class, 'itemDetailerShortItem']);
+        // Route::post('change-date',              [DMSReportDealerController::class, 'changeDate']);
 
-        Route::get('dealer-sale-details',       [DMSReportDealerController::class, 'dealerSaleDetailsReport']);
-        Route::post('dealer-sale-details-ajax', [DMSReportDealerController::class, 'dealerSaleDetailsReportAjax']);
+        // Route::get('dealer-sale-details',       [DMSReportDealerController::class, 'dealerSaleDetailsReport']);
+        // Route::post('dealer-sale-details-ajax', [DMSReportDealerController::class, 'dealerSaleDetailsReportAjax']);
     });
 
     /* ---------------- DMS Claim Reports ---------------- */
     Route::prefix('dms-claim')->group(function () {
-        Route::get('filters',            [DMSClaimReportController::class, 'dmsClaimReport']);
+        // Route::get('filters',            [DMSClaimReportController::class, 'dmsClaimReport']);
         Route::post('report',            [DMSClaimReportController::class, 'dmsClaim']);
         Route::post('approval/dealer',   [DMSClaimReportController::class, 'newClaimApproval']);
         Route::post('approval/sampling', [DMSClaimReportController::class, 'newClaimApproval1']);

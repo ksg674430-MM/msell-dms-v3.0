@@ -300,7 +300,8 @@ class InvoiceController extends Controller
         ]);
 
         try {
-        DB::transaction(function () use ($id, $invoice, $validated, $dealerId) {
+        $companyId = (int) $user->company_id;
+        DB::transaction(function () use ($id, $invoice, $validated, $dealerId, $companyId) {
 
             $oldItems = DB::select(
                 "SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp, tax, old_rate, order_id
@@ -335,8 +336,10 @@ class InvoiceController extends Controller
 
             foreach ($validated['items'] as $row) {
                 $product = DB::selectOne(
-                    "SELECT id, name, gst_percent FROM catalog_product WHERE id = ?",
-                    [(int) $row['product_id']]
+                    "SELECT id, name, gst_percent FROM catalog_product p
+                      WHERE p.id = ?
+                        AND (p.company_id = ? OR EXISTS (SELECT 1 FROM stock s WHERE s.product_id = p.id AND s.dealer_id = ?))",
+                    [(int) $row['product_id'], $companyId, $dealerId]
                 );
                 if (!$product) {
                     throw new \RuntimeException("Product {$row['product_id']} not found.");
@@ -417,7 +420,7 @@ class InvoiceController extends Controller
             app(StockService::class)->sync($dealerId, $oldItems, $stockLines);
 
             $invoiceService = app(InvoiceService::class);
-            $invoiceService->reopenSalesOrders($oldItems);
+            $invoiceService->reopenSalesOrders($oldItems, $dealerId);
             $invoicedByOrder = [];
             foreach ($lines as $l) {
                 if ($l['order_id'] !== '') {
@@ -460,7 +463,7 @@ class InvoiceController extends Controller
                 ->update($headerUpdate);
         });
         } catch (\RuntimeException $e) {
-            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+            return response()->json(['status' => false, 'message' => safe_error_message($e)], 422);
         }
 
         return $this->show($request, $id);
@@ -496,7 +499,8 @@ class InvoiceController extends Controller
         DB::transaction(function () use ($id, $invoice, $user, $reason, $dealerId) {
 
             app(InvoiceService::class)->reopenSalesOrders(
-                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
+                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]),
+                $dealerId
             );
             app(StockService::class)->sync(
                 $dealerId,
@@ -528,7 +532,7 @@ class InvoiceController extends Controller
             DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
         });
         } catch (\RuntimeException $e) {
-            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+            return response()->json(['status' => false, 'message' => safe_error_message($e)], 422);
         }
 
         return response()->json([
@@ -577,7 +581,8 @@ class InvoiceController extends Controller
         DB::transaction(function () use ($id, $invoice, $user, $dealerId) {
 
             app(InvoiceService::class)->reopenSalesOrders(
-                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
+                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]),
+                $dealerId
             );
             app(StockService::class)->sync(
                 $dealerId,
@@ -609,7 +614,7 @@ class InvoiceController extends Controller
             DB::table('challan_order')->where('id', $id)->where('ch_dealer_id', $dealerId)->delete();
         });
         } catch (\RuntimeException $e) {
-            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+            return response()->json(['status' => false, 'message' => safe_error_message($e)], 422);
         }
 
         return response()->json([
@@ -836,7 +841,7 @@ class InvoiceController extends Controller
         return response()->json(['status' => true, 'message' => 'Claim submitted successfully.']);
     } catch (\Throwable $e) {
         DB::rollBack();
-        return response()->json(['status' => false, 'message' => 'Claim failed: ' . $e->getMessage()], 500);
+        return response()->json(['status' => false, 'message' => 'Claim failed: ' . safe_error_message($e)], 500);
     }
 }
 

@@ -675,7 +675,7 @@ class QuickOrderController extends Controller
             return response()->json([
                 'status'  => false,
                 'message' => 'Cart update failed',
-                'error'   => $e->getMessage(),
+                'error'   => safe_error_message($e),
             ], 500);
         }
     }
@@ -993,7 +993,7 @@ class QuickOrderController extends Controller
             return response()->json([
                 'status'  => false,
                 'message' => 'Finalize failed',
-                'error'   => $e->getMessage(),
+                'error'   => safe_error_message($e),
             ], 500);
         }
     }
@@ -1277,93 +1277,93 @@ class QuickOrderController extends Controller
      |  8) PDF (perfoma) + EMAIL
      * ============================================================ */
 
-    public function downloadPdf(Request $request, $id)
-    {
-        $ctx        = $this->context($request);
-        $company_id = $ctx['company_id'];
+    // public function downloadPdf(Request $request, $id)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
 
-        try { $uid = Crypt::decryptString($id); } catch (\Throwable $e) { $uid = $id; }
+        // try { $uid = Crypt::decryptString($id); } catch (\Throwable $e) { $uid = $id; }
 
-        $head = DB::table('demand_order')
-            ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
-            ->select('dealer.*', 'demand_order.order_remark as order_remark',
-                'demand_order.id as pid', 'demand_order.order_date as order_date')
-            ->where('demand_order.order_id', $uid)
-            ->first();
+        // $head = DB::table('demand_order')
+            // ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
+            // ->select('dealer.*', 'demand_order.order_remark as order_remark',
+                // 'demand_order.id as pid', 'demand_order.order_date as order_date')
+            // ->where('demand_order.order_id', $uid)
+            // ->first();
 
-        if (!$head || !$this->canAccessOrder($ctx, DB::table('demand_order')->where('order_id', $uid)->first())) {
-            return response()->json(['status' => false, 'message' => 'Order not found'], 404);
-        }
+        // if (!$head || !$this->canAccessOrder($ctx, DB::table('demand_order')->where('order_id', $uid)->first())) {
+            // return response()->json(['status' => false, 'message' => 'Order not found'], 404);
+        // }
 
-        $mktg_cat_array = DB::table('catalog_2')
-            ->where('company_id', $company_id)
-            ->orderBy('name', 'ASC')
-            ->pluck('name', 'id');
+        // $mktg_cat_array = DB::table('catalog_2')
+            // ->where('company_id', $company_id)
+            // ->orderBy('name', 'ASC')
+            // ->pluck('name', 'id');
 
-        $final_out = [];
-        foreach ($mktg_cat_array as $catId => $catName) {
-            $rows = DB::table('demand_order')
-                ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
-                ->join('catalog_product', 'catalog_product.id', '=', 'demand_order_details.product_id')
-                ->where('catalog_product.catalog_id', $catId)
-                ->where('catalog_product.company_id', $company_id)
-                ->where('demand_order.order_id', $uid)
-                ->groupBy('demand_order_details.id')
-                ->get();
+        // $final_out = [];
+        // foreach ($mktg_cat_array as $catId => $catName) {
+            // $rows = DB::table('demand_order')
+                // ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+                // ->join('catalog_product', 'catalog_product.id', '=', 'demand_order_details.product_id')
+                // ->where('catalog_product.catalog_id', $catId)
+                // ->where('catalog_product.company_id', $company_id)
+                // ->where('demand_order.order_id', $uid)
+                // ->groupBy('demand_order_details.id')
+                // ->get();
 
-            $out_2 = [];
-            foreach ($rows as $v) {
-                $out_2[] = [
-                    'total_rs'                => $v->total_rs,
-                    'order_converstion_unit'  => $v->order_converstion_unit,
-                    'ITEM_CODE'               => $v->itemcode,
-                    'ITEM_NAME'               => $v->name,
-                    'rate'                    => $v->rate,
-                    'order_unit'              => $v->order_unit,
-                    'quantity'                => $v->quantity,
-                    'free_qty'                => $v->free_qty,
-                    'remarks'                 => $v->remarks,
-                    't1_rate'                 => $v->t1_rate,
-                    'atd_rate'                => $v->atd_rate,
-                ];
-            }
-            $final_out[$catId] = ['name' => $catName, 'rows' => $out_2];
-        }
+            // $out_2 = [];
+            // foreach ($rows as $v) {
+                // $out_2[] = [
+                    // 'total_rs'                => $v->total_rs,
+                    // 'order_converstion_unit'  => $v->order_converstion_unit,
+                    // 'ITEM_CODE'               => $v->itemcode,
+                    // 'ITEM_NAME'               => $v->name,
+                    // 'rate'                    => $v->rate,
+                    // 'order_unit'              => $v->order_unit,
+                    // 'quantity'                => $v->quantity,
+                    // 'free_qty'                => $v->free_qty,
+                    // 'remarks'                 => $v->remarks,
+                    // 't1_rate'                 => $v->t1_rate,
+                    // 'atd_rate'                => $v->atd_rate,
+                // ];
+            // }
+            // $final_out[$catId] = ['name' => $catName, 'rows' => $out_2];
+        // }
 
-        $pdf = PDF::loadView('DMS.QuickOrder.perfoma_pdf', [
-            'party_name'    => $head->name ?? '',
-            'order_remark'  => $head->order_remark ?? '',
-            'order_id'      => 'B-' . $head->pid,
-            'order_date'    => $head->order_date,
-            'mktg_cat_array'=> $mktg_cat_array,
-            'final_out'     => $final_out,
-        ]);
+        // $pdf = PDF::loadView('DMS.QuickOrder.perfoma_pdf', [
+            // 'party_name'    => $head->name ?? '',
+            // 'order_remark'  => $head->order_remark ?? '',
+            // 'order_id'      => 'B-' . $head->pid,
+            // 'order_date'    => $head->order_date,
+            // 'mktg_cat_array'=> $mktg_cat_array,
+            // 'final_out'     => $final_out,
+        // ]);
 
-        // email to configured recipient
-        if ($request->boolean('email', false)) {
-            $to = $company_id == 206 ? 'financesupport@nutraj.com' : 'rohit.k@manacleindia.com';
-            $mail = DB::table('mail_master')->where('company_id', $company_id)->first();
-            if ($mail && !empty($mail->mail)) {
-                config([
-                    'mail.username' => $mail->mail,
-                    'mail.password' => $mail->password_key,
-                    'mail.from.address' => $mail->mail,
-                ]);
-                Mail::send('DMS.QuickOrder.perfoma_pdf', [
-                    'party_name'    => $head->name ?? '',
-                    'order_remark'  => $head->order_remark ?? '',
-                    'order_id'      => 'B-' . $head->pid,
-                    'order_date'    => $head->order_date,
-                    'mktg_cat_array'=> $mktg_cat_array,
-                    'final_out'     => $final_out,
-                ], function ($m) use ($to, $mail) {
-                    $m->from($mail->mail)->to($to)->subject('Report');
-                });
-            }
-        }
+        // // email to configured recipient
+        // if ($request->boolean('email', false)) {
+            // $to = $company_id == 206 ? 'financesupport@nutraj.com' : 'rohit.k@manacleindia.com';
+            // $mail = DB::table('mail_master')->where('company_id', $company_id)->first();
+            // if ($mail && !empty($mail->mail)) {
+                // config([
+                    // 'mail.username' => $mail->mail,
+                    // 'mail.password' => $mail->password_key,
+                    // 'mail.from.address' => $mail->mail,
+                // ]);
+                // Mail::send('DMS.QuickOrder.perfoma_pdf', [
+                    // 'party_name'    => $head->name ?? '',
+                    // 'order_remark'  => $head->order_remark ?? '',
+                    // 'order_id'      => 'B-' . $head->pid,
+                    // 'order_date'    => $head->order_date,
+                    // 'mktg_cat_array'=> $mktg_cat_array,
+                    // 'final_out'     => $final_out,
+                // ], function ($m) use ($to, $mail) {
+                    // $m->from($mail->mail)->to($to)->subject('Report');
+                // });
+            // }
+        // }
 
-        return $pdf->download('B-' . $head->pid . '.pdf');
-    }
+        // return $pdf->download('B-' . $head->pid . '.pdf');
+    // }
 
     /* ============================================================
      |  9) SEND TO ERP
@@ -1469,218 +1469,218 @@ class QuickOrderController extends Controller
      |  11) CHECK SCHEME
      * ============================================================ */
 
-    public function checkScheme(Request $request)
-    {
-        $ctx        = $this->context($request);
-        $date       = $ctx['date'];
-        $dealer_code = $request->dealer_code ?: $ctx['dealer_code'];
-        $qty         = $request->get('term', '0');
-        $unit_conf   = $request->unit_conf ?: '';
-        $item_code   = $request->item_code ?: '0';
+    // public function checkScheme(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $date       = $ctx['date'];
+        // $dealer_code = $request->dealer_code ?: $ctx['dealer_code'];
+        // $qty         = $request->get('term', '0');
+        // $unit_conf   = $request->unit_conf ?: '';
+        // $item_code   = $request->item_code ?: '0';
 
-        // Active circulars for this dealer
-        $scheme_details = DB::table('circular_mast')
-            ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-            ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-            ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
-            ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
-            ->where('scheme_domain.ACC_CODE', $dealer_code)
-            ->groupBy('scheme_domain.SCHEME_NO')
-            ->get();
+        // // Active circulars for this dealer
+        // $scheme_details = DB::table('circular_mast')
+            // ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+            // ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+            // ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
+            // ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
+            // ->where('scheme_domain.ACC_CODE', $dealer_code)
+            // ->groupBy('scheme_domain.SCHEME_NO')
+            // ->get();
 
-        $scheme_no_step1 = [];
-        foreach ($scheme_details as $v) {
-            if (empty($v->CANCELLEDBY)) $scheme_no_step1[] = $v->SCHEME_NO;
-        }
+        // $scheme_no_step1 = [];
+        // foreach ($scheme_details as $v) {
+            // if (empty($v->CANCELLEDBY)) $scheme_no_step1[] = $v->SCHEME_NO;
+        // }
 
-        $scheme_step1 = DB::table('circular_mast')
-            ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-            ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-            ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
-            ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
-            ->whereIn('scheme_domain.SCHEME_NO', $scheme_no_step1)
-            ->where('scheme_domain.ITEM_CODE', $item_code)
-            ->groupBy('scheme_domain.SCHEME_NO')
-            ->orderBy('scheme_domain.id', 'DESC')
-            ->first();
+        // $scheme_step1 = DB::table('circular_mast')
+            // ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+            // ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+            // ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
+            // ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
+            // ->whereIn('scheme_domain.SCHEME_NO', $scheme_no_step1)
+            // ->where('scheme_domain.ITEM_CODE', $item_code)
+            // ->groupBy('scheme_domain.SCHEME_NO')
+            // ->orderBy('scheme_domain.id', 'DESC')
+            // ->first();
 
-        if ($scheme_step1) {
-            $slabs = DB::table('scheme_slab')->where('SCHEME_NO', $scheme_step1->SCHEME_NO)->get();
-        } else {
-            $prodCodes = DB::table('item_mast')->where('ITEM_CODE', $item_code)->pluck('PROD_CODE');
-            $item_row  = DB::table('item_mast')->where('ITEM_CODE', $item_code)->first();
+        // if ($scheme_step1) {
+            // $slabs = DB::table('scheme_slab')->where('SCHEME_NO', $scheme_step1->SCHEME_NO)->get();
+        // } else {
+            // $prodCodes = DB::table('item_mast')->where('ITEM_CODE', $item_code)->pluck('PROD_CODE');
+            // $item_row  = DB::table('item_mast')->where('ITEM_CODE', $item_code)->first();
 
-            $scheme_step1 = DB::table('circular_mast')
-                ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-                ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
-                ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
-                ->join('item_mast',    'item_mast.PROD_CODE',    '=', 'scheme_domain.PROD_CODE')
-                ->select('item_mast.ITEM_SIZE as ITEM_SIZE', 'scheme_domain.SCHEME_NO as SCHEME_NO')
-                ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
-                ->whereIn('scheme_domain.SCHEME_NO', $scheme_no_step1)
-                ->whereIn('scheme_domain.PROD_CODE', $prodCodes)
-                ->groupBy('scheme_domain.SCHEME_NO')
-                ->orderBy('scheme_domain.id', 'DESC')
-                ->first();
+            // $scheme_step1 = DB::table('circular_mast')
+                // ->join('scheme_mast',  'scheme_mast.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+                // ->join('scheme_slab',  'scheme_slab.SCHEME_NO',  '=', 'circular_mast.SCHEME_NO')
+                // ->join('scheme_domain','scheme_domain.SCHEME_NO','=', 'circular_mast.SCHEME_NO')
+                // ->join('item_mast',    'item_mast.PROD_CODE',    '=', 'scheme_domain.PROD_CODE')
+                // ->select('item_mast.ITEM_SIZE as ITEM_SIZE', 'scheme_domain.SCHEME_NO as SCHEME_NO')
+                // ->whereRaw("DATE_FORMAT(circular_mast.from_date_condition ,'%Y-%m-%d')<='$date' AND DATE_FORMAT(circular_mast.to_date_condition,'%Y-%m-%d') >= '$date'")
+                // ->whereIn('scheme_domain.SCHEME_NO', $scheme_no_step1)
+                // ->whereIn('scheme_domain.PROD_CODE', $prodCodes)
+                // ->groupBy('scheme_domain.SCHEME_NO')
+                // ->orderBy('scheme_domain.id', 'DESC')
+                // ->first();
 
-            $slabs = collect();
-            if ($scheme_step1) {
-                $slabs = DB::table('scheme_slab')
-                    ->where('SCHEME_NO', $scheme_step1->SCHEME_NO)
-                    ->where('ITEM_SIZE', $item_row->ITEM_SIZE ?? '')
-                    ->orderBy('id', 'DESC')->get();
-                if ($slabs->isEmpty()) {
-                    $slabs = DB::table('scheme_slab')
-                        ->where('SCHEME_NO', $scheme_step1->SCHEME_NO)
-                        ->orderBy('id', 'DESC')->get();
-                }
-            }
-        }
+            // $slabs = collect();
+            // if ($scheme_step1) {
+                // $slabs = DB::table('scheme_slab')
+                    // ->where('SCHEME_NO', $scheme_step1->SCHEME_NO)
+                    // ->where('ITEM_SIZE', $item_row->ITEM_SIZE ?? '')
+                    // ->orderBy('id', 'DESC')->get();
+                // if ($slabs->isEmpty()) {
+                    // $slabs = DB::table('scheme_slab')
+                        // ->where('SCHEME_NO', $scheme_step1->SCHEME_NO)
+                        // ->orderBy('id', 'DESC')->get();
+                // }
+            // }
+        // }
 
-        $conv = DB::table('item_aum_mast')->where('ITEM_CODE', $item_code)->first();
-        $converstion_unit = $conv->UMTOAUM ?? 0;
+        // $conv = DB::table('item_aum_mast')->where('ITEM_CODE', $item_code)->first();
+        // $converstion_unit = $conv->UMTOAUM ?? 0;
 
-        // Build out[] — same logic, condensed
-        $out = [];
-        $slabs_txt = [];
-        if ($slabs->isNotEmpty()) {
-            foreach ($slabs as $s) {
-                $FREE = (float) ($s->FREE_ITEM1_QTY1 ?? 0);
-                $BASE = (float) ($s->BASE_FROM ?? 0);
-                $sum  = $BASE + $FREE;
-                if ($unit_conf === 'BOX1') {
-                    $sum_inner  = $BASE * $converstion_unit;
-                    $free_inner = $FREE * $converstion_unit;
-                    $out_value  = $sum . '(' . $sum_inner . '+' . $free_inner . ')';
-                } else {
-                    $free_inner = $FREE;
-                    $out_value  = $sum . '(' . $BASE . '+' . $FREE . ')';
-                }
-                $slabs_txt[] = ' ' . $sum . ' (' . $BASE . '+' . $FREE . '= ' . $sum . ')';
-                $out[] = [
-                    'value'         => $out_value,
-                    'title'         => $sum,
-                    'free_qty'      => $free_inner,
-                    'slabs_testing' => $sum . '|' . $BASE . '|' . $FREE,
-                ];
-            }
-        } else {
-            $out_value = $unit_conf === 'BOX'
-                ? $qty . '(' . $qty * $converstion_unit . '+ 0 = ' . $qty * $converstion_unit . ')'
-                : $qty . '(' . $qty . '+ 0 = ' . $qty . ')';
-            $out[] = ['value' => $out_value, 'title' => $qty, 'free_qty' => '0', 'slabs_testing' => $qty . '|' . $qty . '|0'];
-        }
+        // // Build out[] — same logic, condensed
+        // $out = [];
+        // $slabs_txt = [];
+        // if ($slabs->isNotEmpty()) {
+            // foreach ($slabs as $s) {
+                // $FREE = (float) ($s->FREE_ITEM1_QTY1 ?? 0);
+                // $BASE = (float) ($s->BASE_FROM ?? 0);
+                // $sum  = $BASE + $FREE;
+                // if ($unit_conf === 'BOX1') {
+                    // $sum_inner  = $BASE * $converstion_unit;
+                    // $free_inner = $FREE * $converstion_unit;
+                    // $out_value  = $sum . '(' . $sum_inner . '+' . $free_inner . ')';
+                // } else {
+                    // $free_inner = $FREE;
+                    // $out_value  = $sum . '(' . $BASE . '+' . $FREE . ')';
+                // }
+                // $slabs_txt[] = ' ' . $sum . ' (' . $BASE . '+' . $FREE . '= ' . $sum . ')';
+                // $out[] = [
+                    // 'value'         => $out_value,
+                    // 'title'         => $sum,
+                    // 'free_qty'      => $free_inner,
+                    // 'slabs_testing' => $sum . '|' . $BASE . '|' . $FREE,
+                // ];
+            // }
+        // } else {
+            // $out_value = $unit_conf === 'BOX'
+                // ? $qty . '(' . $qty * $converstion_unit . '+ 0 = ' . $qty * $converstion_unit . ')'
+                // : $qty . '(' . $qty . '+ 0 = ' . $qty . ')';
+            // $out[] = ['value' => $out_value, 'title' => $qty, 'free_qty' => '0', 'slabs_testing' => $qty . '|' . $qty . '|0'];
+        // }
 
-        // Simple projected slab series — kept as in original
-        $result = [];
-        foreach ($out as $k => $v) {
-            $result[] = [
-                'value'    => $v['value'],
-                'title'    => $v['title'],
-                'free_qty' => $v['free_qty'],
-            ];
-        }
+        // // Simple projected slab series — kept as in original
+        // $result = [];
+        // foreach ($out as $k => $v) {
+            // $result[] = [
+                // 'value'    => $v['value'],
+                // 'title'    => $v['title'],
+                // 'free_qty' => $v['free_qty'],
+            // ];
+        // }
 
-        return response()->json([
-            'status'  => true,
-            'code'    => 200,
-            'message' => 'Found',
-            'data'    => [
-                'result' => $result,
-                'slabs'  => implode(',', $slabs_txt),
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'code'    => 200,
+            // 'message' => 'Found',
+            // 'data'    => [
+                // 'result' => $result,
+                // 'slabs'  => implode(',', $slabs_txt),
+            // ],
+        // ]);
+    // }
 
     /* ============================================================
      |  12) SCHEME AUTOCOMPLETE (product_wise_scheme_plan based)
      * ============================================================ */
 
-    public function schemeAutocomplete(Request $request)
-    {
-        $ctx        = $this->context($request);
-        $date       = $ctx['date'];
-        $company_id = $ctx['company_id'];
-        $dealer_id  = $ctx['dealer_id'];
-        $item_code  = $request->item_code ?: '0';
-        $qty        = (float) $request->get('term', '0');
-        $unit_conf  = $request->unit_conf ?: '';
+    // public function schemeAutocomplete(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $date       = $ctx['date'];
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
+        // $item_code  = $request->item_code ?: '0';
+        // $qty        = (float) $request->get('term', '0');
+        // $unit_conf  = $request->unit_conf ?: '';
 
-        $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
+        // $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
 
-        $plans = DB::table('product_wise_scheme_plan_details')
-            ->join('product_wise_scheme_plan', 'product_wise_scheme_plan.id', '=', 'product_wise_scheme_plan_details.scheme_id')
-            ->join('catalog_product', 'catalog_product.id', '=', 'product_wise_scheme_plan_details.product_id')
-            ->join('catalog_2', 'catalog_2.id', '=', 'catalog_product.catalog_id')
-            ->join('catalog_1', 'catalog_1.id', '=', 'catalog_2.catalog_1_id')
-            ->select(
-                'sale_value_range_first as BASE_FROM',
-                'sale_value_range_last  as BASE_TO',
-                'value_amount_percentage as FREE_ITEM1_QTY1',
-                'scheme_id as SCHEME_NO'
-            )
-            ->where('product_wise_scheme_plan_details.state_id', $dealer->state_id ?? 0)
-            ->where('catalog_product.id', $item_code)
-            ->where('incentive_type', 3)
-            ->where('product_wise_scheme_plan_details.company_id', $company_id)
-            ->whereRaw("DATE_FORMAT(valid_from_date,'%Y-%m-%d')<='$date' AND DATE_FORMAT(valid_to_date,'%Y-%m-%d')>='$date'")
-            ->groupBy('product_wise_scheme_plan_details.state_id', 'product_wise_scheme_plan_details.product_id')
-            ->get();
+        // $plans = DB::table('product_wise_scheme_plan_details')
+            // ->join('product_wise_scheme_plan', 'product_wise_scheme_plan.id', '=', 'product_wise_scheme_plan_details.scheme_id')
+            // ->join('catalog_product', 'catalog_product.id', '=', 'product_wise_scheme_plan_details.product_id')
+            // ->join('catalog_2', 'catalog_2.id', '=', 'catalog_product.catalog_id')
+            // ->join('catalog_1', 'catalog_1.id', '=', 'catalog_2.catalog_1_id')
+            // ->select(
+                // 'sale_value_range_first as BASE_FROM',
+                // 'sale_value_range_last  as BASE_TO',
+                // 'value_amount_percentage as FREE_ITEM1_QTY1',
+                // 'scheme_id as SCHEME_NO'
+            // )
+            // ->where('product_wise_scheme_plan_details.state_id', $dealer->state_id ?? 0)
+            // ->where('catalog_product.id', $item_code)
+            // ->where('incentive_type', 3)
+            // ->where('product_wise_scheme_plan_details.company_id', $company_id)
+            // ->whereRaw("DATE_FORMAT(valid_from_date,'%Y-%m-%d')<='$date' AND DATE_FORMAT(valid_to_date,'%Y-%m-%d')>='$date'")
+            // ->groupBy('product_wise_scheme_plan_details.state_id', 'product_wise_scheme_plan_details.product_id')
+            // ->get();
 
-        $conv = DB::table('catalog_product')->where('id', $item_code)->first();
-        $converstion_unit = $conv->quantity_per_case ?? 1;
+        // $conv = DB::table('catalog_product')->where('id', $item_code)->first();
+        // $converstion_unit = $conv->quantity_per_case ?? 1;
 
-        if ($unit_conf === 'BOX') $qty *= $converstion_unit;
+        // if ($unit_conf === 'BOX') $qty *= $converstion_unit;
 
-        $result = [];
-        if ($plans->isNotEmpty()) {
-            foreach ($plans as $p) {
-                $base = (float) ($p->BASE_FROM ?? 0);
-                $free = (float) ($p->FREE_ITEM1_QTY1 ?? 0);
-                $sum  = $base + $free;
+        // $result = [];
+        // if ($plans->isNotEmpty()) {
+            // foreach ($plans as $p) {
+                // $base = (float) ($p->BASE_FROM ?? 0);
+                // $free = (float) ($p->FREE_ITEM1_QTY1 ?? 0);
+                // $sum  = $base + $free;
 
-                if ($unit_conf === 'BOX1') {
-                    $sum_inner  = $base * $converstion_unit;
-                    $free_inner = $free * $converstion_unit;
-                    $val        = $sum . '(' . $sum_inner . '+' . $free_inner . ')';
-                } else {
-                    $free_inner = $free;
-                    $val        = $sum . '(' . $base . '+' . $free . ')';
-                }
+                // if ($unit_conf === 'BOX1') {
+                    // $sum_inner  = $base * $converstion_unit;
+                    // $free_inner = $free * $converstion_unit;
+                    // $val        = $sum . '(' . $sum_inner . '+' . $free_inner . ')';
+                // } else {
+                    // $free_inner = $free;
+                    // $val        = $sum . '(' . $base . '+' . $free . ')';
+                // }
 
-                if ($qty <= $sum) {
-                    $result[$sum] = [
-                        'value'    => $val,
-                        'title'    => $sum,
-                        'free_qty' => $free_inner,
-                    ];
-                }
-            }
-            $result = array_values($result);
-        } else {
-            // No scheme — use PUDA size progression
-            $puda = DB::table('www_web_item_display')->where('ITEM_CODE', $item_code)->first();
-            $step = (float) ($puda->PUDA_SIZE ?? 1);
-            if ($step <= 0) $step = 1;
+                // if ($qty <= $sum) {
+                    // $result[$sum] = [
+                        // 'value'    => $val,
+                        // 'title'    => $sum,
+                        // 'free_qty' => $free_inner,
+                    // ];
+                // }
+            // }
+            // $result = array_values($result);
+        // } else {
+            // // No scheme — use PUDA size progression
+            // $puda = DB::table('www_web_item_display')->where('ITEM_CODE', $item_code)->first();
+            // $step = (float) ($puda->PUDA_SIZE ?? 1);
+            // if ($step <= 0) $step = 1;
 
-            $t = $qty;
-            for ($i = 0; $i < 10; $i++) {
-                $result[] = [
-                    'value'    => $t . '(' . $t . '+0)',
-                    'title'    => $t,
-                    'free_qty' => 0,
-                ];
-                $t += $step;
-            }
-        }
+            // $t = $qty;
+            // for ($i = 0; $i < 10; $i++) {
+                // $result[] = [
+                    // 'value'    => $t . '(' . $t . '+0)',
+                    // 'title'    => $t,
+                    // 'free_qty' => 0,
+                // ];
+                // $t += $step;
+            // }
+        // }
 
-        return response()->json([
-            'status'  => true,
-            'code'    => 200,
-            'message' => 'Found',
-            'data'    => ['result' => $result],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'code'    => 200,
+            // 'message' => 'Found',
+            // 'data'    => ['result' => $result],
+        // ]);
+    // }
 
     /* ============================================================
      |  13) COMMON DISCOUNT (private)
@@ -1774,76 +1774,76 @@ class QuickOrderController extends Controller
     }
 
     /* ---------- OTC ---------- */
-    public function otc(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'OTC report',
-            'data'    => $this->buildMarketReport('OTC', $dealer_code, $div_code),
-        ]);
-    }
+    // public function otc(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'OTC report',
+            // 'data'    => $this->buildMarketReport('OTC', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /* ---------- OT2 ---------- */
-    public function ot2(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'OT2 report',
-            'data'    => $this->buildMarketReport('OT2', $dealer_code, $div_code),
-        ]);
-    }
+    // public function ot2(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'OT2 report',
+            // 'data'    => $this->buildMarketReport('OT2', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /* ---------- Ethical (JPS) ---------- */
-    public function ethical(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'Ethical report',
-            'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
-        ]);
-    }
+    // public function ethical(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Ethical report',
+            // 'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /* ---------- FMCG ---------- */
-    public function fmcg(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'FMCG report',
-            'data'    => $this->buildMarketReport('FMC', $dealer_code, $div_code),
-        ]);
-    }
+    // public function fmcg(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'FMCG report',
+            // 'data'    => $this->buildMarketReport('FMC', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /* ---------- JPS ---------- */
-    public function jps(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'JPS report',
-            'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
-        ]);
-    }
+    // public function jps(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'JPS report',
+            // 'data'    => $this->buildMarketReport('JPS', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /* ---------- JP2 ---------- */
-    public function jp2(Request $request)
-    {
-        $ctx = $this->context($request);
-        [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
-        return response()->json([
-            'status'  => true,
-            'message' => 'JP2 report',
-            'data'    => $this->buildMarketReport('JP2', $dealer_code, $div_code),
-        ]);
-    }
+    // public function jp2(Request $request)
+    // {
+        // $ctx = $this->context($request);
+        // [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'JP2 report',
+            // 'data'    => $this->buildMarketReport('JP2', $dealer_code, $div_code),
+        // ]);
+    // }
 
     /**
      * Common market/category-wise target vs achievement data builder.
@@ -1938,179 +1938,179 @@ class QuickOrderController extends Controller
     }
 
     /* ---------- Sale Statement ---------- */
-    public function saleStatement(Request $request)
-    {
-        $ctx = $this->context($request);
+    // public function saleStatement(Request $request)
+    // {
+        // $ctx = $this->context($request);
 
-        $dms_division = DB::table('mktg_catg_mast')
-            ->where('flag', '=', 'Y')
-            ->pluck('MKTG_CATG_NAME', 'MKTG_CATG');
+        // $dms_division = DB::table('mktg_catg_mast')
+            // ->where('flag', '=', 'Y')
+            // ->pluck('MKTG_CATG_NAME', 'MKTG_CATG');
 
-        $locQ = DB::table('location_2')->where('status', 1);
-        if ($ctx['role_id'] != 1) {
-            $locQ->join('dealer_report_section_data', 'dealer_report_section_data.location_2', '=', 'location_2.id')
-                 ->where('dealer_id', $ctx['dealer_id']);
-        }
-        $locations = $locQ->groupBy('location_2.id')->pluck('location_2.name', 'location_2.id');
+        // $locQ = DB::table('location_2')->where('status', 1);
+        // if ($ctx['role_id'] != 1) {
+            // $locQ->join('dealer_report_section_data', 'dealer_report_section_data.location_2', '=', 'location_2.id')
+                 // ->where('dealer_id', $ctx['dealer_id']);
+        // }
+        // $locations = $locQ->groupBy('location_2.id')->pluck('location_2.name', 'location_2.id');
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Sale statement meta',
-            'data'    => [
-                'dms_division' => $dms_division,
-                'locations'    => $locations,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Sale statement meta',
+            // 'data'    => [
+                // 'dms_division' => $dms_division,
+                // 'locations'    => $locations,
+            // ],
+        // ]);
+    // }
 
-    public function saleStatementEthical(Request $request)
-    {
-        return $this->saleStatement($request);
-    }
+    // public function saleStatementEthical(Request $request)
+    // {
+        // return $this->saleStatement($request);
+    // }
 
     /* ---------- DMS to Tally report ---------- */
-    public function dmsToTally(Request $request)
-    {
-        $ctx        = $this->context($request);
-        $company_id = $ctx['company_id'];
-        $dealer_id  = $ctx['dealer_id'];
+    // public function dmsToTally(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
 
-        if (!$request->filled('date_range_picker')) {
-            return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
-        }
-        $parts     = explode(" -", $request->date_range_picker);
-        $from_date = date('Y-m-d', strtotime(trim($parts[0])));
-        $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
 
-        $q = DB::table('challan_order')
-            ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
-            ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
-            ->join('dealer',   'dealer.id',   '=', 'challan_order.ch_dealer_id')
-            ->select(
-                'ch_retailer_id as retailer_id',
-                'ch_date as challan_date',
-                'state_id_retailer',
-                'product_id',
-                'hsn_code',
-                'retailer.name as retailer_name',
-                'challan_order.ch_no as challan_id',
-                'dealer.state_id as state_id_dealer',
-                'product_rate', 'qty', 'free_qty',
-                'retailer.tin_no as gst_no',
-                'taxable_amt'
-            )
-            ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
-            ->where('retailer.company_id', $company_id)
-            ->where('dealer.company_id',   $company_id)
-            ->where('challan_order.ch_dealer_id', $dealer_id);
+        // $q = DB::table('challan_order')
+            // ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
+            // ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
+            // ->join('dealer',   'dealer.id',   '=', 'challan_order.ch_dealer_id')
+            // ->select(
+                // 'ch_retailer_id as retailer_id',
+                // 'ch_date as challan_date',
+                // 'state_id_retailer',
+                // 'product_id',
+                // 'hsn_code',
+                // 'retailer.name as retailer_name',
+                // 'challan_order.ch_no as challan_id',
+                // 'dealer.state_id as state_id_dealer',
+                // 'product_rate', 'qty', 'free_qty',
+                // 'retailer.tin_no as gst_no',
+                // 'taxable_amt'
+            // )
+            // ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('retailer.company_id', $company_id)
+            // ->where('dealer.company_id',   $company_id)
+            // ->where('challan_order.ch_dealer_id', $dealer_id);
 
-        if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
+        // if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Tally data',
-            'data'    => [
-                'main_data'    => $q->get(),
-                'states'       => DB::table('location_3')->where('company_id', $company_id)->where('status', 1)->pluck('name', 'id'),
-                'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Tally data',
+            // 'data'    => [
+                // 'main_data'    => $q->get(),
+                // 'states'       => DB::table('location_3')->where('company_id', $company_id)->where('status', 1)->pluck('name', 'id'),
+                // 'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
+            // ],
+        // ]);
+    // }
 
     /* ---------- Invoice Summary ---------- */
-    public function invoiceSummary(Request $request)
-    {
-        $ctx        = $this->context($request);
-        $company_id = $ctx['company_id'];
-        $dealer_id  = $ctx['dealer_id'];
+    // public function invoiceSummary(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
 
-        if (!$request->filled('date_range_picker')) {
-            return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
-        }
-        $parts     = explode(" -", $request->date_range_picker);
-        $from_date = date('Y-m-d', strtotime(trim($parts[0])));
-        $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
 
-        $q = DB::table('challan_order')
-            ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
-            ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
-            ->join('dealer_location_rate_list', 'dealer_location_rate_list.location_id', '=', 'retailer.location_id')
-            ->join('location_7', 'location_7.id', '=', 'dealer_location_rate_list.location_id')
-            ->join('location_6', 'location_7.location_6_id', '=', 'location_6.id')
-            ->join('location_5', 'location_6.location_5_id', '=', 'location_5.id')
-            ->join('location_4', 'location_5.location_4_id', '=', 'location_4.id')
-            ->select(
-                'ch_retailer_id as retailer_id',
-                'ch_date as challan_date',
-                'product_id',
-                'challan_order.ch_no as challan_number',
-                'challan_order.id as challan_id',
-                'retailer.name as retailer_name',
-                'ch_dealer_id as dealer_id',
-                'qty', 'taxable_amt'
-            )
-            ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
-            ->where('retailer.company_id', $company_id)
-            ->where('challan_order.ch_dealer_id', $dealer_id);
+        // $q = DB::table('challan_order')
+            // ->join('challan_order_details', 'challan_order_details.ch_id', '=', 'challan_order.id')
+            // ->join('retailer', 'retailer.id', '=', 'challan_order.ch_retailer_id')
+            // ->join('dealer_location_rate_list', 'dealer_location_rate_list.location_id', '=', 'retailer.location_id')
+            // ->join('location_7', 'location_7.id', '=', 'dealer_location_rate_list.location_id')
+            // ->join('location_6', 'location_7.location_6_id', '=', 'location_6.id')
+            // ->join('location_5', 'location_6.location_5_id', '=', 'location_5.id')
+            // ->join('location_4', 'location_5.location_4_id', '=', 'location_4.id')
+            // ->select(
+                // 'ch_retailer_id as retailer_id',
+                // 'ch_date as challan_date',
+                // 'product_id',
+                // 'challan_order.ch_no as challan_number',
+                // 'challan_order.id as challan_id',
+                // 'retailer.name as retailer_name',
+                // 'ch_dealer_id as dealer_id',
+                // 'qty', 'taxable_amt'
+            // )
+            // ->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('retailer.company_id', $company_id)
+            // ->where('challan_order.ch_dealer_id', $dealer_id);
 
-        if ($request->filled('location_4')) $q->whereIn('location_4.id', (array) $request->location_4);
-        if ($request->filled('location_5')) $q->whereIn('location_5.id', (array) $request->location_5);
-        if ($request->filled('location_6')) $q->whereIn('location_6.id', (array) $request->location_6);
+        // if ($request->filled('location_4')) $q->whereIn('location_4.id', (array) $request->location_4);
+        // if ($request->filled('location_5')) $q->whereIn('location_5.id', (array) $request->location_5);
+        // if ($request->filled('location_6')) $q->whereIn('location_6.id', (array) $request->location_6);
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Invoice summary',
-            'data'    => ['main_data' => $q->groupBy('challan_id')->get()],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Invoice summary',
+            // 'data'    => ['main_data' => $q->groupBy('challan_id')->get()],
+        // ]);
+    // }
 
     /* ---------- Purchase Report ---------- */
-    public function purchaseReport(Request $request)
-    {
-        $ctx        = $this->context($request);
-        $company_id = $ctx['company_id'];
-        $dealer_id  = $ctx['dealer_id'];
+    // public function purchaseReport(Request $request)
+    // {
+        // $ctx        = $this->context($request);
+        // $company_id = $ctx['company_id'];
+        // $dealer_id  = $ctx['dealer_id'];
 
-        if (!$request->filled('date_range_picker')) {
-            return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
-        }
-        $parts     = explode(" -", $request->date_range_picker);
-        $from_date = date('Y-m-d', strtotime(trim($parts[0])));
-        $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+        // if (!$request->filled('date_range_picker')) {
+            // return response()->json(['status' => false, 'message' => 'date_range_picker required'], 422);
+        // }
+        // $parts     = explode(" -", $request->date_range_picker);
+        // $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        // $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
 
-        $q = DB::table('demand_order')
-            ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
-            ->join('dealer_location_rate_list', 'dealer_location_rate_list.dealer_id', '=', 'demand_order.dealer_id')
-            ->join('retailer', 'retailer.location_id', '=', 'dealer_location_rate_list.location_id')
-            ->select(
-                'demand_order.order_id',
-                'demand_order_details.product_id',
-                'challan_no', 'order_date',
-                'retailer.name as retailer_name',
-                'retailer.tin_no as gst_no',
-                'retailer.location_id as beat_id',
-                'quantity', 'free_qty', 'pr_rate', 'total_rs'
-            )
-            ->whereRaw("DATE_FORMAT(order_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(order_date, '%Y-%m-%d') <= '$to_date'")
-            ->where('demand_order.dealer_id', $dealer_id)
-            ->where('dealer_location_rate_list.dealer_id', $dealer_id)
-            ->where('dealer_location_rate_list.company_id', $company_id)
-            ->where('retailer.company_id', $company_id)
-            ->where('demand_order.company_id', $company_id);
+        // $q = DB::table('demand_order')
+            // ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+            // ->join('dealer_location_rate_list', 'dealer_location_rate_list.dealer_id', '=', 'demand_order.dealer_id')
+            // ->join('retailer', 'retailer.location_id', '=', 'dealer_location_rate_list.location_id')
+            // ->select(
+                // 'demand_order.order_id',
+                // 'demand_order_details.product_id',
+                // 'challan_no', 'order_date',
+                // 'retailer.name as retailer_name',
+                // 'retailer.tin_no as gst_no',
+                // 'retailer.location_id as beat_id',
+                // 'quantity', 'free_qty', 'pr_rate', 'total_rs'
+            // )
+            // ->whereRaw("DATE_FORMAT(order_date, '%Y-%m-%d') >= '$from_date' AND DATE_FORMAT(order_date, '%Y-%m-%d') <= '$to_date'")
+            // ->where('demand_order.dealer_id', $dealer_id)
+            // ->where('dealer_location_rate_list.dealer_id', $dealer_id)
+            // ->where('dealer_location_rate_list.company_id', $company_id)
+            // ->where('retailer.company_id', $company_id)
+            // ->where('demand_order.company_id', $company_id);
 
-        if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
+        // if ($request->filled('retailer')) $q->whereIn('retailer.id', (array) $request->retailer);
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Purchase report',
-            'data'    => [
-                'main_data'    => $q->get(),
-                'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Purchase report',
+            // 'data'    => [
+                // 'main_data'    => $q->get(),
+                // 'product_name' => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'product_gst'  => DB::table('catalog_product')->where('status', 1)->where('company_id', $company_id)->pluck('gst_percent', 'id'),
+            // ],
+        // ]);
+    // }
 //---Dealer Dashboard
 public function dealerDashboard(Request $request)
 {
@@ -2161,31 +2161,31 @@ public function dealerDashboard(Request $request)
 }
 
     /* ---------- Common Report dispatcher ---------- */
-    public function commonReportSection(Request $request)
-    {
-        $request->validate(['report_name' => 'required|string']);
+    // public function commonReportSection(Request $request)
+    // {
+        // $request->validate(['report_name' => 'required|string']);
 
-        $map = [
-            'ss_van_sales_report'        => 'ss_van_sales_report_new',
-            'retailer_ledger_index'      => 'retailer_ledger_ajax',
-            'retailer_wise_sales_index'  => 'retailer_wise_sales_ajax',
-            'van_sale_index'             => 'van_sale_ajax',
-            'van_settlement_index'       => 'van_settlement_ajax',
-            'db_sales_index'             => 'db_sales_ajax',
-            'db_van_summary_index'       => 'db_van_summary_ajax',
-            'retailer-wise-index-new'    => 'retailer-wise-new-ajax',
-            'DisplayClaimReport'         => 'DgrClaimAjax',
-        ];
+        // $map = [
+            // 'ss_van_sales_report'        => 'ss_van_sales_report_new',
+            // 'retailer_ledger_index'      => 'retailer_ledger_ajax',
+            // 'retailer_wise_sales_index'  => 'retailer_wise_sales_ajax',
+            // 'van_sale_index'             => 'van_sale_ajax',
+            // 'van_settlement_index'       => 'van_settlement_ajax',
+            // 'db_sales_index'             => 'db_sales_ajax',
+            // 'db_van_summary_index'       => 'db_van_summary_ajax',
+            // 'retailer-wise-index-new'    => 'retailer-wise-new-ajax',
+            // 'DisplayClaimReport'         => 'DgrClaimAjax',
+        // ];
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Common report',
-            'data'    => [
-                'ajax_report_name' => $map[$request->report_name] ?? null,
-                'report_name'      => $request->report_name,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Common report',
+            // 'data'    => [
+                // 'ajax_report_name' => $map[$request->report_name] ?? null,
+                // 'report_name'      => $request->report_name,
+            // ],
+        // ]);
+    // }
 
     /* ============================================================
      |  15) CSV FORMAT DOWNLOADS
@@ -2198,10 +2198,10 @@ public function dealerDashboard(Request $request)
         }, 'orderFormat.csv', ['Content-Type' => 'text/csv']);
     }
 
-    public function dmsChallanFormat()
-    {
-        return response()->streamDownload(function () {
-            echo "Date,Order Id,Retailer Id,Retailer Name,User Id,User Name,Product Id,Product Name,Quantity,Rate,Direct Invoice(1)/Through SFA(0)\n";
-        }, 'DMSchallanFormat.csv', ['Content-Type' => 'text/csv']);
-    }
+    // public function dmsChallanFormat()
+    // {
+        // return response()->streamDownload(function () {
+            // echo "Date,Order Id,Retailer Id,Retailer Name,User Id,User Name,Product Id,Product Name,Quantity,Rate,Direct Invoice(1)/Through SFA(0)\n";
+        // }, 'DMSchallanFormat.csv', ['Content-Type' => 'text/csv']);
+    // }
 }

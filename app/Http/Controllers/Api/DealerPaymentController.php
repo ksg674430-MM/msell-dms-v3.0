@@ -185,7 +185,7 @@ class DealerPaymentController extends Controller
             return response()->json([
                 'status'   => false,
                 'message'  => 'Old payment save failed',
-                'myreason' => $e->getMessage(),
+                'myreason' => safe_error_message($e),
             ], 500);
         }
     }
@@ -521,7 +521,7 @@ class DealerPaymentController extends Controller
             return response()->json([
                 'status'   => false,
                 'message'  => 'Payment save failed',
-                'myreason' => $e->getMessage(),
+                'myreason' => safe_error_message($e),
             ], 500);
         }
     }
@@ -530,237 +530,237 @@ class DealerPaymentController extends Controller
      |  CHALLAN-WISE PAYMENT (Reports)
      | ========================================================= */
 
-    /**
-     * Challan-wise payment list (Pending/Paid status).
-     * Mirrors dealer_sale::get_payment_list().
-     */
-    public function challanPaymentList(Request $request): JsonResponse
-    {
-        $ctx       = $this->context($request);
-        $dealer_id = $ctx['dealer_id'];
+    // /**
+     // * Challan-wise payment list (Pending/Paid status).
+     // * Mirrors dealer_sale::get_payment_list().
+     // */
+    // public function challanPaymentList(Request $request): JsonResponse
+    // {
+        // $ctx       = $this->context($request);
+        // $dealer_id = $ctx['dealer_id'];
 
-        $perPage = (int) ($request->perpage ?? 10);
+        // $perPage = (int) ($request->perpage ?? 10);
 
-        $query = DB::table('challan_order')
-            ->select(
-                'challan_order.*',
-                'challan_order.id as ch_id',
-                DB::raw("IF(payment_status = 0, 'Pending', 'Paid') as payment"),
-                DB::raw("DATE_FORMAT(ch_date, '%Y-%m-%d') as ch_date")
-            )
-            ->where('ch_dealer_id', $dealer_id);
+        // $query = DB::table('challan_order')
+            // ->select(
+                // 'challan_order.*',
+                // 'challan_order.id as ch_id',
+                // DB::raw("IF(payment_status = 0, 'Pending', 'Paid') as payment"),
+                // DB::raw("DATE_FORMAT(ch_date, '%Y-%m-%d') as ch_date")
+            // )
+            // ->where('ch_dealer_id', $dealer_id);
 
-        if ($request->filled('start')) {
-            $query->whereDate('ch_date', '>=', $request->start);
-        }
-        if ($request->filled('end')) {
-            $query->whereDate('ch_date', '<=', $request->end);
-        }
-        if ($request->filled('retailer_id')) {
-            $query->where('ch_retailer_id', $request->retailer_id);
-        }
-        if ($request->filled('ch_no')) {
-            $query->where('ch_no', 'LIKE', '%' . $request->ch_no . '%');
-        }
-        if ($request->filled('payment')) {
-            if ($request->payment === 'paid') {
-                $query->where('payment_status', '1');
-            } elseif ($request->payment === 'pending') {
-                $query->where('payment_status', '!=', '1');
-            }
-        }
+        // if ($request->filled('start')) {
+            // $query->whereDate('ch_date', '>=', $request->start);
+        // }
+        // if ($request->filled('end')) {
+            // $query->whereDate('ch_date', '<=', $request->end);
+        // }
+        // if ($request->filled('retailer_id')) {
+            // $query->where('ch_retailer_id', $request->retailer_id);
+        // }
+        // if ($request->filled('ch_no')) {
+            // $query->where('ch_no', 'LIKE', '%' . $request->ch_no . '%');
+        // }
+        // if ($request->filled('payment')) {
+            // if ($request->payment === 'paid') {
+                // $query->where('payment_status', '1');
+            // } elseif ($request->payment === 'pending') {
+                // $query->where('payment_status', '!=', '1');
+            // }
+        // }
 
-        $records = $query->orderBy('challan_order.ch_no', 'ASC')->paginate($perPage);
+        // $records = $query->orderBy('challan_order.ch_no', 'ASC')->paginate($perPage);
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Challan payment list',
-            'data'    => [
-                'records' => $records,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Challan payment list',
+            // 'data'    => [
+                // 'records' => $records,
+            // ],
+        // ]);
+    // }
 
-    /**
-     * Paid challan list (challans having a payment entry).
-     * Mirrors dealer_sale::get_paid_challan_list().
-     */
-    public function paidChallanList(Request $request): JsonResponse
-{
-    $ctx       = $this->context($request);
-    $dealer_id = $ctx['dealer_id'];
+    // /**
+     // * Paid challan list (challans having a payment entry).
+     // * Mirrors dealer_sale::get_paid_challan_list().
+     // */
+    // public function paidChallanList(Request $request): JsonResponse
+// {
+    // $ctx       = $this->context($request);
+    // $dealer_id = $ctx['dealer_id'];
 
-    $perPage = (int) ($request->perpage ?? 10);
+    // $perPage = (int) ($request->perpage ?? 10);
 
-    $query = DB::table('challan_order')
-        ->join('payment_collection', 'payment_collection.challan_id', '=', 'challan_order.id')
-        ->select(
-            'challan_order.ch_no',
-            'challan_order.payment_status',
-            'challan_order.amount',
-            'challan_order.remaining',
-            'challan_order.ch_retailer_id',
-            'challan_order.id as chln_id',
-            DB::raw("DATE_FORMAT(challan_order.ch_date, '%d-%b-%Y') as ch_date"),
-            DB::raw("DATE_FORMAT(payment_collection.pay_date_time, '%Y-%m-%d') as payment_date"),
-            'payment_collection.total_amount as paid_amount',
-            'payment_collection.reciept_no'
-        )
-        ->where('challan_order.ch_dealer_id', $dealer_id);
+    // $query = DB::table('challan_order')
+        // ->join('payment_collection', 'payment_collection.challan_id', '=', 'challan_order.id')
+        // ->select(
+            // 'challan_order.ch_no',
+            // 'challan_order.payment_status',
+            // 'challan_order.amount',
+            // 'challan_order.remaining',
+            // 'challan_order.ch_retailer_id',
+            // 'challan_order.id as chln_id',
+            // DB::raw("DATE_FORMAT(challan_order.ch_date, '%d-%b-%Y') as ch_date"),
+            // DB::raw("DATE_FORMAT(payment_collection.pay_date_time, '%Y-%m-%d') as payment_date"),
+            // 'payment_collection.total_amount as paid_amount',
+            // 'payment_collection.reciept_no'
+        // )
+        // ->where('challan_order.ch_dealer_id', $dealer_id);
 
-    if ($request->filled('start')) {
-        $query->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= ?", [$request->start]);
-    }
-    if ($request->filled('end')) {
-        $query->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= ?", [$request->end]);
-    }
-    if ($request->filled('retailer_id')) {
-        $query->where('challan_order.ch_retailer_id', $request->retailer_id);
-    }
+    // if ($request->filled('start')) {
+        // $query->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') >= ?", [$request->start]);
+    // }
+    // if ($request->filled('end')) {
+        // $query->whereRaw("DATE_FORMAT(challan_order.ch_date, '%Y-%m-%d') <= ?", [$request->end]);
+    // }
+    // if ($request->filled('retailer_id')) {
+        // $query->where('challan_order.ch_retailer_id', $request->retailer_id);
+    // }
 
-    $paginator = $query->orderBy('payment_collection.pay_date_time', 'DESC')->paginate($perPage);
+    // $paginator = $query->orderBy('payment_collection.pay_date_time', 'DESC')->paginate($perPage);
 
-    return response()->json([
-        'status'  => true,
-        'message' => 'Paid challan list',
-        'data'    => [
-            'records' => $paginator->items(),
-            'meta'    => [
-                'current_page' => $paginator->currentPage(),
-                'per_page'     => $paginator->perPage(),
-                'total'        => $paginator->total(),
-                'last_page'    => $paginator->lastPage(),
-                'from'         => $paginator->firstItem(),
-                'to'           => $paginator->lastItem(),
-            ],
-        ],
-    ]);
-}
+    // return response()->json([
+        // 'status'  => true,
+        // 'message' => 'Paid challan list',
+        // 'data'    => [
+            // 'records' => $paginator->items(),
+            // 'meta'    => [
+                // 'current_page' => $paginator->currentPage(),
+                // 'per_page'     => $paginator->perPage(),
+                // 'total'        => $paginator->total(),
+                // 'last_page'    => $paginator->lastPage(),
+                // 'from'         => $paginator->firstItem(),
+                // 'to'           => $paginator->lastItem(),
+            // ],
+        // ],
+    // ]);
+// }
 
 
-/**
- * Legacy payment save — comma-separated challan_id, auto-distribute.
- * Mirrors payment::save_payment().
- */
-public function paymentCollectionSaveLegacy(Request $request): JsonResponse
-{
-    $ctx        = $this->context($request);
-    $dealer_id  = $ctx['dealer_id'];
+// /**
+ // * Legacy payment save — comma-separated challan_id, auto-distribute.
+ // * Mirrors payment::save_payment().
+ // */
+// public function paymentCollectionSaveLegacy(Request $request): JsonResponse
+// {
+    // $ctx        = $this->context($request);
+    // $dealer_id  = $ctx['dealer_id'];
 
-    $request->validate([
-        'retailer_id'   => 'required',
-        'challan_id'    => 'required',
-        'total_amount'  => 'required|numeric|min:0',
-        'pay_mode'      => 'required',
-        'reciept_no'    => 'required',
-        'bank_name'     => 'nullable',
-        'chq_no'        => 'nullable',
-        'chq_date'      => 'nullable',
-        'txn_no'        => 'nullable',
-        'txn_date'      => 'nullable',
-        'Remark'        => 'nullable',
-    ]);
+    // $request->validate([
+        // 'retailer_id'   => 'required',
+        // 'challan_id'    => 'required',
+        // 'total_amount'  => 'required|numeric|min:0',
+        // 'pay_mode'      => 'required',
+        // 'reciept_no'    => 'required',
+        // 'bank_name'     => 'nullable',
+        // 'chq_no'        => 'nullable',
+        // 'chq_date'      => 'nullable',
+        // 'txn_no'        => 'nullable',
+        // 'txn_date'      => 'nullable',
+        // 'Remark'        => 'nullable',
+    // ]);
 
-    $chq_no   = $request->chq_no   ?: $request->txn_no;
-    $chq_date = $request->chq_date ?: $request->txn_date;
+    // $chq_no   = $request->chq_no   ?: $request->txn_no;
+    // $chq_date = $request->chq_date ?: $request->txn_date;
 
-    $challan_id_str = $request->challan_id;               // "101,102"
-    $challan_ids    = array_filter(explode(',', $challan_id_str));
-    $amt            = (float) $request->total_amount;
+    // $challan_id_str = $request->challan_id;               // "101,102"
+    // $challan_ids    = array_filter(explode(',', $challan_id_str));
+    // $amt            = (float) $request->total_amount;
 
-    $id = $dealer_id . date('Ymdhis');
+    // $id = $dealer_id . date('Ymdhis');
 
-    DB::beginTransaction();
+    // DB::beginTransaction();
 
-    try {
-        // 1. Insert payment_collection (one row, comma-separated challan_id)
-        DB::table('payment_collection')->insert([
-            'dealer_id'     => $dealer_id,
-            'retailer_id'   => $request->retailer_id,
-            'challan_id'    => implode(',', $challan_ids),
-            'total_amount'  => $amt,
-            'reciept_no'    => $request->reciept_no,
-            'pay_mode'      => $request->pay_mode,
-            'bank_name'     => $request->bank_name,
-            'chq_no'        => $chq_no,
-            'chq_date'      => $chq_date,
-            'Remark'        => $request->Remark,
-            'pay_date_time' => now(),
-        ]);
+    // try {
+        // // 1. Insert payment_collection (one row, comma-separated challan_id)
+        // DB::table('payment_collection')->insert([
+            // 'dealer_id'     => $dealer_id,
+            // 'retailer_id'   => $request->retailer_id,
+            // 'challan_id'    => implode(',', $challan_ids),
+            // 'total_amount'  => $amt,
+            // 'reciept_no'    => $request->reciept_no,
+            // 'pay_mode'      => $request->pay_mode,
+            // 'bank_name'     => $request->bank_name,
+            // 'chq_no'        => $chq_no,
+            // 'chq_date'      => $chq_date,
+            // 'Remark'        => $request->Remark,
+            // 'pay_date_time' => now(),
+        // ]);
 
-        // 2. First id might be old_payment_dues — reduce it first
-        $first_id = $challan_ids[0] ?? null;
+        // // 2. First id might be old_payment_dues — reduce it first
+        // $first_id = $challan_ids[0] ?? null;
 
-        if ($first_id) {
-            $old = DB::table('old_payment_dues')->where('id', $first_id)->first();
+        // if ($first_id) {
+            // $old = DB::table('old_payment_dues')->where('id', $first_id)->first();
 
-            if ($old) {
-                $old_remain = (float) $old->remaining;
+            // if ($old) {
+                // $old_remain = (float) $old->remaining;
 
-                if ($amt >= $old_remain) {
-                    $amt -= $old_remain;
-                    DB::table('old_payment_dues')
-                        ->where('id', $first_id)
-                        ->update(['remaining' => 0, 'payment_status' => '1']);
-                } elseif ($amt > 0) {
-                    DB::table('old_payment_dues')
-                        ->where('id', $first_id)
-                        ->update(['remaining' => $old_remain - $amt]);
-                    $amt = 0;
-                }
-            }
-        }
+                // if ($amt >= $old_remain) {
+                    // $amt -= $old_remain;
+                    // DB::table('old_payment_dues')
+                        // ->where('id', $first_id)
+                        // ->update(['remaining' => 0, 'payment_status' => '1']);
+                // } elseif ($amt > 0) {
+                    // DB::table('old_payment_dues')
+                        // ->where('id', $first_id)
+                        // ->update(['remaining' => $old_remain - $amt]);
+                    // $amt = 0;
+                // }
+            // }
+        // }
 
-        // 3. Distribute remaining amount across challan_order rows
-        if ($amt > 0) {
-            foreach ($challan_ids as $challan_id) {
-                $challan = DB::table('challan_order')
-                    ->where('id', $challan_id)
-                    ->orderBy('auto', 'ASC')
-                    ->first();
+        // // 3. Distribute remaining amount across challan_order rows
+        // if ($amt > 0) {
+            // foreach ($challan_ids as $challan_id) {
+                // $challan = DB::table('challan_order')
+                    // ->where('id', $challan_id)
+                    // ->orderBy('auto', 'ASC')
+                    // ->first();
 
-                if (!$challan) {
-                    continue;
-                }
+                // if (!$challan) {
+                    // continue;
+                // }
 
-                $remain = (float) $challan->remaining;
+                // $remain = (float) $challan->remaining;
 
-                if ($amt >= $remain) {
-                    $amt -= $remain;
-                    DB::table('challan_order')
-                        ->where('id', $challan_id)
-                        ->update(['remaining' => 0, 'payment_status' => '1']);
-                } elseif ($amt > 0) {
-                    DB::table('challan_order')
-                        ->where('id', $challan_id)
-                        ->update([
-                            'remaining'      => $remain - $amt,
-                            'payment_status' => '2',
-                        ]);
-                    $amt = 0;
-                }
+                // if ($amt >= $remain) {
+                    // $amt -= $remain;
+                    // DB::table('challan_order')
+                        // ->where('id', $challan_id)
+                        // ->update(['remaining' => 0, 'payment_status' => '1']);
+                // } elseif ($amt > 0) {
+                    // DB::table('challan_order')
+                        // ->where('id', $challan_id)
+                        // ->update([
+                            // 'remaining'      => $remain - $amt,
+                            // 'payment_status' => '2',
+                        // ]);
+                    // $amt = 0;
+                // }
 
-                if ($amt <= 0) {
-                    break;
-                }
-            }
-        }
+                // if ($amt <= 0) {
+                    // break;
+                // }
+            // }
+        // }
 
-        DB::commit();
+        // DB::commit();
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Payment successfully saved',
-            'rId'     => $id,
-        ]);
-    } catch (\Exception $e) {
-        DB::rollBack();
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Payment successfully saved',
+            // 'rId'     => $id,
+        // ]);
+    // } catch (\Exception $e) {
+        // DB::rollBack();
 
-        return response()->json([
-            'status'   => false,
-            'message'  => 'Payment save failed',
-            'myreason' => $e->getMessage(),
-        ], 500);
-    }
-}
+        // return response()->json([
+            // 'status'   => false,
+            // 'message'  => 'Payment save failed',
+            // 'myreason' => $e->getMessage(),
+        // ], 500);
+    // }
+// }
 }

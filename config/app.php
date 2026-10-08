@@ -14,6 +14,8 @@ return [
 
     'asset_url' => env('ASSET_URL'),
 
+    'legacy_public_url' => env('LEGACY_PUBLIC_URL', 'https://demo.msell.in/public'),
+
     'timezone' => 'UTC',
 
     'locale' => 'en',

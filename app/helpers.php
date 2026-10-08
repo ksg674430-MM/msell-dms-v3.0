@@ -102,3 +102,28 @@ if (!function_exists('h1')) {
         echo '<h1>' . htmlspecialchars((string) $data) . '</h1>';
     }
 }
+
+if (!function_exists('legacy_public_url')) {
+    function legacy_public_url(?string $path): ?string
+    {
+        $path = trim((string) $path);
+        if ($path === '' || strtoupper($path) === 'NA') {
+            return null;
+        }
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
+        return rtrim((string) config('app.legacy_public_url'), '/') . '/' . ltrim($path, '/');
+    }
+}
+
+if (!function_exists('safe_error_message')) {
+    function safe_error_message(\Throwable $e): string
+    {
+        if ($e instanceof \Illuminate\Database\QueryException || $e instanceof \PDOException || $e instanceof \Error) {
+            report($e);
+            return 'A server error occurred. Please try again.';
+        }
+        return $e->getMessage();
+    }
+}

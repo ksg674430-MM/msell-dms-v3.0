@@ -69,31 +69,31 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'products' => $rows]);
     }
 
-    /**
-     * GET /api/thresholds/{id}
-     */
-    public function show(Request $request, int $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // /**
+     // * GET /api/thresholds/{id}
+     // */
+    // public function show(Request $request, int $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        // ✅ FIX #3: no company_id filter — legacy rows might have different company
-        $row = DB::selectOne(
-            "SELECT t.id, t.product_id, t.qty, t.max_qty, t.retailer_id,
-                    cp.name AS product_name, cp.itemcode
-               FROM threshold t
-               LEFT JOIN catalog_product cp ON cp.id = t.product_id
-              WHERE t.id = ? AND t.dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
+        // // ✅ FIX #3: no company_id filter — legacy rows might have different company
+        // $row = DB::selectOne(
+            // "SELECT t.id, t.product_id, t.qty, t.max_qty, t.retailer_id,
+                    // cp.name AS product_name, cp.itemcode
+               // FROM threshold t
+               // LEFT JOIN catalog_product cp ON cp.id = t.product_id
+              // WHERE t.id = ? AND t.dealer_id = ?
+              // LIMIT 1",
+            // [$id, $dealerId]
+        // );
 
-        if (!$row) {
-            return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
-        }
+        // if (!$row) {
+            // return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
+        // }
 
-        return response()->json(['status' => true, 'row' => $row]);
-    }
+        // return response()->json(['status' => true, 'row' => $row]);
+    // }
 
     /**
      * POST /api/thresholds
@@ -234,26 +234,26 @@ class ThresholdController extends Controller
         return response()->json(['status' => true, 'message' => 'Threshold updated successfully.']);
     }
 
-    /**
-     * DELETE /api/thresholds/{id}
-     */
-    public function destroy(Request $request, int $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // /**
+     // * DELETE /api/thresholds/{id}
+     // */
+    // public function destroy(Request $request, int $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        // ✅ FIX #3: dealer only
-        $deleted = DB::table('threshold')
-            ->where('id', $id)
-            ->where('dealer_id', $dealerId)
-            ->delete();
+        // // ✅ FIX #3: dealer only
+        // $deleted = DB::table('threshold')
+            // ->where('id', $id)
+            // ->where('dealer_id', $dealerId)
+            // ->delete();
 
-        if (!$deleted) {
-            return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
-        }
+        // if (!$deleted) {
+            // return response()->json(['status' => false, 'message' => 'Threshold not found.'], 404);
+        // }
 
-        return response()->json(['status' => true, 'message' => 'Threshold deleted successfully.']);
-    }
+        // return response()->json(['status' => true, 'message' => 'Threshold deleted successfully.']);
+    // }
 
     public function lowStock(Request $request): JsonResponse
     {

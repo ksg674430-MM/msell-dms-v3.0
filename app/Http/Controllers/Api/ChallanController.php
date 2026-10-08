@@ -18,102 +18,102 @@ class ChallanController extends Controller
      |  GET /api/challans
      |  Query: from_date, to_date, ch_no, retailer_id, page
      | ========================================================= */
-    public function index(Request $request): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // public function index(Request $request): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        $where    = ["co.ch_dealer_id = ?"];
-        $bindings = [$dealerId];
+        // $where    = ["co.ch_dealer_id = ?"];
+        // $bindings = [$dealerId];
 
-        if ($from = $request->input('from_date')) {
-            $where[]    = "DATE(co.ch_date) >= ?";
-            $bindings[] = $this->parseDate($from) ?: $from;
-        }
-        if ($to = $request->input('to_date')) {
-            $where[]    = "DATE(co.ch_date) <= ?";
-            $bindings[] = $this->parseDate($to) ?: $to;
-        }
-        if ($chNo = $request->input('ch_no')) {
-            $where[]    = "co.ch_no LIKE ?";
-            $bindings[] = "%{$chNo}%";
-        }
-        if ($retailerId = $request->input('retailer_id')) {
-            $where[]    = "co.ch_retailer_id = ?";
-            $bindings[] = (int) $retailerId;
-        }
+        // if ($from = $request->input('from_date')) {
+            // $where[]    = "DATE(co.ch_date) >= ?";
+            // $bindings[] = $this->parseDate($from) ?: $from;
+        // }
+        // if ($to = $request->input('to_date')) {
+            // $where[]    = "DATE(co.ch_date) <= ?";
+            // $bindings[] = $this->parseDate($to) ?: $to;
+        // }
+        // if ($chNo = $request->input('ch_no')) {
+            // $where[]    = "co.ch_no LIKE ?";
+            // $bindings[] = "%{$chNo}%";
+        // }
+        // if ($retailerId = $request->input('retailer_id')) {
+            // $where[]    = "co.ch_retailer_id = ?";
+            // $bindings[] = (int) $retailerId;
+        // }
 
-        $whereSql = implode(' AND ', $where);
+        // $whereSql = implode(' AND ', $where);
 
-        $rows = DB::select(
-            "SELECT co.auto, co.id, co.ch_no, co.ch_created_by, co.ch_dealer_id,
-                    co.ch_retailer_id, co.ch_date, co.company_id, co.dispatch_status,
-                    co.sesId, co.remark, co.invoice_type, co.payment_status,
-                    co.discount_per, co.discount_amt, co.amount, co.remaining,
-                    r.name AS retailer_name,
-                    d.name AS dealer_name
-               FROM challan_order co
-               LEFT JOIN retailer r ON r.id = co.ch_retailer_id
-               LEFT JOIN dealer   d ON d.id = co.ch_dealer_id
-              WHERE {$whereSql}
-              ORDER BY co.auto DESC
-              LIMIT 200",
-            $bindings
-        );
+        // $rows = DB::select(
+            // "SELECT co.auto, co.id, co.ch_no, co.ch_created_by, co.ch_dealer_id,
+                    // co.ch_retailer_id, co.ch_date, co.company_id, co.dispatch_status,
+                    // co.sesId, co.remark, co.invoice_type, co.payment_status,
+                    // co.discount_per, co.discount_amt, co.amount, co.remaining,
+                    // r.name AS retailer_name,
+                    // d.name AS dealer_name
+               // FROM challan_order co
+               // LEFT JOIN retailer r ON r.id = co.ch_retailer_id
+               // LEFT JOIN dealer   d ON d.id = co.ch_dealer_id
+              // WHERE {$whereSql}
+              // ORDER BY co.auto DESC
+              // LIMIT 200",
+            // $bindings
+        // );
 
-        return response()->json([
-            'status' => true,
-            'rows'   => $rows,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'rows'   => $rows,
+        // ]);
+    // }
 
     /* =========================================================
      |  SHOW ONE
      |  GET /api/challans/{id}
      | ========================================================= */
-    public function show(Request $request, $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // public function show(Request $request, $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        $header = DB::selectOne(
-            "SELECT co.*, r.name AS retailer_name, d.name AS dealer_name
-               FROM challan_order co
-               LEFT JOIN retailer r ON r.id = co.ch_retailer_id
-               LEFT JOIN dealer   d ON d.id = co.ch_dealer_id
-              WHERE co.id = ? AND co.ch_dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
+        // $header = DB::selectOne(
+            // "SELECT co.*, r.name AS retailer_name, d.name AS dealer_name
+               // FROM challan_order co
+               // LEFT JOIN retailer r ON r.id = co.ch_retailer_id
+               // LEFT JOIN dealer   d ON d.id = co.ch_dealer_id
+              // WHERE co.id = ? AND co.ch_dealer_id = ?
+              // LIMIT 1",
+            // [$id, $dealerId]
+        // );
 
-        if (!$header) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Challan not found.',
-            ], 404);
-        }
+        // if (!$header) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Challan not found.',
+            // ], 404);
+        // }
 
-        // HSN is stored per line; fall back to catalog_product when blank
-        $items = DB::select(
-            "SELECT cod.*,
-                    COALESCE(cp.name, cv.product_name)  AS product_name,
-                    COALESCE(cp.itemcode, cv.itemcode)  AS itemcode,
-                    cp.quantity_per_case,
-                    COALESCE(cod.hsn_code, cp.hsn_code) AS hsn_code_resolved
-               FROM challan_order_details cod
-               LEFT JOIN catalog_product cp ON cp.id = cod.product_id
-               LEFT JOIN catalog_view    cv ON cv.product_id = cod.product_id
-              WHERE cod.ch_id = ?
-              ORDER BY cod.id ASC",
-            [$id]
-        );
+        // // HSN is stored per line; fall back to catalog_product when blank
+        // $items = DB::select(
+            // "SELECT cod.*,
+                    // COALESCE(cp.name, cv.product_name)  AS product_name,
+                    // COALESCE(cp.itemcode, cv.itemcode)  AS itemcode,
+                    // cp.quantity_per_case,
+                    // COALESCE(cod.hsn_code, cp.hsn_code) AS hsn_code_resolved
+               // FROM challan_order_details cod
+               // LEFT JOIN catalog_product cp ON cp.id = cod.product_id
+               // LEFT JOIN catalog_view    cv ON cv.product_id = cod.product_id
+              // WHERE cod.ch_id = ?
+              // ORDER BY cod.id ASC",
+            // [$id]
+        // );
 
-        return response()->json([
-            'status' => true,
-            'header' => $header,
-            'items'  => $items,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'header' => $header,
+            // 'items'  => $items,
+        // ]);
+    // }
 
     /* =========================================================
      |  NEXT NUMBER
@@ -492,13 +492,13 @@ class ChallanController extends Controller
             DB::rollBack();
             return response()->json([
                 'status'  => false,
-                'message' => $e->getMessage(),
+                'message' => safe_error_message($e),
             ], 422);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
                 'status'  => false,
-                'message' => 'Challan could not be saved: ' . $e->getMessage(),
+                'message' => 'Challan could not be saved: ' . safe_error_message($e),
             ], 500);
         }
     }
@@ -508,230 +508,230 @@ class ChallanController extends Controller
      |  POST /api/challans/from-orders
      |  Builds challans from one or more sales orders.
      | ========================================================= */
-    public function fromOrders(Request $request): JsonResponse
-    {
-        $v = Validator::make($request->all(), [
-            'ch_date'                     => ['required', 'string'],
-            'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'orders'                      => ['required', 'array', 'min:1'],
-            'orders.*.order_id'           => ['required', 'string'],
-            'orders.*.items'              => ['required', 'array', 'min:1'],
-            'orders.*.items.*.product_id' => ['required', 'integer'],
-            'orders.*.items.*.qty'        => ['required', 'numeric', 'min:0.01'],
-            'orders.*.items.*.rate'       => ['required', 'numeric', 'min:0'],
-        ]);
-        if ($v->fails()) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Validation failed.',
-                'errors'  => $v->errors(),
-            ], 422);
-        }
+    // public function fromOrders(Request $request): JsonResponse
+    // {
+        // $v = Validator::make($request->all(), [
+            // 'ch_date'                     => ['required', 'string'],
+            // 'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
+            // 'orders'                      => ['required', 'array', 'min:1'],
+            // 'orders.*.order_id'           => ['required', 'string'],
+            // 'orders.*.items'              => ['required', 'array', 'min:1'],
+            // 'orders.*.items.*.product_id' => ['required', 'integer'],
+            // 'orders.*.items.*.qty'        => ['required', 'numeric', 'min:0.01'],
+            // 'orders.*.items.*.rate'       => ['required', 'numeric', 'min:0'],
+        // ]);
+        // if ($v->fails()) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Validation failed.',
+                // 'errors'  => $v->errors(),
+            // ], 422);
+        // }
 
-        $user      = $request->user();
-        $dpId      = (int) $user->getKey();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) $user->company_id;
+        // $user      = $request->user();
+        // $dpId      = (int) $user->getKey();
+        // $dealerId  = (int) $user->dealer_id;
+        // $companyId = (int) $user->company_id;
 
-        $chDate = $this->parseDate($request->input('ch_date'));
-        if (!$chDate) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Invalid ch_date. Use dd/mm/yyyy or yyyy-mm-dd.',
-            ], 422);
-        }
+        // $chDate = $this->parseDate($request->input('ch_date'));
+        // if (!$chDate) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Invalid ch_date. Use dd/mm/yyyy or yyyy-mm-dd.',
+            // ], 422);
+        // }
 
-        $discountPer = (float) $request->input('discount_per', 0);
+        // $discountPer = (float) $request->input('discount_per', 0);
 
-        $sessionYear = DB::selectOne("SELECT sesId FROM session_year ORDER BY sesId DESC LIMIT 1");
-        $sesId       = (int) ($sessionYear->sesId ?? 0);
+        // $sessionYear = DB::selectOne("SELECT sesId FROM session_year ORDER BY sesId DESC LIMIT 1");
+        // $sesId       = (int) ($sessionYear->sesId ?? 0);
 
-        $created = [];
-        $failed  = [];
+        // $created = [];
+        // $failed  = [];
 
-        foreach ($request->input('orders') as $order) {
-            try {
-                $result = DB::transaction(function () use (
-                    $order, $chDate, $discountPer, $sesId,
-                    $dealerId, $dpId, $companyId
-                ) {
-                    $orderId = $order['order_id'];
-                    $items   = $order['items'];
+        // foreach ($request->input('orders') as $order) {
+            // try {
+                // $result = DB::transaction(function () use (
+                    // $order, $chDate, $discountPer, $sesId,
+                    // $dealerId, $dpId, $companyId
+                // ) {
+                    // $orderId = $order['order_id'];
+                    // $items   = $order['items'];
 
-                    $orderRow = DB::selectOne(
-                        "SELECT * FROM user_sales_order
-                          WHERE order_id = ? AND dealer_id = ?
-                          LIMIT 1",
-                        [$orderId, $dealerId]
-                    );
-                    if (!$orderRow) {
-                        throw new \RuntimeException("Order {$orderId} not found.");
-                    }
+                    // $orderRow = DB::selectOne(
+                        // "SELECT * FROM user_sales_order
+                          // WHERE order_id = ? AND dealer_id = ?
+                          // LIMIT 1",
+                        // [$orderId, $dealerId]
+                    // );
+                    // if (!$orderRow) {
+                        // throw new \RuntimeException("Order {$orderId} not found.");
+                    // }
 
-                    // FIX: reject already-processed orders so the same order
-                    // cannot be turned into two challans.
-                    if ((string) $orderRow->order_status === '1') {
-                        throw new \RuntimeException("Order {$orderId} is already processed.");
-                    }
+                    // // FIX: reject already-processed orders so the same order
+                    // // cannot be turned into two challans.
+                    // if ((string) $orderRow->order_status === '1') {
+                        // throw new \RuntimeException("Order {$orderId} is already processed.");
+                    // }
 
-                    if ($creditBlock = app(InvoiceService::class)->creditBlock($dealerId, (string) $orderRow->retailer_id)) {
-                        throw new \RuntimeException("Order {$orderId}: {$creditBlock}");
-                    }
+                    // if ($creditBlock = app(InvoiceService::class)->creditBlock($dealerId, (string) $orderRow->retailer_id)) {
+                        // throw new \RuntimeException("Order {$orderId}: {$creditBlock}");
+                    // }
 
-                    // Allocate unique challan id
-                    $chId = null;
-                    $baseId = (int) ($dealerId . date('ymdHis'));
-                    for ($attempt = 0; $attempt < 50; $attempt++) {
-                        $candidate = $baseId + $attempt;
-                        $exists = DB::selectOne(
-                            "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
-                            [$candidate]
-                        );
-                        if (!$exists) { $chId = $candidate; break; }
-                    }
-                    if ($chId === null) {
-                        throw new \RuntimeException('Could not allocate unique challan id.');
-                    }
+                    // // Allocate unique challan id
+                    // $chId = null;
+                    // $baseId = (int) ($dealerId . date('ymdHis'));
+                    // for ($attempt = 0; $attempt < 50; $attempt++) {
+                        // $candidate = $baseId + $attempt;
+                        // $exists = DB::selectOne(
+                            // "SELECT 1 AS x FROM challan_order WHERE id = ? LIMIT 1",
+                            // [$candidate]
+                        // );
+                        // if (!$exists) { $chId = $candidate; break; }
+                    // }
+                    // if ($chId === null) {
+                        // throw new \RuntimeException('Could not allocate unique challan id.');
+                    // }
 
-                    $chNo = $this->generateChNo($dpId, $dealerId, $companyId);
+                    // $chNo = $this->generateChNo($dpId, $dealerId, $companyId);
 
-                    $subTotal   = 0.0;
-                    $orderLines = [];
+                    // $subTotal   = 0.0;
+                    // $orderLines = [];
 
-                    foreach ($items as $it) {
-                        $productId = (int)   $it['product_id'];
+                    // foreach ($items as $it) {
+                        // $productId = (int)   $it['product_id'];
 
-                        // FIX: validate product belongs to this company.
-                        $this->assertProductForCompany($productId, $companyId);
+                        // // FIX: validate product belongs to this company.
+                        // $this->assertProductForCompany($productId, $companyId);
 
-                        $qty       = (float) $it['qty'];
-                        $schQty    = (float) ($it['scheme_qty'] ?? $it['free_qty'] ?? 0);
-                        $rate      = (float) $it['rate'];
-                        $mrp       = (float) ($it['mrp']         ?? 0);
-                        $tax       = (float) ($it['vat']         ?? 18);
-                        $taxable   = (float) ($it['taxable_amt'] ?? ($qty * $rate));
-                        $vatAmt    = (float) ($it['vat_amt']     ?? round($taxable * $tax / 100, 2));
-                        $amount    = round($taxable + $vatAmt, 2);
-                        $batchNo   = (string)($it['batch_no']    ?? '');
-                        $mfgDate   = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
+                        // $qty       = (float) $it['qty'];
+                        // $schQty    = (float) ($it['scheme_qty'] ?? $it['free_qty'] ?? 0);
+                        // $rate      = (float) $it['rate'];
+                        // $mrp       = (float) ($it['mrp']         ?? 0);
+                        // $tax       = (float) ($it['vat']         ?? 18);
+                        // $taxable   = (float) ($it['taxable_amt'] ?? ($qty * $rate));
+                        // $vatAmt    = (float) ($it['vat_amt']     ?? round($taxable * $tax / 100, 2));
+                        // $amount    = round($taxable + $vatAmt, 2);
+                        // $batchNo   = (string)($it['batch_no']    ?? '');
+                        // $mfgDate   = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
 
-                        // HSN — critical, otherwise IRN will fail on this challan
-                        $hsn = (string) ($it['hsn_code'] ?? '');
-                        if ($hsn === '') {
-                            $cp  = DB::selectOne(
-                                "SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
-                                [$productId]
-                            );
-                            $hsn = (string) ($cp->hsn_code ?? '');
-                        }
+                        // // HSN — critical, otherwise IRN will fail on this challan
+                        // $hsn = (string) ($it['hsn_code'] ?? '');
+                        // if ($hsn === '') {
+                            // $cp  = DB::selectOne(
+                                // "SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
+                                // [$productId]
+                            // );
+                            // $hsn = (string) ($cp->hsn_code ?? '');
+                        // }
 
-                        if ($batchNo !== '') {
-                            app(StockService::class)->take($dealerId, $productId, $batchNo, $mfgDate, $mrp, $qty + $schQty);
-                        } else {
-                            app(StockService::class)->takeFifo($dealerId, $productId, $qty + $schQty);
-                        }
+                        // if ($batchNo !== '') {
+                            // app(StockService::class)->take($dealerId, $productId, $batchNo, $mfgDate, $mrp, $qty + $schQty);
+                        // } else {
+                            // app(StockService::class)->takeFifo($dealerId, $productId, $qty + $schQty);
+                        // }
 
-                        DB::update(
-                            "UPDATE user_sales_order_details
-                                SET status = 2
-                              WHERE order_id = ? AND product_id = ?",
-                            [$orderId, $productId]
-                        );
+                        // DB::update(
+                            // "UPDATE user_sales_order_details
+                                // SET status = 2
+                              // WHERE order_id = ? AND product_id = ?",
+                            // [$orderId, $productId]
+                        // );
 
-                        $orderLines[] = compact(
-                            'productId', 'qty', 'schQty', 'rate', 'mrp',
-                            'tax', 'vatAmt', 'taxable', 'amount',
-                            'batchNo', 'mfgDate', 'hsn'
-                        );
-                        $subTotal += $amount;
-                    }
+                        // $orderLines[] = compact(
+                            // 'productId', 'qty', 'schQty', 'rate', 'mrp',
+                            // 'tax', 'vatAmt', 'taxable', 'amount',
+                            // 'batchNo', 'mfgDate', 'hsn'
+                        // );
+                        // $subTotal += $amount;
+                    // }
 
-                    $discAmt     = round($subTotal * $discountPer / 100, 2);
-                    $finalAmount = round($subTotal - $discAmt, 2);
-                    $amountRound = round($finalAmount);
+                    // $discAmt     = round($subTotal * $discountPer / 100, 2);
+                    // $finalAmount = round($subTotal - $discAmt, 2);
+                    // $amountRound = round($finalAmount);
 
-                    DB::insert(
-                        "INSERT INTO challan_order
-                            (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id, ch_user_id,
-                             ch_date, date_added, company_id, sesId,
-                             invoice_type, book_status,
-                             dispatch_status, sync_status, payment_status,
-                             remark,
-                             discount_per, discount_amt,
-                             amount, remaining, amount_round)
-                         VALUES
-                            (?, ?, ?, ?, ?, ?,
-                             ?, NOW(), ?, ?,
-                             1, 0,
-                             0, 1, '0',
-                             ?,
-                             ?, ?,
-                             ?, ?, ?)",
-                        [
-                            $chId, $chNo, $dpId, $dealerId,
-                            $orderRow->retailer_id, $orderRow->user_id,
-                            $chDate, $companyId, $sesId,
-                            $orderRow->remarks ?? '',
-                            $discountPer, $discAmt,
-                            $finalAmount, $finalAmount, $amountRound,
-                        ]
-                    );
+                    // DB::insert(
+                        // "INSERT INTO challan_order
+                            // (id, ch_no, ch_created_by, ch_dealer_id, ch_retailer_id, ch_user_id,
+                             // ch_date, date_added, company_id, sesId,
+                             // invoice_type, book_status,
+                             // dispatch_status, sync_status, payment_status,
+                             // remark,
+                             // discount_per, discount_amt,
+                             // amount, remaining, amount_round)
+                         // VALUES
+                            // (?, ?, ?, ?, ?, ?,
+                             // ?, NOW(), ?, ?,
+                             // 1, 0,
+                             // 0, 1, '0',
+                             // ?,
+                             // ?, ?,
+                             // ?, ?, ?)",
+                        // [
+                            // $chId, $chNo, $dpId, $dealerId,
+                            // $orderRow->retailer_id, $orderRow->user_id,
+                            // $chDate, $companyId, $sesId,
+                            // $orderRow->remarks ?? '',
+                            // $discountPer, $discAmt,
+                            // $finalAmount, $finalAmount, $amountRound,
+                        // ]
+                    // );
 
-                    foreach ($orderLines as $l) {
-                        // FIX: remain_amount = line amount (not taxable)
-                        DB::insert(
-                            "INSERT INTO challan_order_details
-                                (ch_id, product_id, hsn_code, supply_status, catalog_details_id,
-                                 batch_no, tax, vat_amt, qty, product_rate, free_qty,
-                                 order_id, user_id, mrp,
-                                 dis_type, dis_amt, dis_percent,
-                                 taxable_amt, remain_amount, mfg_date, sync_status)
-                             VALUES
-                                (?, ?, ?, 0, 0,
-                                 ?, ?, ?, ?, ?, ?,
-                                 ?, ?, ?,
-                                 1, 0, 0,
-                                 ?, ?, ?, 1)",
-                            [
-                                $chId, $l['productId'], $l['hsn'],
-                                $l['batchNo'], $l['tax'], $l['vatAmt'],
-                                $l['qty'], $l['rate'], $l['schQty'],
-                                $orderId, $orderRow->user_id, $l['mrp'],
-                                $l['amount'], $l['amount'], $l['mfgDate'],
-                            ]
-                        );
-                    }
+                    // foreach ($orderLines as $l) {
+                        // // FIX: remain_amount = line amount (not taxable)
+                        // DB::insert(
+                            // "INSERT INTO challan_order_details
+                                // (ch_id, product_id, hsn_code, supply_status, catalog_details_id,
+                                 // batch_no, tax, vat_amt, qty, product_rate, free_qty,
+                                 // order_id, user_id, mrp,
+                                 // dis_type, dis_amt, dis_percent,
+                                 // taxable_amt, remain_amount, mfg_date, sync_status)
+                             // VALUES
+                                // (?, ?, ?, 0, 0,
+                                 // ?, ?, ?, ?, ?, ?,
+                                 // ?, ?, ?,
+                                 // 1, 0, 0,
+                                 // ?, ?, ?, 1)",
+                            // [
+                                // $chId, $l['productId'], $l['hsn'],
+                                // $l['batchNo'], $l['tax'], $l['vatAmt'],
+                                // $l['qty'], $l['rate'], $l['schQty'],
+                                // $orderId, $orderRow->user_id, $l['mrp'],
+                                // $l['amount'], $l['amount'], $l['mfgDate'],
+                            // ]
+                        // );
+                    // }
 
-                    DB::update(
-                        "UPDATE user_sales_order SET order_status = '1' WHERE order_id = ?",
-                        [$orderId]
-                    );
+                    // DB::update(
+                        // "UPDATE user_sales_order SET order_status = '1' WHERE order_id = ?",
+                        // [$orderId]
+                    // );
 
-                    return [
-                        'order_id' => $orderId,
-                        'ch_id'    => $chId,
-                        'ch_no'    => $chNo,
-                        'amount'   => $finalAmount,
-                    ];
-                });
+                    // return [
+                        // 'order_id' => $orderId,
+                        // 'ch_id'    => $chId,
+                        // 'ch_no'    => $chNo,
+                        // 'amount'   => $finalAmount,
+                    // ];
+                // });
 
-                $created[] = $result;
+                // $created[] = $result;
 
-            } catch (\Throwable $e) {
-                $failed[] = [
-                    'order_id' => $order['order_id'] ?? '?',
-                    'reason'   => $e->getMessage(),
-                ];
-            }
-        }
+            // } catch (\Throwable $e) {
+                // $failed[] = [
+                    // 'order_id' => $order['order_id'] ?? '?',
+                    // 'reason'   => $e->getMessage(),
+                // ];
+            // }
+        // }
 
-        return response()->json([
-            'status'   => count($failed) === 0,
-            'message'  => sprintf('%d challan(s) created, %d failed.', count($created), count($failed)),
-            'challans' => $created,
-            'failed'   => $failed,
-        ], count($failed) > 0 && count($created) === 0 ? 500 : 200);
-    }
+        // return response()->json([
+            // 'status'   => count($failed) === 0,
+            // 'message'  => sprintf('%d challan(s) created, %d failed.', count($created), count($failed)),
+            // 'challans' => $created,
+            // 'failed'   => $failed,
+        // ], count($failed) > 0 && count($created) === 0 ? 500 : 200);
+    // }
 
     /* =========================================================
      |  EDIT
@@ -741,235 +741,235 @@ class ChallanController extends Controller
      |  between new qty and the original qty (per product), and
      |  restores stock for any product removed entirely.
      | ========================================================= */
-    public function update(Request $request, $id): JsonResponse
-    {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) $user->company_id;
+    // public function update(Request $request, $id): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $dealerId  = (int) $user->dealer_id;
+        // $companyId = (int) $user->company_id;
 
-        // Load current header (dealer-scoped). Include dispatch_status so we
-        // can refuse to edit cancelled challans.
-        $header = DB::selectOne(
-            "SELECT id, ch_no, ch_dealer_id, ch_retailer_id, ch_date, dispatch_status
-               FROM challan_order
-              WHERE id = ? AND ch_dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$header) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Challan not found.',
-            ], 404);
-        }
+        // // Load current header (dealer-scoped). Include dispatch_status so we
+        // // can refuse to edit cancelled challans.
+        // $header = DB::selectOne(
+            // "SELECT id, ch_no, ch_dealer_id, ch_retailer_id, ch_date, dispatch_status
+               // FROM challan_order
+              // WHERE id = ? AND ch_dealer_id = ?
+              // LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$header) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Challan not found.',
+            // ], 404);
+        // }
 
-        if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
-            return response()->json(['status' => false, 'message' => $lock], 409);
-        }
+        // if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
+            // return response()->json(['status' => false, 'message' => $lock], 409);
+        // }
 
-        $v = Validator::make($request->all(), [
-            'ch_date'                     => ['required', 'string'],
-            'retailer_id'                 => ['required', 'integer'],
-            'remark'                      => ['nullable', 'string', 'max:255'],
-            'crdr_status'                 => ['nullable', 'in:0,1,2'],
-            'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'items'                       => ['required', 'array', 'min:1'],
-            'items.*.product_id'          => ['required', 'integer'],
-            'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
-            'items.*.rate'                => ['required', 'numeric', 'gt:0'],
-        ], [
-            'items.*.rate.gt' => 'Every item needs a rate above 0.',
-        ]);
-        if ($v->fails()) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Validation failed.',
-                'errors'  => $v->errors(),
-            ], 422);
-        }
+        // $v = Validator::make($request->all(), [
+            // 'ch_date'                     => ['required', 'string'],
+            // 'retailer_id'                 => ['required', 'integer'],
+            // 'remark'                      => ['nullable', 'string', 'max:255'],
+            // 'crdr_status'                 => ['nullable', 'in:0,1,2'],
+            // 'discount_per'                => ['nullable', 'numeric', 'min:0', 'max:100'],
+            // 'items'                       => ['required', 'array', 'min:1'],
+            // 'items.*.product_id'          => ['required', 'integer'],
+            // 'items.*.qty'                 => ['required', 'numeric', 'min:0.01'],
+            // 'items.*.rate'                => ['required', 'numeric', 'gt:0'],
+        // ], [
+            // 'items.*.rate.gt' => 'Every item needs a rate above 0.',
+        // ]);
+        // if ($v->fails()) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Validation failed.',
+                // 'errors'  => $v->errors(),
+            // ], 422);
+        // }
 
-        $chDate = $this->parseDate($request->input('ch_date'));
-        if (!$chDate) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Invalid ch_date.',
-            ], 422);
-        }
+        // $chDate = $this->parseDate($request->input('ch_date'));
+        // if (!$chDate) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Invalid ch_date.',
+            // ], 422);
+        // }
 
-        // Retailer must belong to this dealer
-        $retailerId = (int) $request->input('retailer_id');
-        $retailerOk = DB::selectOne(
-            "SELECT id FROM retailer WHERE id = ? AND dealer_id = ? LIMIT 1",
-            [$retailerId, $dealerId]
-        );
-        if (!$retailerOk) {
-            return response()->json([
-                'status'  => false,
-                'message' => "Retailer {$retailerId} not found for this dealer.",
-            ], 404);
-        }
+        // // Retailer must belong to this dealer
+        // $retailerId = (int) $request->input('retailer_id');
+        // $retailerOk = DB::selectOne(
+            // "SELECT id FROM retailer WHERE id = ? AND dealer_id = ? LIMIT 1",
+            // [$retailerId, $dealerId]
+        // );
+        // if (!$retailerOk) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => "Retailer {$retailerId} not found for this dealer.",
+            // ], 404);
+        // }
 
-        // Load current lines so we can compute stock deltas
-        $oldLines = DB::select(
-            "SELECT id, product_id, qty, free_qty, mrp, batch_no, mfg_date
-               FROM challan_order_details
-              WHERE ch_id = ?",
-            [$id]
-        );
+        // // Load current lines so we can compute stock deltas
+        // $oldLines = DB::select(
+            // "SELECT id, product_id, qty, free_qty, mrp, batch_no, mfg_date
+               // FROM challan_order_details
+              // WHERE ch_id = ?",
+            // [$id]
+        // );
 
-        $items       = $request->input('items');
-        $discountPer = (float) ($request->input('discount_per') ?? 0);
-        $remark      = (string) $request->input('remark', '');
+        // $items       = $request->input('items');
+        // $discountPer = (float) ($request->input('discount_per') ?? 0);
+        // $remark      = (string) $request->input('remark', '');
 
-        DB::beginTransaction();
-        try {
-            // ── Normalize incoming items (server-side fallbacks)
-            $normalized = [];
-            $subTotal   = 0.0;
-            $stockLines = [];
+        // DB::beginTransaction();
+        // try {
+            // // ── Normalize incoming items (server-side fallbacks)
+            // $normalized = [];
+            // $subTotal   = 0.0;
+            // $stockLines = [];
 
-            foreach ($items as $it) {
-                $productId  = (int)   $it['product_id'];
+            // foreach ($items as $it) {
+                // $productId  = (int)   $it['product_id'];
 
-                // FIX: validate product belongs to this company.
-                $this->assertProductForCompany($productId, $companyId);
+                // // FIX: validate product belongs to this company.
+                // $this->assertProductForCompany($productId, $companyId);
 
-                $qty        = (float) $it['qty'];
-                $rate       = (float) $it['rate'];
-                $mrp        = (float) ($it['mrp']         ?? 0);
-                $freeQty    = (float) ($it['free_qty']    ?? $it['scheme'] ?? 0);
-                $tax        = (float) ($it['vat']         ?? 18);
-                $cd         = (float) ($it['cd']          ?? 0);
-                $cdType     = (int)   ($it['cd_type']     ?? 1);
-                $cdAmt      = (float) ($it['cd_amt']      ?? 0);
-                $disType    = (int)   ($it['dis_type']    ?? 1);
-                $disAmt     = (float) ($it['dis_amt']     ?? 0);
-                $disPct     = (float) ($it['dis_percent'] ?? 0);
-                $splDiscAmt = (float) ($it['spl_disc_amt'] ?? 0);
-                $cashAmt    = (float) ($it['cash_amt']    ?? 0);
-                $batchNo    = (string)($it['batch_no']    ?? '');
-                $mfgDate    = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
-                $orderId    = (string)($it['order_id']    ?? '');
-                $userId     = (int)   ($it['user_id']     ?? 0);
+                // $qty        = (float) $it['qty'];
+                // $rate       = (float) $it['rate'];
+                // $mrp        = (float) ($it['mrp']         ?? 0);
+                // $freeQty    = (float) ($it['free_qty']    ?? $it['scheme'] ?? 0);
+                // $tax        = (float) ($it['vat']         ?? 18);
+                // $cd         = (float) ($it['cd']          ?? 0);
+                // $cdType     = (int)   ($it['cd_type']     ?? 1);
+                // $cdAmt      = (float) ($it['cd_amt']      ?? 0);
+                // $disType    = (int)   ($it['dis_type']    ?? 1);
+                // $disAmt     = (float) ($it['dis_amt']     ?? 0);
+                // $disPct     = (float) ($it['dis_percent'] ?? 0);
+                // $splDiscAmt = (float) ($it['spl_disc_amt'] ?? 0);
+                // $cashAmt    = (float) ($it['cash_amt']    ?? 0);
+                // $batchNo    = (string)($it['batch_no']    ?? '');
+                // $mfgDate    = $this->parseDate($it['mfg_date'] ?? null) ?: '1970-01-01';
+                // $orderId    = (string)($it['order_id']    ?? '');
+                // $userId     = (int)   ($it['user_id']     ?? 0);
 
-                $gross   = round($qty * $rate, 2);
-                $taxable = isset($it['taxable_amt']) && $it['taxable_amt'] !== null
-                    ? (float) $it['taxable_amt']
-                    : round($gross - $cdAmt - $disAmt - $splDiscAmt - $cashAmt, 2);
-                $vatAmt  = isset($it['vat_amt']) && $it['vat_amt'] !== null
-                    ? (float) $it['vat_amt']
-                    : round($taxable * $tax / 100, 2);
-                $amount  = round($taxable + $vatAmt, 2);
+                // $gross   = round($qty * $rate, 2);
+                // $taxable = isset($it['taxable_amt']) && $it['taxable_amt'] !== null
+                    // ? (float) $it['taxable_amt']
+                    // : round($gross - $cdAmt - $disAmt - $splDiscAmt - $cashAmt, 2);
+                // $vatAmt  = isset($it['vat_amt']) && $it['vat_amt'] !== null
+                    // ? (float) $it['vat_amt']
+                    // : round($taxable * $tax / 100, 2);
+                // $amount  = round($taxable + $vatAmt, 2);
 
-                // HSN
-                $hsn = (string) ($it['hsn_code'] ?? '');
-                if ($hsn === '') {
-                    $cp  = DB::selectOne("SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1", [$productId]);
-                    $hsn = (string) ($cp->hsn_code ?? '');
-                }
+                // // HSN
+                // $hsn = (string) ($it['hsn_code'] ?? '');
+                // if ($hsn === '') {
+                    // $cp  = DB::selectOne("SELECT hsn_code FROM catalog_product WHERE id = ? LIMIT 1", [$productId]);
+                    // $hsn = (string) ($cp->hsn_code ?? '');
+                // }
 
-                $normalized[] = compact(
-                    'productId', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
-                    'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
-                    'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
-                    'splDiscAmt', 'cashAmt', 'orderId', 'userId'
-                );
-                $subTotal += $amount;
+                // $normalized[] = compact(
+                    // 'productId', 'qty', 'rate', 'mrp', 'freeQty', 'tax', 'vatAmt',
+                    // 'taxable', 'amount', 'batchNo', 'mfgDate', 'hsn',
+                    // 'cd', 'cdType', 'cdAmt', 'disType', 'disAmt', 'disPct',
+                    // 'splDiscAmt', 'cashAmt', 'orderId', 'userId'
+                // );
+                // $subTotal += $amount;
 
-                $stockLines[] = [
-                    'product_id' => $productId,
-                    'batch_no'   => $batchNo,
-                    'mfg_date'   => $mfgDate,
-                    'mrp'        => $mrp,
-                    'qty'        => $qty + $freeQty,
-                ];
-            }
+                // $stockLines[] = [
+                    // 'product_id' => $productId,
+                    // 'batch_no'   => $batchNo,
+                    // 'mfg_date'   => $mfgDate,
+                    // 'mrp'        => $mrp,
+                    // 'qty'        => $qty + $freeQty,
+                // ];
+            // }
 
-            app(StockService::class)->sync($dealerId, $oldLines, $stockLines);
+            // app(StockService::class)->sync($dealerId, $oldLines, $stockLines);
 
-            $discountAmt = round($subTotal * $discountPer / 100, 2);
-            $finalAmount = round($subTotal - $discountAmt, 2);
-            $amountRound = round($finalAmount);
+            // $discountAmt = round($subTotal * $discountPer / 100, 2);
+            // $finalAmount = round($subTotal - $discountAmt, 2);
+            // $amountRound = round($finalAmount);
 
-            // ── Update header
-            DB::update(
-                "UPDATE challan_order
-                    SET ch_retailer_id = ?,
-                        ch_date        = ?,
-                        remark         = ?,
-                        crdr_status    = ?,
-                        discount_per   = ?,
-                        discount_amt   = ?,
-                        amount         = ?,
-                        remaining      = ?,
-                        amount_round   = ?
-                  WHERE id = ? AND ch_dealer_id = ?",
-                [
-                    $retailerId, $chDate, $remark, (int) $request->input('crdr_status', 0),
-                    $discountPer, $discountAmt,
-                    $finalAmount, $finalAmount, $amountRound,
-                    $id, $dealerId,
-                ]
-            );
+            // // ── Update header
+            // DB::update(
+                // "UPDATE challan_order
+                    // SET ch_retailer_id = ?,
+                        // ch_date        = ?,
+                        // remark         = ?,
+                        // crdr_status    = ?,
+                        // discount_per   = ?,
+                        // discount_amt   = ?,
+                        // amount         = ?,
+                        // remaining      = ?,
+                        // amount_round   = ?
+                  // WHERE id = ? AND ch_dealer_id = ?",
+                // [
+                    // $retailerId, $chDate, $remark, (int) $request->input('crdr_status', 0),
+                    // $discountPer, $discountAmt,
+                    // $finalAmount, $finalAmount, $amountRound,
+                    // $id, $dealerId,
+                // ]
+            // );
 
-            // ── Delete old lines, insert new
-            DB::delete("DELETE FROM challan_order_details WHERE ch_id = ?", [$id]);
+            // // ── Delete old lines, insert new
+            // DB::delete("DELETE FROM challan_order_details WHERE ch_id = ?", [$id]);
 
-            foreach ($normalized as $l) {
-                // FIX: cd_amt bound to $l['cdAmt']; remain_amount = $l['amount'].
-                DB::insert(
-                    "INSERT INTO challan_order_details
-                        (ch_id, product_id, hsn_code, catalog_details_id,
-                         batch_no, mfg_date, tax, vat_amt, qty, product_rate,
-                         free_qty, order_id, user_id, mrp,
-                         cd, cd_type, cd_amt,
-                         spl_disc_type, spl_disc_val, spl_disc_amt, cash_amt,
-                         dis_type, dis_amt, dis_percent,
-                         taxable_amt, remain_amount, sale_order_id, sync_status)
-                     VALUES
-                        (?, ?, ?, 0,
-                         ?, ?, ?, ?, ?, ?,
-                         ?, ?, ?, ?,
-                         ?, ?, ?,
-                         0, 0, ?, ?,
-                         ?, ?, ?,
-                         ?, ?, '', 1)",
-                    [
-                        $id, $l['productId'], $l['hsn'],
-                        $l['batchNo'], $l['mfgDate'], $l['tax'], $l['vatAmt'],
-                        $l['qty'], $l['rate'], $l['freeQty'],
-                        $l['orderId'], $l['userId'], $l['mrp'],
-                        $l['cd'], $l['cdType'], $l['cdAmt'],
-                        $l['splDiscAmt'], $l['cashAmt'],
-                        $l['disType'], $l['disAmt'], $l['disPct'],
-                        $l['amount'], $l['amount'],
-                    ]
-                );
-            }
+            // foreach ($normalized as $l) {
+                // // FIX: cd_amt bound to $l['cdAmt']; remain_amount = $l['amount'].
+                // DB::insert(
+                    // "INSERT INTO challan_order_details
+                        // (ch_id, product_id, hsn_code, catalog_details_id,
+                         // batch_no, mfg_date, tax, vat_amt, qty, product_rate,
+                         // free_qty, order_id, user_id, mrp,
+                         // cd, cd_type, cd_amt,
+                         // spl_disc_type, spl_disc_val, spl_disc_amt, cash_amt,
+                         // dis_type, dis_amt, dis_percent,
+                         // taxable_amt, remain_amount, sale_order_id, sync_status)
+                     // VALUES
+                        // (?, ?, ?, 0,
+                         // ?, ?, ?, ?, ?, ?,
+                         // ?, ?, ?, ?,
+                         // ?, ?, ?,
+                         // 0, 0, ?, ?,
+                         // ?, ?, ?,
+                         // ?, ?, '', 1)",
+                    // [
+                        // $id, $l['productId'], $l['hsn'],
+                        // $l['batchNo'], $l['mfgDate'], $l['tax'], $l['vatAmt'],
+                        // $l['qty'], $l['rate'], $l['freeQty'],
+                        // $l['orderId'], $l['userId'], $l['mrp'],
+                        // $l['cd'], $l['cdType'], $l['cdAmt'],
+                        // $l['splDiscAmt'], $l['cashAmt'],
+                        // $l['disType'], $l['disAmt'], $l['disPct'],
+                        // $l['amount'], $l['amount'],
+                    // ]
+                // );
+            // }
 
-            DB::commit();
+            // DB::commit();
 
-            return response()->json([
-                'status'       => true,
-                'message'      => 'Challan updated.',
-                'challan_id'   => $id,
-                'amount'       => $finalAmount,
-                'amount_round' => $amountRound,
-                'discount_amt' => $discountAmt,
-                'items_count'  => count($normalized),
-            ]);
+            // return response()->json([
+                // 'status'       => true,
+                // 'message'      => 'Challan updated.',
+                // 'challan_id'   => $id,
+                // 'amount'       => $finalAmount,
+                // 'amount_round' => $amountRound,
+                // 'discount_amt' => $discountAmt,
+                // 'items_count'  => count($normalized),
+            // ]);
 
-        } catch (InsufficientStockException $e) {
-            DB::rollBack();
-            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'status'  => false,
-                'message' => 'Challan update failed: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
+        // } catch (InsufficientStockException $e) {
+            // DB::rollBack();
+            // return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        // } catch (\Throwable $e) {
+            // DB::rollBack();
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Challan update failed: ' . $e->getMessage(),
+            // ], 500);
+        // }
+    // }
 
     /* =========================================================
      |  CANCEL
@@ -978,103 +978,103 @@ class ChallanController extends Controller
      |  Marks the challan void + restores stock. Uses a
      |  `reason` body field for the audit trail.
      | ========================================================= */
-    public function cancel(Request $request, $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
-        $reason   = (string) $request->input('reason', 'No reason given');
+    // public function cancel(Request $request, $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
+        // $reason   = (string) $request->input('reason', 'No reason given');
 
-        $header = DB::selectOne(
-            "SELECT id, ch_no FROM challan_order
-              WHERE id = ? AND ch_dealer_id = ?
-              LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$header) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Challan not found.',
-            ], 404);
-        }
+        // $header = DB::selectOne(
+            // "SELECT id, ch_no FROM challan_order
+              // WHERE id = ? AND ch_dealer_id = ?
+              // LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$header) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Challan not found.',
+            // ], 404);
+        // }
 
-        if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
-            return response()->json(['status' => false, 'message' => $lock], 409);
-        }
+        // if ($lock = app(InvoiceService::class)->reason((string) $header->id, $dealerId)) {
+            // return response()->json(['status' => false, 'message' => $lock], 409);
+        // }
 
-        // Already cancelled?
-        $already = DB::selectOne(
-            "SELECT 1 AS x FROM challan_order_cancel WHERE challan_id = ? LIMIT 1",
-            [$id]
-        );
-        if ($already) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Challan is already cancelled.',
-            ], 409);
-        }
+        // // Already cancelled?
+        // $already = DB::selectOne(
+            // "SELECT 1 AS x FROM challan_order_cancel WHERE challan_id = ? LIMIT 1",
+            // [$id]
+        // );
+        // if ($already) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Challan is already cancelled.',
+            // ], 409);
+        // }
 
-        DB::beginTransaction();
-        try {
-            app(InvoiceService::class)->reopenSalesOrders(
-                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
-            );
+        // DB::beginTransaction();
+        // try {
+            // app(InvoiceService::class)->reopenSalesOrders(
+                // DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id])
+            // );
 
-            // 1. Restore stock for every line
-            app(StockService::class)->sync(
-                $dealerId,
-                DB::select(
-                    "SELECT product_id, qty, free_qty, mrp, batch_no, mfg_date
-                       FROM challan_order_details
-                      WHERE ch_id = ?",
-                    [$id]
-                ),
-                []
-            );
+            // // 1. Restore stock for every line
+            // app(StockService::class)->sync(
+                // $dealerId,
+                // DB::select(
+                    // "SELECT product_id, qty, free_qty, mrp, batch_no, mfg_date
+                       // FROM challan_order_details
+                      // WHERE ch_id = ?",
+                    // [$id]
+                // ),
+                // []
+            // );
 
-            // 2. Mirror the header into challan_order_cancel
-            DB::insert(
-                "INSERT INTO challan_order_cancel
-                    (challan_id, ch_no, dealer_id, cancel_reason,
-                     cancelled_by, cancelled_date)
-                 VALUES (?, ?, ?, ?, ?, NOW())",
-                [
-                    $id,
-                    $header->ch_no,
-                    $dealerId,
-                    $reason,
-                    (int) $user->getKey(),
-                ]
-            );
+            // // 2. Mirror the header into challan_order_cancel
+            // DB::insert(
+                // "INSERT INTO challan_order_cancel
+                    // (challan_id, ch_no, dealer_id, cancel_reason,
+                     // cancelled_by, cancelled_date)
+                 // VALUES (?, ?, ?, ?, ?, NOW())",
+                // [
+                    // $id,
+                    // $header->ch_no,
+                    // $dealerId,
+                    // $reason,
+                    // (int) $user->getKey(),
+                // ]
+            // );
 
-            // 3. Mark challan
-            DB::update(
-                "UPDATE challan_order
-                    SET dispatch_status = 3,
-                        payment_status  = '0'
-                  WHERE id = ? AND ch_dealer_id = ?",
-                [$id, $dealerId]
-            );
+            // // 3. Mark challan
+            // DB::update(
+                // "UPDATE challan_order
+                    // SET dispatch_status = 3,
+                        // payment_status  = '0'
+                  // WHERE id = ? AND ch_dealer_id = ?",
+                // [$id, $dealerId]
+            // );
 
-            DB::commit();
+            // DB::commit();
 
-            return response()->json([
-                'status'  => true,
-                'message' => 'Challan cancelled.',
-                'ch_id'   => $id,
-                'ch_no'   => $header->ch_no,
-            ]);
+            // return response()->json([
+                // 'status'  => true,
+                // 'message' => 'Challan cancelled.',
+                // 'ch_id'   => $id,
+                // 'ch_no'   => $header->ch_no,
+            // ]);
 
-        } catch (InsufficientStockException $e) {
-            DB::rollBack();
-            return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'status'  => false,
-                'message' => 'Cancel failed: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
+        // } catch (InsufficientStockException $e) {
+            // DB::rollBack();
+            // return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        // } catch (\Throwable $e) {
+            // DB::rollBack();
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Cancel failed: ' . $e->getMessage(),
+            // ], 500);
+        // }
+    // }
 
     /* =========================================================
      |  HELPERS

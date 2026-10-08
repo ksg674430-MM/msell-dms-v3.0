@@ -81,7 +81,7 @@ class DamageInvoiceService
                 $this->stock->apply($items, $dealerId, $saleableNonSaleable, $forSelfRetailer);
             }
 
-            $this->markSaleOrders($items);
+            $this->markSaleOrders($items, $dealerId);
 
             DB::commit();
 
@@ -98,7 +98,7 @@ class DamageInvoiceService
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('Damage invoice save failed', [
-                'err' => $e->getMessage(),
+                'err' => safe_error_message($e),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
@@ -165,7 +165,7 @@ class DamageInvoiceService
                 $this->stock->apply($items, $dealerId, $saleableNonSaleable, $forSelfRetailer);
             }
 
-            $this->markSaleOrders($items);
+            $this->markSaleOrders($items, $dealerId);
 
             DB::commit();
 
@@ -182,7 +182,7 @@ class DamageInvoiceService
             DB::rollBack();
             Log::error('Damage invoice update failed', [
                 'id'  => $id,
-                'err' => $e->getMessage(),
+                'err' => safe_error_message($e),
             ]);
             throw $e;
         }
@@ -528,14 +528,16 @@ class DamageInvoiceService
         DB::table('damage_order_details')->insert($rows);
     }
 
-    protected function markSaleOrders(array $items): void
+    protected function markSaleOrders(array $items, int $dealerId): void
     {
         foreach ($items as $it) {
             if (!empty($it['order_id'])) {
-                DB::table('user_sales_order_details')
-                    ->where('order_id', $it['order_id'])
-                    ->where('product_id', $it['product_id'])
-                    ->update(['status' => 2]);
+                DB::table('user_sales_order_details as d')
+                    ->join('user_sales_order as o', 'o.order_id', '=', 'd.order_id')
+                    ->where('o.dealer_id', $dealerId)
+                    ->where('d.order_id', $it['order_id'])
+                    ->where('d.product_id', $it['product_id'])
+                    ->update(['d.status' => 2]);
             }
         }
     }

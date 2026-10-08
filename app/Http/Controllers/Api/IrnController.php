@@ -9,61 +9,61 @@ use Illuminate\Support\Facades\DB;
 
 class IrnController extends Controller
 {
-    /**
-     * POST /api/invoices/{challan_id}/irn
-     * Generate e-invoice IRN for a challan.
-     */
-    public function generate(Request $request, string $challanId): JsonResponse
-    {
-        $user      = $request->user();
-        $companyId = (int) ($user->company_id ?? 213);
+    // /**
+     // * POST /api/invoices/{challan_id}/irn
+     // * Generate e-invoice IRN for a challan.
+     // */
+    // public function generate(Request $request, string $challanId): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $companyId = (int) ($user->company_id ?? 213);
 
-        $challan = DB::selectOne("SELECT * FROM challan_order WHERE id = ? LIMIT 1", [$challanId]);
-        if (!$challan) {
-            return response()->json(['status' => false, 'message' => 'Challan not found.'], 404);
-        }
+        // $challan = DB::selectOne("SELECT * FROM challan_order WHERE id = ? LIMIT 1", [$challanId]);
+        // if (!$challan) {
+            // return response()->json(['status' => false, 'message' => 'Challan not found.'], 404);
+        // }
 
-        // Build IRN JSON payload
-        $payload = $this->buildPayload($challan, $companyId);
-        if (isset($payload['error'])) {
-            return response()->json(['status' => false, 'message' => $payload['error']], 422);
-        }
+        // // Build IRN JSON payload
+        // $payload = $this->buildPayload($challan, $companyId);
+        // if (isset($payload['error'])) {
+            // return response()->json(['status' => false, 'message' => $payload['error']], 422);
+        // }
 
-        // Get auth token
-        $tokenResult = $this->fetchToken();
-        if (isset($tokenResult['error'])) {
-            $this->logIrn($companyId, $challanId, 0, json_encode($payload), '', null, null, null, null);
-            return response()->json(['status' => false, 'message' => $tokenResult['error']], 502);
-        }
+        // // Get auth token
+        // $tokenResult = $this->fetchToken();
+        // if (isset($tokenResult['error'])) {
+            // $this->logIrn($companyId, $challanId, 0, json_encode($payload), '', null, null, null, null);
+            // return response()->json(['status' => false, 'message' => $tokenResult['error']], 502);
+        // }
 
-        // Generate IRN
-        $irnResult = $this->callIrnApi($tokenResult['token'], json_encode($payload));
-        $success   = !isset($irnResult['error']);
+        // // Generate IRN
+        // $irnResult = $this->callIrnApi($tokenResult['token'], json_encode($payload));
+        // $success   = !isset($irnResult['error']);
 
-        $this->logIrn(
-            $companyId,
-            $challanId,
-            $success ? 1 : 0,
-            json_encode($payload),
-            $irnResult['response_json'] ?? '',
-            $irnResult['irn']      ?? null,
-            $irnResult['ack_no']   ?? null,
-            $irnResult['ack_date'] ?? null,
-            $irnResult['qr_text']  ?? null
-        );
+        // $this->logIrn(
+            // $companyId,
+            // $challanId,
+            // $success ? 1 : 0,
+            // json_encode($payload),
+            // $irnResult['response_json'] ?? '',
+            // $irnResult['irn']      ?? null,
+            // $irnResult['ack_no']   ?? null,
+            // $irnResult['ack_date'] ?? null,
+            // $irnResult['qr_text']  ?? null
+        // );
 
-        if (!$success) {
-            return response()->json(['status' => false, 'message' => $irnResult['error']], 502);
-        }
+        // if (!$success) {
+            // return response()->json(['status' => false, 'message' => $irnResult['error']], 502);
+        // }
 
-        return response()->json([
-            'status'   => true,
-            'message'  => 'IRN generated successfully.',
-            'irn'      => $irnResult['irn'],
-            'ack_no'   => $irnResult['ack_no'],
-            'ack_date' => $irnResult['ack_date'],
-        ]);
-    }
+        // return response()->json([
+            // 'status'   => true,
+            // 'message'  => 'IRN generated successfully.',
+            // 'irn'      => $irnResult['irn'],
+            // 'ack_no'   => $irnResult['ack_no'],
+            // 'ack_date' => $irnResult['ack_date'],
+        // ]);
+    // }
 
     /* ================= helpers ================= */
 

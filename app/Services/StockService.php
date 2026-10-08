@@ -377,7 +377,7 @@ class StockService
         }
 
         $ref = DB::selectOne(
-            "SELECT rate, dealer_rate, company_id FROM stock
+            "SELECT rate, dealer_rate FROM stock
               WHERE dealer_id = ? AND product_id = ?
               ORDER BY ABS(mrp - ?) ASC, id DESC
               LIMIT 1",
@@ -396,7 +396,6 @@ class StockService
             'nonsalable_damage' => 0,
             'remaining'         => 0,
             'mfg'               => $this->normalizeDate($mfg),
-            'company_id'        => $ref->company_id ?? 1,
         ]);
     }
 
@@ -506,7 +505,7 @@ class StockService
             'expire'             => $d['expire'] ?? null,
             'date'               => now()->format('Y-m-d'),
             'pr_rate'            => $d['pr_rate'] ?? 0,
-            'company_id'         => $d['company_id'] ?? 1,
+            'company_id'         => $d['company_id'] ?? (int) DB::table('dealer')->where('id', $d['dealer_id'])->value('company_id'),
             'action'             => '1',
             'sync_status'        => 1,
             'update_date_time'   => now(),

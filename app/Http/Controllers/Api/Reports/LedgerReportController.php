@@ -15,55 +15,55 @@ class LedgerReportController extends Controller
     // 1) Party Ledger (retailer — challan debit + payment credit)
     //    Legacy: report::get_party_wise_ledger_report_list()
     // =========================================================
-   public function partyLedger(Request $request)
-{
-    $retailerId = (int) $request->input('retailer_id');
-    if (!$retailerId) return $this->fail('retailer_id is required');
+   // public function partyLedger(Request $request)
+// {
+    // $retailerId = (int) $request->input('retailer_id');
+    // if (!$retailerId) return $this->fail('retailer_id is required');
 
-    ['dealer_id' => $dealer] = $this->scope($request);
+    // ['dealer_id' => $dealer] = $this->scope($request);
 
-    $debits = DB::table('challan_order as co')
-        ->where('co.ch_dealer_id', $dealer)
-        ->where('co.ch_retailer_id', $retailerId)
-        ->select(
-            'co.ch_no as voucher',
-            DB::raw("DATE_FORMAT(co.ch_date,'%Y-%m-%d') as voucher_date"),
-            DB::raw('ROUND(co.amount,2) as dr'),
-            DB::raw('0 as cr'),
-            DB::raw("'challan' as type")
-        )->get();
+    // $debits = DB::table('challan_order as co')
+        // ->where('co.ch_dealer_id', $dealer)
+        // ->where('co.ch_retailer_id', $retailerId)
+        // ->select(
+            // 'co.ch_no as voucher',
+            // DB::raw("DATE_FORMAT(co.ch_date,'%Y-%m-%d') as voucher_date"),
+            // DB::raw('ROUND(co.amount,2) as dr'),
+            // DB::raw('0 as cr'),
+            // DB::raw("'challan' as type")
+        // )->get();
 
-    $credits = DB::table('challan_order_wise_payment as cwp')
-        ->join('challan_order_wise_payment_details as cwpd', 'cwpd.pay_id', '=', 'cwp.pay_id')
-        ->where('cwp.retailer_id', $retailerId)
-        ->select(
-            DB::raw('cwpd.challan_no as voucher'),
-            DB::raw("DATE_FORMAT(cwp.payment_date,'%Y-%m-%d') as voucher_date"),
-            DB::raw('0 as dr'),
-            DB::raw('ROUND(cwp.pay_amount,2) as cr'),
-            DB::raw("'payment' as type")
-        )->get();
+    // $credits = DB::table('challan_order_wise_payment as cwp')
+        // ->join('challan_order_wise_payment_details as cwpd', 'cwpd.pay_id', '=', 'cwp.pay_id')
+        // ->where('cwp.retailer_id', $retailerId)
+        // ->select(
+            // DB::raw('cwpd.challan_no as voucher'),
+            // DB::raw("DATE_FORMAT(cwp.payment_date,'%Y-%m-%d') as voucher_date"),
+            // DB::raw('0 as dr'),
+            // DB::raw('ROUND(cwp.pay_amount,2) as cr'),
+            // DB::raw("'payment' as type")
+        // )->get();
 
-    $opening = (float) DB::table('old_payment_dues')
-        ->where('ch_dealer_id', $dealer)->where('ch_retailer_id', $retailerId)
-        ->sum('amount');
+    // $opening = (float) DB::table('old_payment_dues')
+        // ->where('ch_dealer_id', $dealer)->where('ch_retailer_id', $retailerId)
+        // ->sum('amount');
 
-    $rows = $debits->merge($credits)
-        ->sortBy(fn($r) => $r->voucher_date.$r->voucher)
-        ->values();
+    // $rows = $debits->merge($credits)
+        // ->sortBy(fn($r) => $r->voucher_date.$r->voucher)
+        // ->values();
 
-    $closing = $opening + $rows->sum('dr') - $rows->sum('cr');
+    // $closing = $opening + $rows->sum('dr') - $rows->sum('cr');
 
-    return $this->ok([
-        'opening_balance' => $opening,
-        'rows'            => $rows,
-        'closing_balance' => $closing,
-        'totals'          => [
-            'dr' => round($rows->sum('dr'), 2),
-            'cr' => round($rows->sum('cr'), 2),
-        ],
-    ], ['retailer_id' => $retailerId]);
-}
+    // return $this->ok([
+        // 'opening_balance' => $opening,
+        // 'rows'            => $rows,
+        // 'closing_balance' => $closing,
+        // 'totals'          => [
+            // 'dr' => round($rows->sum('dr'), 2),
+            // 'cr' => round($rows->sum('cr'), 2),
+        // ],
+    // ], ['retailer_id' => $retailerId]);
+// }
 
     // =========================================================
     // 2) Retailer Ledger (with opening)

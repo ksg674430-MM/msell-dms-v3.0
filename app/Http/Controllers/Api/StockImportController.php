@@ -10,83 +10,83 @@ use Illuminate\Support\Facades\DB;
 
 class StockImportController extends Controller
 {
-    /**
-     * GET /api/opening-stocks/import-format
-     */
-    public function importFormat(Request $request)
-    {
-        $user            = $request->user();
-        $dealerId        = (int) $user->dealer_id;
-        $companyId       = (int) ($user->company_id ?? 0);
-        $stateId         = (string) ($user->state_id ?? 0);
-        $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
+    // /**
+     // * GET /api/opening-stocks/import-format
+     // */
+    // public function importFormat(Request $request)
+    // {
+        // $user            = $request->user();
+        // $dealerId        = (int) $user->dealer_id;
+        // $companyId       = (int) ($user->company_id ?? 0);
+        // $stateId         = (string) ($user->state_id ?? 0);
+        // $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
 
-        $dealer = DB::selectOne(
-            "SELECT id, dealer_code, csa_id, ownership_type_id, template_id
-               FROM dealer WHERE id = ? LIMIT 1",
-            [$dealerId]
-        );
+        // $dealer = DB::selectOne(
+            // "SELECT id, dealer_code, csa_id, ownership_type_id, template_id
+               // FROM dealer WHERE id = ? LIMIT 1",
+            // [$dealerId]
+        // );
 
-        if (!$dealer) {
-            return response()->json(['status' => false, 'message' => 'Dealer not found'], 404);
-        }
+        // if (!$dealer) {
+            // return response()->json(['status' => false, 'message' => 'Dealer not found'], 404);
+        // }
 
-        if ($ownershipTypeId === 0) {
-            $ownershipTypeId = (int) ($dealer->ownership_type_id ?? 0);
-        }
-        $templateId = (int) ($dealer->template_id ?? 0);
+        // if ($ownershipTypeId === 0) {
+            // $ownershipTypeId = (int) ($dealer->ownership_type_id ?? 0);
+        // }
+        // $templateId = (int) ($dealer->template_id ?? 0);
 
-        // Piece-level only (case-quantity on hold)
-        $isDepo           = ($ownershipTypeId === 245);
-        $useTemplateRates = ($companyId === 213 && $templateId > 0);
+        // // Piece-level only (case-quantity on hold)
+        // $isDepo           = ($ownershipTypeId === 245);
+        // $useTemplateRates = ($companyId === 213 && $templateId > 0);
 
-        if ($isDepo) {
-            $rateCol = 'ss_pcs_rate';
-            $mrpCol  = 'mrp_pcs';
-        } else {
-            $rateCol = 'dealer_pcs_rate';
-            $mrpCol  = 'mrp_pcs';
-        }
+        // if ($isDepo) {
+            // $rateCol = 'ss_pcs_rate';
+            // $mrpCol  = 'mrp_pcs';
+        // } else {
+            // $rateCol = 'dealer_pcs_rate';
+            // $mrpCol  = 'mrp_pcs';
+        // }
 
-        $rateTable = $useTemplateRates ? 'product_rate_list_template' : 'product_rate_list';
+        // $rateTable = $useTemplateRates ? 'product_rate_list_template' : 'product_rate_list';
 
-        $rows = DB::select(
-            "SELECT cp.id,
-                    cp.itemcode,
-                    cp.name AS product_name,
-                    prl.{$mrpCol}  AS mrp,
-                    prl.{$rateCol} AS rate
-               FROM catalog_product cp
-               LEFT JOIN {$rateTable} prl
-                      ON prl.product_id = cp.id
-                     AND prl.state_id   = ?
-                     AND prl.status     = 1
-              WHERE cp.company_id = ?
-                AND cp.status     = 1
-              ORDER BY cp.name ASC",
-            [$stateId, $companyId]
-        );
+        // $rows = DB::select(
+            // "SELECT cp.id,
+                    // cp.itemcode,
+                    // cp.name AS product_name,
+                    // prl.{$mrpCol}  AS mrp,
+                    // prl.{$rateCol} AS rate
+               // FROM catalog_product cp
+               // LEFT JOIN {$rateTable} prl
+                      // ON prl.product_id = cp.id
+                     // AND prl.state_id   = ?
+                     // AND prl.status     = 1
+              // WHERE cp.company_id = ?
+                // AND cp.status     = 1
+              // ORDER BY cp.name ASC",
+            // [$stateId, $companyId]
+        // );
 
-        $csv = "S.No,Item Code,Product Name,MRP,Rate,Quantity(In PCS),Batch No,Mfg Date(dd/mm/yyyy)\n";
-        $i = 1;
-        foreach ($rows as $r) {
-            $csv .= implode(',', [
-                $i++,
-                $this->csvEscape($r->itemcode),
-                $this->csvEscape($r->product_name),
-                number_format((float) ($r->mrp  ?? 0), 2, '.', ''),
-                number_format((float) ($r->rate ?? 0), 2, '.', ''),
-                0,
-                '',
-                '',
-            ]) . "\n";
-        }
+        // $csv = "S.No,Item Code,Product Name,MRP,Rate,Quantity(In PCS),Batch No,Mfg Date(dd/mm/yyyy)\n";
+        // $i = 1;
+        // foreach ($rows as $r) {
+            // $csv .= implode(',', [
+                // $i++,
+                // $this->csvEscape($r->itemcode),
+                // $this->csvEscape($r->product_name),
+                // number_format((float) ($r->mrp  ?? 0), 2, '.', ''),
+                // number_format((float) ($r->rate ?? 0), 2, '.', ''),
+                // 0,
+                // '',
+                // '',
+            // ]) . "\n";
+        // }
 
-        return response($csv, 200, [
-            'Content-Type'        => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="PreviousStock.csv"',
-        ]);
-    }
+        // return response($csv, 200, [
+            // 'Content-Type'        => 'text/csv',
+            // 'Content-Disposition' => 'attachment; filename="PreviousStock.csv"',
+        // ]);
+    // }
 
     /**
      * POST /api/opening-stocks/import
@@ -244,7 +244,7 @@ class StockImportController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             if (is_resource($fh)) fclose($fh);
-            return response()->json(['status' => false, 'message' => 'Import failed: ' . $e->getMessage()], 500);
+            return response()->json(['status' => false, 'message' => 'Import failed: ' . safe_error_message($e)], 500);
         }
     }
 
@@ -456,7 +456,7 @@ class StockImportController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
             if (is_resource($fh)) fclose($fh);
-            return response()->json(['status' => false, 'message' => 'Import failed: ' . $e->getMessage()], 500);
+            return response()->json(['status' => false, 'message' => 'Import failed: ' . safe_error_message($e)], 500);
         }
     }
 

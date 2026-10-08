@@ -35,16 +35,16 @@ class DepotDamageInvoiceController extends Controller
         return response()->json($this->service->save($request->validated(), $request->user()), 201);
     }
 
-    public function update(UpdateDepotDamageInvoiceRequest $request, string $id)
-    {
-        return response()->json($this->service->update($id, $request->validated(), $request->user()));
-    }
+    // public function update(UpdateDepotDamageInvoiceRequest $request, string $id)
+    // {
+        // return response()->json($this->service->update($id, $request->validated(), $request->user()));
+    // }
 
-    public function destroy(Request $request, string $id)
-    {
-        $this->service->delete($id, $request->user());
-        return response()->json(['status' => true, 'message' => 'Depot damage invoice deleted.']);
-    }
+    // public function destroy(Request $request, string $id)
+    // {
+        // $this->service->delete($id, $request->user());
+        // return response()->json(['status' => true, 'message' => 'Depot damage invoice deleted.']);
+    // }
 
     public function nextNumber(Request $request)
     {

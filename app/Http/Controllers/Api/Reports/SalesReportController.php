@@ -139,70 +139,70 @@ class SalesReportController extends Controller
         return $this->ok($rows, ['from' => $from, 'to' => $to]);
     }
 
-    public function itemSale(Request $request)
-    {
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope($request);
+    // public function itemSale(Request $request)
+    // {
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope($request);
 
-        $q = DB::table('user_sales_order as uso')
-            ->join('user_sales_order_details as usod', 'usod.order_id', '=', 'uso.order_id')
-            ->join('catalog_product as cp', 'cp.id', '=', 'usod.product_id')
-            ->join('person as p', 'p.id', '=', 'uso.user_id')
-            ->leftJoin('location_7 as l7', 'l7.id', '=', 'uso.location_id')
-            ->where('uso.dealer_id', $dealer)
-            ->whereBetween(DB::raw('DATE(uso.date)'), [$from, $to]);
+        // $q = DB::table('user_sales_order as uso')
+            // ->join('user_sales_order_details as usod', 'usod.order_id', '=', 'uso.order_id')
+            // ->join('catalog_product as cp', 'cp.id', '=', 'usod.product_id')
+            // ->join('person as p', 'p.id', '=', 'uso.user_id')
+            // ->leftJoin('location_7 as l7', 'l7.id', '=', 'uso.location_id')
+            // ->where('uso.dealer_id', $dealer)
+            // ->whereBetween(DB::raw('DATE(uso.date)'), [$from, $to]);
 
-        if ($request->filled('user_id')) $q->where('uso.user_id', $request->user_id);
+        // if ($request->filled('user_id')) $q->where('uso.user_id', $request->user_id);
 
-        $rows = $q->groupBy('cp.id', 'cp.name', 'uso.user_id', 'uso.date')
-            ->select([
-                'cp.id as product_id',
-                'cp.name as product_name',
-                DB::raw('SUM(usod.case_quantity) as case_quantity'),
-                DB::raw('SUM(usod.quantity) as quantity'),
-                DB::raw('SUM((usod.rate * usod.quantity) + (usod.case_rate * usod.case_quantity)) as sale_value'),
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as user_name"),
-                DB::raw('GROUP_CONCAT(DISTINCT l7.name) as beat_name'),
-                'uso.user_id',
-                'uso.date',
-            ])
-            ->orderBy('product_name')
-            ->get();
+        // $rows = $q->groupBy('cp.id', 'cp.name', 'uso.user_id', 'uso.date')
+            // ->select([
+                // 'cp.id as product_id',
+                // 'cp.name as product_name',
+                // DB::raw('SUM(usod.case_quantity) as case_quantity'),
+                // DB::raw('SUM(usod.quantity) as quantity'),
+                // DB::raw('SUM((usod.rate * usod.quantity) + (usod.case_rate * usod.case_quantity)) as sale_value'),
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as user_name"),
+                // DB::raw('GROUP_CONCAT(DISTINCT l7.name) as beat_name'),
+                // 'uso.user_id',
+                // 'uso.date',
+            // ])
+            // ->orderBy('product_name')
+            // ->get();
 
-        $mrps = DB::table('product_rate_list')->where('company_id', $company)->pluck('mrp_pcs', 'product_id');
+        // $mrps = DB::table('product_rate_list')->where('company_id', $company)->pluck('mrp_pcs', 'product_id');
 
-        return $this->ok($rows, ['from' => $from, 'to' => $to, 'mrp' => $mrps]);
-    }
+        // return $this->ok($rows, ['from' => $from, 'to' => $to, 'mrp' => $mrps]);
+    // }
 
-    public function itemChallan(Request $request)
-    {
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer] = $this->scope($request);
+    // public function itemChallan(Request $request)
+    // {
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer] = $this->scope($request);
 
-        $q = DB::table('challan_order as co')
-            ->join('challan_order_details as cod', 'co.id', '=', 'cod.ch_id')
-            ->join('catalog_product as cp', 'cp.id', '=', 'cod.product_id')
-            ->join('person as p', 'p.id', '=', 'co.ch_user_id')
-            ->where('co.ch_dealer_id', $dealer)
-            ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to]);
+        // $q = DB::table('challan_order as co')
+            // ->join('challan_order_details as cod', 'co.id', '=', 'cod.ch_id')
+            // ->join('catalog_product as cp', 'cp.id', '=', 'cod.product_id')
+            // ->join('person as p', 'p.id', '=', 'co.ch_user_id')
+            // ->where('co.ch_dealer_id', $dealer)
+            // ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to]);
 
-        if ($request->filled('user_id')) $q->where('co.ch_user_id', $request->user_id);
+        // if ($request->filled('user_id')) $q->where('co.ch_user_id', $request->user_id);
 
-        $rows = $q->groupBy('cp.id', 'cp.name', 'co.ch_user_id')
-            ->select([
-                'cp.id as product_id',
-                'cp.name as product_name',
-                DB::raw('SUM(cod.qty) as quantity'),
-                DB::raw('SUM(cod.product_rate * cod.qty) as sale_value'),
-                DB::raw('SUM(cod.vat_amt) as vat_amt'),
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as user_name"),
-                'co.ch_user_id as user_id',
-            ])
-            ->orderBy('product_name')
-            ->get();
+        // $rows = $q->groupBy('cp.id', 'cp.name', 'co.ch_user_id')
+            // ->select([
+                // 'cp.id as product_id',
+                // 'cp.name as product_name',
+                // DB::raw('SUM(cod.qty) as quantity'),
+                // DB::raw('SUM(cod.product_rate * cod.qty) as sale_value'),
+                // DB::raw('SUM(cod.vat_amt) as vat_amt'),
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as user_name"),
+                // 'co.ch_user_id as user_id',
+            // ])
+            // ->orderBy('product_name')
+            // ->get();
 
-        return $this->ok($rows, ['from' => $from, 'to' => $to]);
-    }
+        // return $this->ok($rows, ['from' => $from, 'to' => $to]);
+    // }
 
   public function retailerBillSummary(Request $request)
 {
@@ -259,57 +259,57 @@ class SalesReportController extends Controller
         return $this->ok($rows, ['as_on' => $today]);
     }
 
-  public function salesPurchasePerformance(Request $request)
-{
-    [$from, $to] = $this->dateRange($request);
-    ['dealer_id' => $dealer] = $this->scope($request);
+  // public function salesPurchasePerformance(Request $request)
+// {
+    // [$from, $to] = $this->dateRange($request);
+    // ['dealer_id' => $dealer] = $this->scope($request);
 
-    $startMonth = \Carbon\Carbon::parse($from)->startOfMonth();
-    $endMonth   = \Carbon\Carbon::parse($to)->endOfMonth();
-    $period     = new \DatePeriod($startMonth, new \DateInterval('P1M'), $endMonth->copy()->addDay());
+    // $startMonth = \Carbon\Carbon::parse($from)->startOfMonth();
+    // $endMonth   = \Carbon\Carbon::parse($to)->endOfMonth();
+    // $period     = new \DatePeriod($startMonth, new \DateInterval('P1M'), $endMonth->copy()->addDay());
 
-    $out = [];
-    foreach ($period as $dt) {
-        $ym    = $dt->format('Y-m');
-        $label = $dt->format('M-Y');
+    // $out = [];
+    // foreach ($period as $dt) {
+        // $ym    = $dt->format('Y-m');
+        // $label = $dt->format('M-Y');
 
-        $sale = DB::table('challan_order')
-            ->where('ch_dealer_id', $dealer)
-            ->whereRaw("DATE_FORMAT(ch_date,'%Y-%m') = ?", [$ym])
-            ->sum('amount_round');
+        // $sale = DB::table('challan_order')
+            // ->where('ch_dealer_id', $dealer)
+            // ->whereRaw("DATE_FORMAT(ch_date,'%Y-%m') = ?", [$ym])
+            // ->sum('amount_round');
 
-        $purchase = DB::table('purchase_order as po')
-            ->join('purchase_order_details as pod', function ($j) {
-                $j->on('po.order_id', '=', 'pod.order_id')
-                  ->on('po.challan_no', '=', 'pod.purchase_inv');
-            })
-            ->where('po.dealer_id', $dealer)
-            ->whereRaw("DATE_FORMAT(po.created_date,'%Y-%m') = ?", [$ym])
-            ->sum('pod.total_amount');
+        // $purchase = DB::table('purchase_order as po')
+            // ->join('purchase_order_details as pod', function ($j) {
+                // $j->on('po.order_id', '=', 'pod.order_id')
+                  // ->on('po.challan_no', '=', 'pod.purchase_inv');
+            // })
+            // ->where('po.dealer_id', $dealer)
+            // ->whereRaw("DATE_FORMAT(po.created_date,'%Y-%m') = ?", [$ym])
+            // ->sum('pod.total_amount');
 
-        $out[] = ['month' => $ym, 'label' => $label, 'sale' => (float) $sale, 'purchase' => (float) $purchase];
-    }
+        // $out[] = ['month' => $ym, 'label' => $label, 'sale' => (float) $sale, 'purchase' => (float) $purchase];
+    // }
 
-    return $this->ok($out);
-}
+    // return $this->ok($out);
+// }
 
-    public function salesPurchaseList(Request $request)
-    {
-        ['dealer_id' => $dealer] = $this->scope($request);
+    // public function salesPurchaseList(Request $request)
+    // {
+        // ['dealer_id' => $dealer] = $this->scope($request);
 
-        $rows = DB::table('challan_order as co')
-            ->join('challan_order_details as cod', 'cod.ch_id', '=', 'co.id')
-            ->join('catalog_product as cp', 'cp.id', '=', 'cod.product_id')
-            ->leftJoin('catalog_2 as c2', 'c2.id', '=', 'cp.catalog_id')
-            ->leftJoin('catalog_1 as c1', 'c1.id', '=', 'c2.catalog_1_id')
-            ->leftJoin('other_company as oc', 'oc.id', '=', 'cp.company_id')
-            ->where('co.ch_dealer_id', $dealer)
-            ->groupBy('c2.id', 'c2.name')
-            ->select(['c2.id as pid', 'c2.name as cat'])
-            ->orderBy('cat')->get();
+        // $rows = DB::table('challan_order as co')
+            // ->join('challan_order_details as cod', 'cod.ch_id', '=', 'co.id')
+            // ->join('catalog_product as cp', 'cp.id', '=', 'cod.product_id')
+            // ->leftJoin('catalog_2 as c2', 'c2.id', '=', 'cp.catalog_id')
+            // ->leftJoin('catalog_1 as c1', 'c1.id', '=', 'c2.catalog_1_id')
+            // ->leftJoin('other_company as oc', 'oc.id', '=', 'cp.company_id')
+            // ->where('co.ch_dealer_id', $dealer)
+            // ->groupBy('c2.id', 'c2.name')
+            // ->select(['c2.id as pid', 'c2.name as cat'])
+            // ->orderBy('cat')->get();
 
-        return $this->ok($rows);
-    }
+        // return $this->ok($rows);
+    // }
 
     public function retailerCategorySale(Request $request)
     {

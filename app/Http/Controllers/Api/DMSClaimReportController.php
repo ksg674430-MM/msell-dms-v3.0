@@ -12,6 +12,8 @@ class DMSClaimReportController extends Controller
 {
     protected $dealer_id;
 protected $company_id;
+    protected $csa_id = 0;
+    protected $role_name = '';
 
 public function __construct()
 {
@@ -36,7 +38,23 @@ private function initAuth(Request $request): void
 
     $this->dealer_id  = (int) $user->dealer_id;
     $this->company_id = (int) $user->company_id;
+    $this->csa_id     = (int) ($user->csa_id ?? 0);
+    $this->role_name  = trim((string) DB::table('_role')->where('role_id', $user->role_id)->value('rolename'));
 }
+
+    private function scopeDealer($query, string $column)
+    {
+        if ($this->role_name === 'Super Admin') {
+            return $query;
+        }
+        if ($this->csa_id > 0) {
+            return $query->where(fn ($w) => $w->where($column, $this->dealer_id)->orWhereIn($column, DB::table('dealer')
+                ->select('id')
+                ->where('company_id', $this->company_id)
+                ->where('csa_id', $this->csa_id)));
+        }
+        return $query->where($column, $this->dealer_id);
+    }
 
     private function resolveDateRange(Request $request): array
     {
@@ -52,25 +70,25 @@ private function initAuth(Request $request): void
         ];
     }
 
-    /**
-     * Static filter data (states / towns) for the claim report screen.
-     */
-    public function dmsClaimReport(Request $request)
-    {
-        $this->initAuth($request);
+    // /**
+     // * Static filter data (states / towns) for the claim report screen.
+     // */
+    // public function dmsClaimReport(Request $request)
+    // {
+        // $this->initAuth($request);
 
-        return response()->json([
-            'success' => true,
-            'data'    => [
-                'states' => Location3::where('status', 1)
-                    ->where('company_id', $this->company_id)
-                    ->pluck('name', 'id'),
-                'towns'  => Location6::where('status', 1)
-                    ->where('company_id', $this->company_id)
-                    ->pluck('name', 'id'),
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'success' => true,
+            // 'data'    => [
+                // 'states' => Location3::where('status', 1)
+                    // ->where('company_id', $this->company_id)
+                    // ->pluck('name', 'id'),
+                // 'towns'  => Location6::where('status', 1)
+                    // ->where('company_id', $this->company_id)
+                    // ->pluck('name', 'id'),
+            // ],
+        // ]);
+    // }
 
     /**
      * Consolidated DGR + Sampling + Rate Difference claim report.
@@ -109,8 +127,8 @@ private function initAuth(Request $request): void
                 DB::raw("SUM(rate*quantity) as claim_amount"),
                 'dealer.dealer_code'
             )
-            ->where('dms_dealer_claim.dealer_id', $this->dealer_id)
             ->where('dms_dealer_claim.company_id', $companyId)
+            ->where(fn ($w) => $this->scopeDealer($w, 'dms_dealer_claim.dealer_id'))
             ->where('dealer.company_id', $companyId)
             ->whereRaw("DATE_FORMAT(dms_dealer_claim.date,'%Y-%m-%d') >='$fromDate' and DATE_FORMAT(dms_dealer_claim.date,'%Y-%m-%d') <='$toDate'")
             ->where('claim_status', '=', '0')
@@ -159,8 +177,8 @@ private function initAuth(Request $request): void
         DB::raw("DATE_FORMAT(samplingclaim.date_time, '%Y-%m-%d') as date"),
         DB::raw("SUM(rate_case * sampling_qty) as claim_amount"),
     ])
-    ->where('samplingclaim.dealer_id', $this->dealer_id)
     ->where('samplingclaim.company_id', $companyId)
+    ->where(fn ($w) => $this->scopeDealer($w, 'samplingclaim.dealer_id'))
     ->where('dealer.company_id', $companyId)
     ->whereDate('samplingclaim.date_time', '>=', $fromDate)
     ->whereDate('samplingclaim.date_time', '<=', $toDate)
@@ -219,7 +237,7 @@ private function initAuth(Request $request): void
         DB::raw("SUM(challan_rate * challan_qty) as claim_amount"),
     ])
     ->where('dms_challan_claim.company_id', $companyId)
-    ->where('dms_challan_claim.dealer_id', $this->dealer_id)
+    ->where(fn ($w) => $this->scopeDealer($w, 'dms_challan_claim.dealer_id'))
     ->where('dealer.company_id', $companyId)
     ->whereDate('dms_challan_claim.date_time', '>=', $fromDate)
     ->whereDate('dms_challan_claim.date_time', '<=', $toDate)
@@ -305,7 +323,12 @@ private function initAuth(Request $request): void
         $dealerClaimData = DB::table('dms_dealer_claim')
             ->where('order_id', $orderId)
             ->where('company_id', $companyId)
+            ->where(fn ($w) => $this->scopeDealer($w, 'dealer_id'))
             ->first();
+
+        if (!$dealerClaimData) {
+            return response()->json(['success' => false, 'message' => 'Claim not found.'], 404);
+        }
 
         if (!empty($dealerClaimData->order_id_string)) {
             $orderIds     = explode(',', $dealerClaimData->order_id_string);
@@ -381,7 +404,7 @@ private function initAuth(Request $request): void
             ->where('order_id', $orderId)
             ->where('samplingclaim.company_id', $companyId)
             ->where('dealer.company_id', $companyId)
-            ->where('samplingclaim.dealer_id', $this->dealer_id)
+            ->where(fn ($w) => $this->scopeDealer($w, 'samplingclaim.dealer_id'))
             ->first();
 
         if (!$challan) {
@@ -436,6 +459,7 @@ private function initAuth(Request $request): void
             ->select('dms_challan_claim.*', 'dealer.name as dealer_name')
             ->where('order_id', $orderId)
             ->where('dms_challan_claim.company_id', $companyId)
+            ->where(fn ($w) => $this->scopeDealer($w, 'dms_challan_claim.dealer_id'))
             ->where('dealer.company_id', $companyId)
             ->first();
 

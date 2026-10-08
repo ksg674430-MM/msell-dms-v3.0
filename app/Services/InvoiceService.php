@@ -136,10 +136,10 @@ class InvoiceService
             }
         }
 
-        $this->refreshOrderStatus($orderId);
+        $this->refreshOrderStatus($orderId, $dealerId);
     }
 
-    public function reopenSalesOrders(array $lines): void
+    public function reopenSalesOrders(array $lines, int $dealerId): void
     {
         $byOrder = [];
         foreach ($lines as $l) {
@@ -150,7 +150,7 @@ class InvoiceService
         }
 
         foreach ($byOrder as $orderId => $products) {
-            $order = DB::selectOne("SELECT order_status FROM user_sales_order WHERE order_id = ? LIMIT 1 FOR UPDATE", [$orderId]);
+            $order = DB::selectOne("SELECT order_status FROM user_sales_order WHERE order_id = ? AND dealer_id = ? LIMIT 1 FOR UPDATE", [$orderId, $dealerId]);
             if (!$order || !in_array((string) $order->order_status, ['0', '1', '7'], true)) continue;
 
             foreach ($products as $productId => $qty) {
@@ -167,11 +167,11 @@ class InvoiceService
                 DB::update("UPDATE user_sales_order_details SET status = 0, remaining_qty = ? WHERE id = ?", [$remaining, $line->id]);
             }
 
-            $this->refreshOrderStatus($orderId);
+            $this->refreshOrderStatus($orderId, $dealerId);
         }
     }
 
-    protected function refreshOrderStatus(string $orderId): void
+    protected function refreshOrderStatus(string $orderId, int $dealerId): void
     {
         $row = DB::selectOne(
             "SELECT SUM(status = 2) AS done, SUM(status <> 2 AND remaining_qty > 0) AS partial, COUNT(*) AS n
@@ -179,6 +179,6 @@ class InvoiceService
             [$orderId]
         );
         $status = (int) $row->done === (int) $row->n ? '1' : ((int) $row->done > 0 || (int) $row->partial > 0 ? '7' : '0');
-        DB::update("UPDATE user_sales_order SET order_status = ? WHERE order_id = ?", [$status, $orderId]);
+        DB::update("UPDATE user_sales_order SET order_status = ? WHERE order_id = ? AND dealer_id = ?", [$status, $orderId, $dealerId]);
     }
 }

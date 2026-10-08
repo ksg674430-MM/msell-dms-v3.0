@@ -250,7 +250,7 @@ class DispatchController extends Controller
             DB::commit();
         } catch (\Throwable $e) {
             DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'Save failed: ' . $e->getMessage()], 500);
+            return response()->json(['status' => false, 'message' => 'Save failed: ' . safe_error_message($e)], 500);
         }
 
         return response()->json([
@@ -261,242 +261,242 @@ class DispatchController extends Controller
         ]);
     }
 
-    /**
-     * GET /api/dispatches/{dispatch_id}
-     */
-    public function show(Request $request, string $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // /**
+     // * GET /api/dispatches/{dispatch_id}
+     // */
+    // public function show(Request $request, string $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        $header = DB::selectOne(
-            "SELECT * FROM daily_dispatch
-              WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$header) {
-            return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
-        }
+        // $header = DB::selectOne(
+            // "SELECT * FROM daily_dispatch
+              // WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$header) {
+            // return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
+        // }
 
-        $details = DB::select(
-            "SELECT ddd.sortorder,
-                    ch.id, ch.ch_no, ch.ch_date, ch.ch_retailer_id, ch.amount,
-                    r.name AS retailer_name,
-                    l7.name AS beat_name,
-                    COALESCE((
-                        SELECT SUM((cod.qty + cod.free_qty) * cp.weight)
-                          FROM challan_order_details cod
-                          LEFT JOIN catalog_product cp ON cp.id = cod.product_id
-                         WHERE cod.ch_id = ch.id
-                    ), 0) AS qty_gram
-               FROM daily_dispatch_details ddd
-               INNER JOIN challan_order ch ON ch.id = ddd.ch_id
-               LEFT JOIN retailer r        ON r.id  = ch.ch_retailer_id
-               LEFT JOIN location_7 l7     ON l7.id = r.location_id
-              WHERE ddd.dispatch_id = ?
-              ORDER BY ddd.sortorder ASC",
-            [$id]
-        );
+        // $details = DB::select(
+            // "SELECT ddd.sortorder,
+                    // ch.id, ch.ch_no, ch.ch_date, ch.ch_retailer_id, ch.amount,
+                    // r.name AS retailer_name,
+                    // l7.name AS beat_name,
+                    // COALESCE((
+                        // SELECT SUM((cod.qty + cod.free_qty) * cp.weight)
+                          // FROM challan_order_details cod
+                          // LEFT JOIN catalog_product cp ON cp.id = cod.product_id
+                         // WHERE cod.ch_id = ch.id
+                    // ), 0) AS qty_gram
+               // FROM daily_dispatch_details ddd
+               // INNER JOIN challan_order ch ON ch.id = ddd.ch_id
+               // LEFT JOIN retailer r        ON r.id  = ch.ch_retailer_id
+               // LEFT JOIN location_7 l7     ON l7.id = r.location_id
+              // WHERE ddd.dispatch_id = ?
+              // ORDER BY ddd.sortorder ASC",
+            // [$id]
+        // );
 
-        $items = [];
-        foreach ($details as $d) {
-            $items[] = [
-                'sortorder'     => (int) $d->sortorder,
-                'id'            => $d->id,
-                'ch_no'         => $d->ch_no,
-                'ch_date'       => $d->ch_date,
-                'retailer_id'   => $d->ch_retailer_id,
-                'retailer_name' => $d->retailer_name,
-                'beat_name'     => $d->beat_name,
-                'amount'        => (float) $d->amount,
-                'qty_gram'      => round((float) $d->qty_gram, 2),
-                'qty_kg'        => round((float) $d->qty_gram / 1000, 3),
-            ];
-        }
+        // $items = [];
+        // foreach ($details as $d) {
+            // $items[] = [
+                // 'sortorder'     => (int) $d->sortorder,
+                // 'id'            => $d->id,
+                // 'ch_no'         => $d->ch_no,
+                // 'ch_date'       => $d->ch_date,
+                // 'retailer_id'   => $d->ch_retailer_id,
+                // 'retailer_name' => $d->retailer_name,
+                // 'beat_name'     => $d->beat_name,
+                // 'amount'        => (float) $d->amount,
+                // 'qty_gram'      => round((float) $d->qty_gram, 2),
+                // 'qty_kg'        => round((float) $d->qty_gram / 1000, 3),
+            // ];
+        // }
 
-        return response()->json([
-            'status'  => true,
-            'header'  => $header,
-            'details' => $items,
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'header'  => $header,
+            // 'details' => $items,
+        // ]);
+    // }
 
-    /**
-     * PUT /api/dispatches/{dispatch_id}
-     */
-    public function update(Request $request, string $id): JsonResponse
-    {
-        $user      = $request->user();
-        $dealerId  = (int) $user->dealer_id;
-        $companyId = (int) ($user->company_id ?? 0);
+    // /**
+     // * PUT /api/dispatches/{dispatch_id}
+     // */
+    // public function update(Request $request, string $id): JsonResponse
+    // {
+        // $user      = $request->user();
+        // $dealerId  = (int) $user->dealer_id;
+        // $companyId = (int) ($user->company_id ?? 0);
 
-        $existing = DB::selectOne(
-            "SELECT dispatch_id, van_no FROM daily_dispatch
-              WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$existing) {
-            return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
-        }
+        // $existing = DB::selectOne(
+            // "SELECT dispatch_id, van_no FROM daily_dispatch
+              // WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$existing) {
+            // return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
+        // }
 
-        $validated = $request->validate([
-            'dispatch_date' => 'required|date',
-            'van_no'        => 'required|string|max:20',
-            'challan_ids'   => 'required|array|min:1',
-            'challan_ids.*' => 'integer',
-            'route'         => 'nullable|string|max:20',
-        ]);
+        // $validated = $request->validate([
+            // 'dispatch_date' => 'required|date',
+            // 'van_no'        => 'required|string|max:20',
+            // 'challan_ids'   => 'required|array|min:1',
+            // 'challan_ids.*' => 'integer',
+            // 'route'         => 'nullable|string|max:20',
+        // ]);
 
-        $challanIds = array_map('intval', $validated['challan_ids']);
-        $challanIds = array_values(array_unique($challanIds));
+        // $challanIds = array_map('intval', $validated['challan_ids']);
+        // $challanIds = array_values(array_unique($challanIds));
 
-        $van = DB::selectOne(
-            "SELECT capacity FROM van WHERE van_no = ? AND dealer_id = ? LIMIT 1",
-            [$validated['van_no'], $dealerId]
-        );
-        if (!$van) {
-            return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
-        }
+        // $van = DB::selectOne(
+            // "SELECT capacity FROM van WHERE van_no = ? AND dealer_id = ? LIMIT 1",
+            // [$validated['van_no'], $dealerId]
+        // );
+        // if (!$van) {
+            // return response()->json(['status' => false, 'message' => 'Van not found.'], 404);
+        // }
 
-        // Challans must belong to dealer. Current dispatch's challans allowed + fresh pending ones.
-        $currentChallanIds = DB::table('daily_dispatch_details')
-            ->where('dispatch_id', $id)
-            ->pluck('ch_id')
-            ->map(fn($v) => (int) $v)
-            ->toArray();
+        // // Challans must belong to dealer. Current dispatch's challans allowed + fresh pending ones.
+        // $currentChallanIds = DB::table('daily_dispatch_details')
+            // ->where('dispatch_id', $id)
+            // ->pluck('ch_id')
+            // ->map(fn($v) => (int) $v)
+            // ->toArray();
 
-        $allowedIds = array_merge($currentChallanIds, $challanIds);
+        // $allowedIds = array_merge($currentChallanIds, $challanIds);
 
-        $validChallans = DB::select(
-            "SELECT id FROM challan_order
-              WHERE id IN (" . implode(',', array_fill(0, count($allowedIds), '?')) . ")
-                AND ch_dealer_id = ?
-                AND (dispatch_status = 0 OR id IN (" . implode(',', array_fill(0, count($currentChallanIds), '?')) . "))",
-            array_merge($allowedIds, [$dealerId], $currentChallanIds ?: [0])
-        );
-        $validIds = array_map(fn($r) => (int) $r->id, $validChallans);
-        foreach ($challanIds as $cid) {
-            if (!in_array($cid, $validIds, true)) {
-                return response()->json([
-                    'status'  => false,
-                    'message' => "Challan {$cid} is not available for dispatch.",
-                ], 422);
-            }
-        }
+        // $validChallans = DB::select(
+            // "SELECT id FROM challan_order
+              // WHERE id IN (" . implode(',', array_fill(0, count($allowedIds), '?')) . ")
+                // AND ch_dealer_id = ?
+                // AND (dispatch_status = 0 OR id IN (" . implode(',', array_fill(0, count($currentChallanIds), '?')) . "))",
+            // array_merge($allowedIds, [$dealerId], $currentChallanIds ?: [0])
+        // );
+        // $validIds = array_map(fn($r) => (int) $r->id, $validChallans);
+        // foreach ($challanIds as $cid) {
+            // if (!in_array($cid, $validIds, true)) {
+                // return response()->json([
+                    // 'status'  => false,
+                    // 'message' => "Challan {$cid} is not available for dispatch.",
+                // ], 422);
+            // }
+        // }
 
-        $totalKg = $this->calcTotalWeightKg($challanIds);
-        if ($totalKg > (float) $van->capacity) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Selected quantity is greater than van capacity.',
-            ], 422);
-        }
+        // $totalKg = $this->calcTotalWeightKg($challanIds);
+        // if ($totalKg > (float) $van->capacity) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Selected quantity is greater than van capacity.',
+            // ], 422);
+        // }
 
-        DB::beginTransaction();
-        try {
-            // Update header
-            DB::update(
-                "UPDATE daily_dispatch
-                    SET van_no = ?, dispatch_date = ?, company_id = ?,
-                        total_bills = ?, route = ?
-                  WHERE dispatch_id = ? AND dealer_id = ?",
-                [
-                    $validated['van_no'],
-                    $validated['dispatch_date'] . ' 00:00:00',
-                    $companyId,
-                    count($challanIds),
-                    $validated['route'] ?? '',
-                    $id, $dealerId,
-                ]
-            );
+        // DB::beginTransaction();
+        // try {
+            // // Update header
+            // DB::update(
+                // "UPDATE daily_dispatch
+                    // SET van_no = ?, dispatch_date = ?, company_id = ?,
+                        // total_bills = ?, route = ?
+                  // WHERE dispatch_id = ? AND dealer_id = ?",
+                // [
+                    // $validated['van_no'],
+                    // $validated['dispatch_date'] . ' 00:00:00',
+                    // $companyId,
+                    // count($challanIds),
+                    // $validated['route'] ?? '',
+                    // $id, $dealerId,
+                // ]
+            // );
 
-            // Reset old challans (release)
-            if (!empty($currentChallanIds)) {
-                DB::update(
-                    "UPDATE challan_order SET dispatch_status = 0
-                      WHERE id IN (" . implode(',', array_fill(0, count($currentChallanIds), '?')) . ")",
-                    $currentChallanIds
-                );
-            }
+            // // Reset old challans (release)
+            // if (!empty($currentChallanIds)) {
+                // DB::update(
+                    // "UPDATE challan_order SET dispatch_status = 0
+                      // WHERE id IN (" . implode(',', array_fill(0, count($currentChallanIds), '?')) . ")",
+                    // $currentChallanIds
+                // );
+            // }
 
-            // Delete old details
-            DB::delete("DELETE FROM daily_dispatch_details WHERE dispatch_id = ?", [$id]);
+            // // Delete old details
+            // DB::delete("DELETE FROM daily_dispatch_details WHERE dispatch_id = ?", [$id]);
 
-            // Re-insert details
-            $sort = 1;
-            foreach ($challanIds as $chId) {
-                DB::insert(
-                    "INSERT INTO daily_dispatch_details
-                        (company_id, dispatch_id, ch_id, sortorder, sync_status)
-                     VALUES (?, ?, ?, ?, 1)",
-                    [$companyId, $id, $chId, $sort++]
-                );
-            }
+            // // Re-insert details
+            // $sort = 1;
+            // foreach ($challanIds as $chId) {
+                // DB::insert(
+                    // "INSERT INTO daily_dispatch_details
+                        // (company_id, dispatch_id, ch_id, sortorder, sync_status)
+                     // VALUES (?, ?, ?, ?, 1)",
+                    // [$companyId, $id, $chId, $sort++]
+                // );
+            // }
 
-            // Mark new challans dispatched
-            DB::update(
-                "UPDATE challan_order SET dispatch_status = 1
-                  WHERE id IN (" . implode(',', array_fill(0, count($challanIds), '?')) . ")",
-                $challanIds
-            );
+            // // Mark new challans dispatched
+            // DB::update(
+                // "UPDATE challan_order SET dispatch_status = 1
+                  // WHERE id IN (" . implode(',', array_fill(0, count($challanIds), '?')) . ")",
+                // $challanIds
+            // );
 
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'Update failed: ' . $e->getMessage()], 500);
-        }
+            // DB::commit();
+        // } catch (\Throwable $e) {
+            // DB::rollBack();
+            // return response()->json(['status' => false, 'message' => 'Update failed: ' . $e->getMessage()], 500);
+        // }
 
-        return response()->json(['status' => true, 'message' => 'Dispatch updated successfully.']);
-    }
+        // return response()->json(['status' => true, 'message' => 'Dispatch updated successfully.']);
+    // }
 
-    /**
-     * DELETE /api/dispatches/{dispatch_id}
-     * Removes dispatch + releases challans.
-     */
-    public function destroy(Request $request, string $id): JsonResponse
-    {
-        $user     = $request->user();
-        $dealerId = (int) $user->dealer_id;
+    // /**
+     // * DELETE /api/dispatches/{dispatch_id}
+     // * Removes dispatch + releases challans.
+     // */
+    // public function destroy(Request $request, string $id): JsonResponse
+    // {
+        // $user     = $request->user();
+        // $dealerId = (int) $user->dealer_id;
 
-        $existing = DB::selectOne(
-            "SELECT dispatch_id, delivery_status FROM daily_dispatch
-              WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
-            [$id, $dealerId]
-        );
-        if (!$existing) {
-            return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
-        }
-        if ((int) $existing->delivery_status === 1) {
-            return response()->json(['status' => false, 'message' => 'Cannot delete a delivered dispatch.'], 409);
-        }
+        // $existing = DB::selectOne(
+            // "SELECT dispatch_id, delivery_status FROM daily_dispatch
+              // WHERE dispatch_id = ? AND dealer_id = ? LIMIT 1",
+            // [$id, $dealerId]
+        // );
+        // if (!$existing) {
+            // return response()->json(['status' => false, 'message' => 'Dispatch not found.'], 404);
+        // }
+        // if ((int) $existing->delivery_status === 1) {
+            // return response()->json(['status' => false, 'message' => 'Cannot delete a delivered dispatch.'], 409);
+        // }
 
-        $challanIds = DB::table('daily_dispatch_details')
-            ->where('dispatch_id', $id)
-            ->pluck('ch_id')
-            ->map(fn($v) => (int) $v)
-            ->toArray();
+        // $challanIds = DB::table('daily_dispatch_details')
+            // ->where('dispatch_id', $id)
+            // ->pluck('ch_id')
+            // ->map(fn($v) => (int) $v)
+            // ->toArray();
 
-        DB::beginTransaction();
-        try {
-            if (!empty($challanIds)) {
-                DB::update(
-                    "UPDATE challan_order SET dispatch_status = 0
-                      WHERE id IN (" . implode(',', array_fill(0, count($challanIds), '?')) . ")",
-                    $challanIds
-                );
-            }
+        // DB::beginTransaction();
+        // try {
+            // if (!empty($challanIds)) {
+                // DB::update(
+                    // "UPDATE challan_order SET dispatch_status = 0
+                      // WHERE id IN (" . implode(',', array_fill(0, count($challanIds), '?')) . ")",
+                    // $challanIds
+                // );
+            // }
 
-            DB::delete("DELETE FROM daily_dispatch_details WHERE dispatch_id = ?", [$id]);
-            DB::delete("DELETE FROM daily_dispatch WHERE dispatch_id = ? AND dealer_id = ?", [$id, $dealerId]);
+            // DB::delete("DELETE FROM daily_dispatch_details WHERE dispatch_id = ?", [$id]);
+            // DB::delete("DELETE FROM daily_dispatch WHERE dispatch_id = ? AND dealer_id = ?", [$id, $dealerId]);
 
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['status' => false, 'message' => 'Delete failed: ' . $e->getMessage()], 500);
-        }
+            // DB::commit();
+        // } catch (\Throwable $e) {
+            // DB::rollBack();
+            // return response()->json(['status' => false, 'message' => 'Delete failed: ' . $e->getMessage()], 500);
+        // }
 
-        return response()->json(['status' => true, 'message' => 'Dispatch deleted and challans released.']);
-    }
+        // return response()->json(['status' => true, 'message' => 'Dispatch deleted and challans released.']);
+    // }
 
     /* ================= Helpers ================= */
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ScopesProducts;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Services\StockService;
@@ -9,6 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 class DamageLookupController extends Controller
 {
+    use ScopesProducts;
+
     /* ---------------- Retailers ---------------- */
 
     public function retailers(Request $request)
@@ -28,11 +31,11 @@ class DamageLookupController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function retailerLocation(Request $request, int $id)
-    {
-        $loc = DB::table('retailer')->where('id', $id)->value('location_id');
-        return response()->json(['location_id' => $loc]);
-    }
+    // public function retailerLocation(Request $request, int $id)
+    // {
+        // $loc = DB::table('retailer')->where('id', $id)->value('location_id');
+        // return response()->json(['location_id' => $loc]);
+    // }
 
     /* ---------------- Products ---------------- */
 
@@ -97,6 +100,7 @@ class DamageLookupController extends Controller
                 $base->where('prl.state_id', $stateId);
             }
 
+            $this->ownProduct($base, $companyIdCus, $dealerId);
             $row = $base->first([
                 'p.id as product_id',
                 DB::raw("CAST(prl.{$mrpCol} AS DECIMAL(16,2)) as mrp"),
@@ -162,6 +166,7 @@ class DamageLookupController extends Controller
                 $j->where('prl.state_id', $stateId);
             }
         });
+        $this->ownProduct($rate, $companyIdCus, $dealerId);
         $row = $rate->first([
             DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
             DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
@@ -193,46 +198,46 @@ class DamageLookupController extends Controller
         ]]);
     }
 
-    public function productDealerRate(Request $request, int $id)
-    {
-        $u = $request->user();
-        $stateId  = (string) ($u->state_id ?? 0);
-        $role     = strtoupper((string) ($u->rolename ?? ''));
-        $qtyType  = (string) ($u->quantity_type ?? '1');
+    // public function productDealerRate(Request $request, int $id)
+    // {
+        // $u = $request->user();
+        // $stateId  = (string) ($u->state_id ?? 0);
+        // $role     = strtoupper((string) ($u->rolename ?? ''));
+        // $qtyType  = (string) ($u->quantity_type ?? '1');
 
-        $rateCol = match (true) {
-            $role === 'DEPO'        && $qtyType === '0' => 'ss_pcs_rate',
-            $role === 'DEPO'                            => 'ss_case_rate',
-            $role === 'DISTRIBUTOR' && $qtyType === '0' => 'dealer_pcs_rate',
-            $role === 'DISTRIBUTOR'                     => 'dealer_rate',
-            $qtyType === '0'                            => 'dealer_pcs_rate',
-            default                                     => 'dealer_rate',
-        };
-        $mrpCol = $qtyType === '0' ? 'mrp_pcs' : 'mrp';
+        // $rateCol = match (true) {
+            // $role === 'DEPO'        && $qtyType === '0' => 'ss_pcs_rate',
+            // $role === 'DEPO'                            => 'ss_case_rate',
+            // $role === 'DISTRIBUTOR' && $qtyType === '0' => 'dealer_pcs_rate',
+            // $role === 'DISTRIBUTOR'                     => 'dealer_rate',
+            // $qtyType === '0'                            => 'dealer_pcs_rate',
+            // default                                     => 'dealer_rate',
+        // };
+        // $mrpCol = $qtyType === '0' ? 'mrp_pcs' : 'mrp';
 
-        $row = DB::table('product_rate_list as prl')
-            ->join('catalog_product as p', 'p.id', '=', 'prl.product_id')
-            ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
-            ->where('prl.state_id', $stateId)
-            ->where('prl.product_id', $id)
-            ->first([
-                DB::raw("CAST(prl.{$rateCol} AS DECIMAL(16,2)) as dealer_rate"),
-                DB::raw("CAST(prl.{$mrpCol} AS DECIMAL(16,2)) as mrp"),
-                DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as gst'),
-            ]);
+        // $row = DB::table('product_rate_list as prl')
+            // ->join('catalog_product as p', 'p.id', '=', 'prl.product_id')
+            // ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
+            // ->where('prl.state_id', $stateId)
+            // ->where('prl.product_id', $id)
+            // ->first([
+                // DB::raw("CAST(prl.{$rateCol} AS DECIMAL(16,2)) as dealer_rate"),
+                // DB::raw("CAST(prl.{$mrpCol} AS DECIMAL(16,2)) as mrp"),
+                // DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as gst'),
+            // ]);
 
-        return response()->json(['data' => $row]);
-    }
+        // return response()->json(['data' => $row]);
+    // }
 
-    public function productGst(Request $request, int $id)
-    {
-        $row = DB::table('catalog_product as cp')
-            ->join('_gst', '_gst.hsn_code', '=', 'cp.hsn_code')
-            ->where('cp.id', $id)
-            ->first([DB::raw('CAST(_gst.igst AS DECIMAL(6,2)) as vat')]);
+    // public function productGst(Request $request, int $id)
+    // {
+        // $row = DB::table('catalog_product as cp')
+            // ->join('_gst', '_gst.hsn_code', '=', 'cp.hsn_code')
+            // ->where('cp.id', $id)
+            // ->first([DB::raw('CAST(_gst.igst AS DECIMAL(6,2)) as vat')]);
 
-        return response()->json(['vat' => $row?->vat]);
-    }
+        // return response()->json(['vat' => $row?->vat]);
+    // }
 
     public function saleableNonSaleable(Request $request)
     {

@@ -13,62 +13,62 @@ class DmsReportController extends Controller
     ) {}
 
     /* ---------- DMS → Tally ---------- */
-    public function dmsToTallyReport(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->toTallyFilters($request->user()),
-        ]);
-    }
+    // public function dmsToTallyReport(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->toTallyFilters($request->user()),
+        // ]);
+    // }
 
-    public function dmsToTally(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->toTallyData($request, $request->user()),
-        ]);
-    }
+    // public function dmsToTally(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->toTallyData($request, $request->user()),
+        // ]);
+    // }
 
     /* ---------- Invoice Summary ---------- */
-    public function dmsInvoiceSummaryReport(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->invoiceSummaryFilters($request->user()),
-        ]);
-    }
+    // public function dmsInvoiceSummaryReport(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->invoiceSummaryFilters($request->user()),
+        // ]);
+    // }
 
-    public function dmsInvoiceSummary(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->invoiceSummaryData($request, $request->user()),
-        ]);
-    }
+    // public function dmsInvoiceSummary(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->invoiceSummaryData($request, $request->user()),
+        // ]);
+    // }
 
     /* ---------- Purchase ---------- */
-    public function dmsPurchaseReport(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->purchaseFilters($request->user()),
-        ]);
-    }
+    // public function dmsPurchaseReport(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->purchaseFilters($request->user()),
+        // ]);
+    // }
 
-    public function dmsPurchase(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->purchaseData($request, $request->user()),
-        ]);
-    }
+    // public function dmsPurchase(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->purchaseData($request, $request->user()),
+        // ]);
+    // }
 
     /* ---------- Common Report Section ---------- */
-    public function dmsCommonReportSection(Request $request)
-    {
-        return response()->json([
-            'status' => true,
-            'data'   => $this->service->commonReportSection($request, $request->user()),
-        ]);
-    }
+    // public function dmsCommonReportSection(Request $request)
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $this->service->commonReportSection($request, $request->user()),
+        // ]);
+    // }
 }

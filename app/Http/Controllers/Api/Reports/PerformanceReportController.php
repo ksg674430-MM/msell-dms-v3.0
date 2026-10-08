@@ -12,63 +12,63 @@ class PerformanceReportController extends Controller
     use ReportFilterTrait;
 
     // Legacy: report::get_user_sales_performance_list()
-    public function userSales(Request $request)
-    {
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope();
+    // public function userSales(Request $request)
+    // {
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope();
 
-        $rows = DB::table('user_sales_order as uso')
-            ->join('user_sales_order_details as usod', 'usod.order_id', '=', 'uso.order_id')
-            ->join('person as p', 'p.id', '=', 'uso.user_id')
-            ->where('uso.dealer_id', $dealer)
-            ->where('uso.company_id', $company)
-            ->whereBetween(DB::raw('DATE(uso.date)'), [$from, $to])
-            ->groupBy('uso.user_id', 'uso.dealer_id',
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)"))
-            ->select([
-                DB::raw('COUNT(DISTINCT uso.retailer_id) as tc'),
-                DB::raw('COUNT(DISTINCT usod.product_id) as total_sku'),
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as fullname"),
-                'uso.dealer_id',
-                'uso.user_id',
-                DB::raw('SUM(usod.rate * usod.quantity) as sale_value'),
-                DB::raw("(SELECT COUNT(DISTINCT uso1.retailer_id)
-                          FROM user_sales_order uso1
-                          WHERE uso1.dealer_id = uso.dealer_id
-                            AND uso1.user_id = uso.user_id
-                            AND uso1.call_status = 1
-                            AND DATE(uso1.date) BETWEEN '$from' AND '$to') as pc"),
-            ])
-            ->orderByDesc('sale_value')
-            ->get();
+        // $rows = DB::table('user_sales_order as uso')
+            // ->join('user_sales_order_details as usod', 'usod.order_id', '=', 'uso.order_id')
+            // ->join('person as p', 'p.id', '=', 'uso.user_id')
+            // ->where('uso.dealer_id', $dealer)
+            // ->where('uso.company_id', $company)
+            // ->whereBetween(DB::raw('DATE(uso.date)'), [$from, $to])
+            // ->groupBy('uso.user_id', 'uso.dealer_id',
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)"))
+            // ->select([
+                // DB::raw('COUNT(DISTINCT uso.retailer_id) as tc'),
+                // DB::raw('COUNT(DISTINCT usod.product_id) as total_sku'),
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as fullname"),
+                // 'uso.dealer_id',
+                // 'uso.user_id',
+                // DB::raw('SUM(usod.rate * usod.quantity) as sale_value'),
+                // DB::raw("(SELECT COUNT(DISTINCT uso1.retailer_id)
+                          // FROM user_sales_order uso1
+                          // WHERE uso1.dealer_id = uso.dealer_id
+                            // AND uso1.user_id = uso.user_id
+                            // AND uso1.call_status = 1
+                            // AND DATE(uso1.date) BETWEEN '$from' AND '$to') as pc"),
+            // ])
+            // ->orderByDesc('sale_value')
+            // ->get();
 
-        return $this->ok($rows, ['from' => $from, 'to' => $to]);
-    }
+        // return $this->ok($rows, ['from' => $from, 'to' => $to]);
+    // }
 
     // Legacy: report::get_user_bill_performance_list()
-    public function userBill(Request $request)
-    {
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope();
+    // public function userBill(Request $request)
+    // {
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer, 'company_id' => $company] = $this->scope();
 
-        $rows = DB::table('challan_order as co')
-            ->join('person as p', 'p.id', '=', 'co.ch_user_id')
-            ->where('co.ch_dealer_id', $dealer)
-            ->where('co.company_id', $company)
-            ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to])
-            ->groupBy('co.ch_user_id', 'co.ch_dealer_id',
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)"))
-            ->select([
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as fullname"),
-                'co.ch_dealer_id',
-                'co.ch_user_id as user_id',
-                DB::raw('ROUND(SUM(co.amount),2) as sale_value'),
-            ])
-            ->orderByDesc('sale_value')
-            ->get();
+        // $rows = DB::table('challan_order as co')
+            // ->join('person as p', 'p.id', '=', 'co.ch_user_id')
+            // ->where('co.ch_dealer_id', $dealer)
+            // ->where('co.company_id', $company)
+            // ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to])
+            // ->groupBy('co.ch_user_id', 'co.ch_dealer_id',
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name)"))
+            // ->select([
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as fullname"),
+                // 'co.ch_dealer_id',
+                // 'co.ch_user_id as user_id',
+                // DB::raw('ROUND(SUM(co.amount),2) as sale_value'),
+            // ])
+            // ->orderByDesc('sale_value')
+            // ->get();
 
-        return $this->ok($rows, ['from' => $from, 'to' => $to]);
-    }
+        // return $this->ok($rows, ['from' => $from, 'to' => $to]);
+    // }
 
     // Legacy: report::get_retailer_sales_performance_list()
     public function retailerSales(Request $request)

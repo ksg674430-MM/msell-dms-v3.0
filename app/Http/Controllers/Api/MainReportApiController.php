@@ -99,516 +99,516 @@ class MainReportApiController extends Controller
     /*  Dispatch Order                                                     */
     /* ------------------------------------------------------------------ */
 
-    public function dispatchOrderIndex(Request $request)
-    {
-        $company_id  = $request->user()->company_id;
-        $distributor = DB::table('dealer')
-            ->where('dealer_status', 1)
-            ->where('company_id', $company_id)
-            ->pluck('name', 'id');
+    // public function dispatchOrderIndex(Request $request)
+    // {
+        // $company_id  = $request->user()->company_id;
+        // $distributor = DB::table('dealer')
+            // ->where('dealer_status', 1)
+            // ->where('company_id', $company_id)
+            // ->pluck('name', 'id');
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'company_id'  => $company_id,
-                'distributor' => $distributor,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'company_id'  => $company_id,
+                // 'distributor' => $distributor,
+            // ],
+        // ]);
+    // }
 
-    public function dispatchOrderAjax(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dispatchOrderAjax(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
+        // [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
 
-        $distributorIds = $request->input('distributor', []);
+        // $distributorIds = $request->input('distributor', []);
 
-        $query = DB::table('purchase_order')
-            ->join('dealer', 'dealer.id', '=', 'purchase_order.dealer_id')
-            ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.id')
-            ->join('catalog_product', 'catalog_product.id', '=', 'purchase_order_details.product_id')
-            ->select(
-                'dealer.id as dealer_id',
-                'dealer.name as distributor_name',
-                'purchase_order.id as order_id',
-                'catalog_product.name as sku_name',
-                DB::raw('purchase_order_details.total_value as msell_order_amount'),
-                DB::raw('purchase_order_details.inv_busy_amt as billing_amount'),
-                DB::raw('DATE(purchase_order.dispatch_date) as dispatch_date')
-            )
-            ->where('purchase_order.invoice_no_p', '!=', '0')
-            ->where('dealer.company_id', $company_id)
-            ->where('purchase_order.company_id', $company_id)
-            ->where('purchase_order_details.company_id', $company_id)
-            ->whereBetween(DB::raw('DATE(purchase_order.dispatch_date)'), [$from_date, $to_date]);
+        // $query = DB::table('purchase_order')
+            // ->join('dealer', 'dealer.id', '=', 'purchase_order.dealer_id')
+            // ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.id')
+            // ->join('catalog_product', 'catalog_product.id', '=', 'purchase_order_details.product_id')
+            // ->select(
+                // 'dealer.id as dealer_id',
+                // 'dealer.name as distributor_name',
+                // 'purchase_order.id as order_id',
+                // 'catalog_product.name as sku_name',
+                // DB::raw('purchase_order_details.total_value as msell_order_amount'),
+                // DB::raw('purchase_order_details.inv_busy_amt as billing_amount'),
+                // DB::raw('DATE(purchase_order.dispatch_date) as dispatch_date')
+            // )
+            // ->where('purchase_order.invoice_no_p', '!=', '0')
+            // ->where('dealer.company_id', $company_id)
+            // ->where('purchase_order.company_id', $company_id)
+            // ->where('purchase_order_details.company_id', $company_id)
+            // ->whereBetween(DB::raw('DATE(purchase_order.dispatch_date)'), [$from_date, $to_date]);
 
-        if (!empty($distributorIds)) {
-            $query->whereIn('purchase_order.dealer_id', (array) $distributorIds);
-        }
+        // if (!empty($distributorIds)) {
+            // $query->whereIn('purchase_order.dealer_id', (array) $distributorIds);
+        // }
 
-        $reportData = $query
-            ->orderBy('dealer.name')
-            ->orderBy('purchase_order.id')
-            ->get();
+        // $reportData = $query
+            // ->orderBy('dealer.name')
+            // ->orderBy('purchase_order.id')
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $reportData,
-            'meta'   => [
-                'company_id' => $company_id,
-                'from_date'  => $from_date,
-                'to_date'    => $to_date,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $reportData,
+            // 'meta'   => [
+                // 'company_id' => $company_id,
+                // 'from_date'  => $from_date,
+                // 'to_date'    => $to_date,
+            // ],
+        // ]);
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  Dispatch Amount                                                    */
     /* ------------------------------------------------------------------ */
 
-    public function dispatchAmountIndex(Request $request)
-    {
-        $company_id  = $request->user()->company_id;
-        $distributor = DB::table('dealer')
-            ->where('dealer_status', 1)
-            ->where('company_id', $company_id)
-            ->pluck('name', 'id');
+    // public function dispatchAmountIndex(Request $request)
+    // {
+        // $company_id  = $request->user()->company_id;
+        // $distributor = DB::table('dealer')
+            // ->where('dealer_status', 1)
+            // ->where('company_id', $company_id)
+            // ->pluck('name', 'id');
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'company_id'  => $company_id,
-                'distributor' => $distributor,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'company_id'  => $company_id,
+                // 'distributor' => $distributor,
+            // ],
+        // ]);
+    // }
 
-    public function dispatchAmountAjax(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dispatchAmountAjax(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
+        // [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
 
-        $distributorIds = $request->input('distributor', []);
+        // $distributorIds = $request->input('distributor', []);
 
-        $query = DB::table('purchase_order')
-            ->join('dealer', 'dealer.id', '=', 'purchase_order.dealer_id')
-            ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.id')
-            ->select(
-                'dealer.id as dealer_id',
-                'dealer.name as distributor_name',
-                'purchase_order.id as order_id',
-                DB::raw('SUM(purchase_order_details.total_value) as msell_order_amount'),
-                DB::raw('SUM(purchase_order_details.inv_busy_amt) as billing_amount'),
-                DB::raw('DATE(purchase_order.dispatch_date) as dispatch_date')
-            )
-            ->where('purchase_order.invoice_no_p', '!=', '0')
-            ->where('dealer.company_id', $company_id)
-            ->where('purchase_order.company_id', $company_id)
-            ->where('purchase_order_details.company_id', $company_id)
-            ->whereBetween(DB::raw('DATE(purchase_order.dispatch_date)'), [$from_date, $to_date]);
+        // $query = DB::table('purchase_order')
+            // ->join('dealer', 'dealer.id', '=', 'purchase_order.dealer_id')
+            // ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.id')
+            // ->select(
+                // 'dealer.id as dealer_id',
+                // 'dealer.name as distributor_name',
+                // 'purchase_order.id as order_id',
+                // DB::raw('SUM(purchase_order_details.total_value) as msell_order_amount'),
+                // DB::raw('SUM(purchase_order_details.inv_busy_amt) as billing_amount'),
+                // DB::raw('DATE(purchase_order.dispatch_date) as dispatch_date')
+            // )
+            // ->where('purchase_order.invoice_no_p', '!=', '0')
+            // ->where('dealer.company_id', $company_id)
+            // ->where('purchase_order.company_id', $company_id)
+            // ->where('purchase_order_details.company_id', $company_id)
+            // ->whereBetween(DB::raw('DATE(purchase_order.dispatch_date)'), [$from_date, $to_date]);
 
-        if (!empty($distributorIds)) {
-            $query->whereIn('purchase_order.dealer_id', (array) $distributorIds);
-        }
+        // if (!empty($distributorIds)) {
+            // $query->whereIn('purchase_order.dealer_id', (array) $distributorIds);
+        // }
 
-        $reportData = $query
-            ->groupBy('dealer.id', 'dealer.name', 'purchase_order.id')
-            ->orderBy('dealer.name')
-            ->get();
+        // $reportData = $query
+            // ->groupBy('dealer.id', 'dealer.name', 'purchase_order.id')
+            // ->orderBy('dealer.name')
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $reportData,
-            'meta'   => [
-                'company_id' => $company_id,
-                'from_date'  => $from_date,
-                'to_date'    => $to_date,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $reportData,
+            // 'meta'   => [
+                // 'company_id' => $company_id,
+                // 'from_date'  => $from_date,
+                // 'to_date'    => $to_date,
+            // ],
+        // ]);
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  Zero Order Dashboard                                               */
     /* ------------------------------------------------------------------ */
 
-    public function dashboardZeroOrder(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dashboardZeroOrder(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        $brand = DB::table('catalog_0')
-            ->orderBy('sequence')
-            ->where('status', 1)
-            ->where('company_id', $company_id)
-            ->pluck('catalog_0.name', 'catalog_0.id');
+        // $brand = DB::table('catalog_0')
+            // ->orderBy('sequence')
+            // ->where('status', 1)
+            // ->where('company_id', $company_id)
+            // ->pluck('catalog_0.name', 'catalog_0.id');
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'company_id' => $company_id,
-                'brand'      => $brand,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'company_id' => $company_id,
+                // 'brand'      => $brand,
+            // ],
+        // ]);
+    // }
 
-    public function dashboardZeroOrderChart(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dashboardZeroOrderChart(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        [$from_date, $to_date] = $this->parseDateRange(
-            $request->input('date_range_picker'),
-            true
-        );
+        // [$from_date, $to_date] = $this->parseDateRange(
+            // $request->input('date_range_picker'),
+            // true
+        // );
 
-        $query = DB::table('user_sales_order')
-            ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
-            ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
-            ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
-            ->select(
-                'catalog_0.name as brand_name',
-                '_no_sale_reason.name as reason_name',
-                DB::raw('COUNT(user_sales_order.id) as total_count')
-            )
-            ->where('user_sales_order.call_status', 0)
-            ->whereBetween('user_sales_order.date', [$from_date, $to_date])
-            ->where('user_sales_order.company_id', $company_id);
+        // $query = DB::table('user_sales_order')
+            // ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
+            // ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
+            // ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
+            // ->select(
+                // 'catalog_0.name as brand_name',
+                // '_no_sale_reason.name as reason_name',
+                // DB::raw('COUNT(user_sales_order.id) as total_count')
+            // )
+            // ->where('user_sales_order.call_status', 0)
+            // ->whereBetween('user_sales_order.date', [$from_date, $to_date])
+            // ->where('user_sales_order.company_id', $company_id);
 
-        if ($request->filled('brand_id')) {
-            $query->where('user_sales_order_smart_force.brand_id', $request->brand_id);
-        }
+        // if ($request->filled('brand_id')) {
+            // $query->where('user_sales_order_smart_force.brand_id', $request->brand_id);
+        // }
 
-        $noSaleReasons = $query
-            ->groupBy('catalog_0.name', '_no_sale_reason.name')
-            ->orderByDesc('total_count')
-            ->get();
+        // $noSaleReasons = $query
+            // ->groupBy('catalog_0.name', '_no_sale_reason.name')
+            // ->orderByDesc('total_count')
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'labels' => $noSaleReasons->pluck('reason_name'),
-            'counts' => $noSaleReasons->pluck('total_count'),
-            'table'  => $noSaleReasons,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'labels' => $noSaleReasons->pluck('reason_name'),
+            // 'counts' => $noSaleReasons->pluck('total_count'),
+            // 'table'  => $noSaleReasons,
+        // ]);
+    // }
 
-    public function dashboardUserZeroOrder(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dashboardUserZeroOrder(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        [$from_date, $to_date] = $this->parseDateRange(
-            $request->input('date_range_picker'),
-            true
-        );
+        // [$from_date, $to_date] = $this->parseDateRange(
+            // $request->input('date_range_picker'),
+            // true
+        // );
 
-        $query = DB::table('user_sales_order')
-            ->join('person', 'user_sales_order.user_id', '=', 'person.id')
-            ->join('retailer', 'user_sales_order.retailer_id', '=', 'retailer.id')
-            ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
-            ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
-            ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
-            ->select(
-                DB::raw('CONCAT(person.first_name," ",person.last_name) as user_name'),
-                'retailer.name as retailer_name',
-                'catalog_0.name as brand_name',
-                '_no_sale_reason.name as reason_name',
-                'user_sales_order.user_id',
-                'user_sales_order.retailer_id',
-                'user_sales_order_smart_force.brand_id',
-                'user_sales_order.reason',
-                DB::raw('COUNT(user_sales_order.id) as total_count')
-            )
-            ->where('user_sales_order.company_id', $company_id)
-            ->where('user_sales_order.call_status', 0)
-            ->whereBetween('user_sales_order.date', [$from_date, $to_date]);
+        // $query = DB::table('user_sales_order')
+            // ->join('person', 'user_sales_order.user_id', '=', 'person.id')
+            // ->join('retailer', 'user_sales_order.retailer_id', '=', 'retailer.id')
+            // ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
+            // ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
+            // ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
+            // ->select(
+                // DB::raw('CONCAT(person.first_name," ",person.last_name) as user_name'),
+                // 'retailer.name as retailer_name',
+                // 'catalog_0.name as brand_name',
+                // '_no_sale_reason.name as reason_name',
+                // 'user_sales_order.user_id',
+                // 'user_sales_order.retailer_id',
+                // 'user_sales_order_smart_force.brand_id',
+                // 'user_sales_order.reason',
+                // DB::raw('COUNT(user_sales_order.id) as total_count')
+            // )
+            // ->where('user_sales_order.company_id', $company_id)
+            // ->where('user_sales_order.call_status', 0)
+            // ->whereBetween('user_sales_order.date', [$from_date, $to_date]);
 
-        if ($request->filled('brand_id')) {
-            $query->where('user_sales_order_smart_force.brand_id', $request->brand_id);
-        }
+        // if ($request->filled('brand_id')) {
+            // $query->where('user_sales_order_smart_force.brand_id', $request->brand_id);
+        // }
 
-        $userZeroOrders = $query
-            ->groupBy(
-                'user_sales_order.user_id',
-                'user_sales_order.retailer_id',
-                'user_sales_order_smart_force.brand_id',
-                'user_sales_order.reason'
-            )
-            ->orderBy('user_sales_order.user_id')
-            ->get();
+        // $userZeroOrders = $query
+            // ->groupBy(
+                // 'user_sales_order.user_id',
+                // 'user_sales_order.retailer_id',
+                // 'user_sales_order_smart_force.brand_id',
+                // 'user_sales_order.reason'
+            // )
+            // ->orderBy('user_sales_order.user_id')
+            // ->get();
 
-        return response()->json([
-            'status'     => true,
-            'user_table' => $userZeroOrders,
-        ]);
-    }
+        // return response()->json([
+            // 'status'     => true,
+            // 'user_table' => $userZeroOrders,
+        // ]);
+    // }
 
-    public function dashboardUserZeroOrderReasonBar(Request $request)
-    {
-        $company_id = $request->user()->company_id;
-        $user_id    = $request->input('user_id');
-        $brand_id   = $request->input('brand_id');
-        $dateRange  = $request->input('date_range_picker');
+    // public function dashboardUserZeroOrderReasonBar(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
+        // $user_id    = $request->input('user_id');
+        // $brand_id   = $request->input('brand_id');
+        // $dateRange  = $request->input('date_range_picker');
 
-        if (!empty($dateRange)) {
-            [$from_date, $to_date] = $this->parseDateRange($dateRange);
-        } else {
-            $from_date = now()->format('Y-m-d');
-            $to_date   = now()->format('Y-m-d');
-        }
+        // if (!empty($dateRange)) {
+            // [$from_date, $to_date] = $this->parseDateRange($dateRange);
+        // } else {
+            // $from_date = now()->format('Y-m-d');
+            // $to_date   = now()->format('Y-m-d');
+        // }
 
-        $query = DB::table('user_sales_order')
-            ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
-            ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
-            ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
-            ->where('user_sales_order.company_id', $company_id)
-            ->where('user_sales_order.call_status', 0)
-            ->whereBetween('user_sales_order.date', [$from_date, $to_date]);
+        // $query = DB::table('user_sales_order')
+            // ->join('user_sales_order_smart_force', 'user_sales_order.order_id', '=', 'user_sales_order_smart_force.order_id')
+            // ->join('_no_sale_reason', '_no_sale_reason.id', '=', 'user_sales_order.reason')
+            // ->join('catalog_0', 'catalog_0.id', '=', 'user_sales_order_smart_force.brand_id')
+            // ->where('user_sales_order.company_id', $company_id)
+            // ->where('user_sales_order.call_status', 0)
+            // ->whereBetween('user_sales_order.date', [$from_date, $to_date]);
 
-        if (!empty($user_id) && $user_id !== 'all') {
-            $query->where('user_sales_order.user_id', $user_id);
-        }
+        // if (!empty($user_id) && $user_id !== 'all') {
+            // $query->where('user_sales_order.user_id', $user_id);
+        // }
 
-        if (!empty($brand_id)) {
-            $query->where('catalog_0.id', $brand_id);
-        }
+        // if (!empty($brand_id)) {
+            // $query->where('catalog_0.id', $brand_id);
+        // }
 
-        $data = $query
-            ->select('_no_sale_reason.name as reason_name', DB::raw('COUNT(user_sales_order.id) as total_count'))
-            ->groupBy('_no_sale_reason.id', '_no_sale_reason.name')
-            ->get();
+        // $data = $query
+            // ->select('_no_sale_reason.name as reason_name', DB::raw('COUNT(user_sales_order.id) as total_count'))
+            // ->groupBy('_no_sale_reason.id', '_no_sale_reason.name')
+            // ->get();
 
-        $allReasons = DB::table('_no_sale_reason')
-            ->where('company_id', $company_id)
-            ->where('status', 1)
-            ->pluck('name');
+        // $allReasons = DB::table('_no_sale_reason')
+            // ->where('company_id', $company_id)
+            // ->where('status', 1)
+            // ->pluck('name');
 
-        $finalData = $allReasons->map(function ($reason) use ($data) {
-            $found = $data->firstWhere('reason_name', $reason);
-            return [
-                'reason_name' => $reason,
-                'total_count' => $found ? $found->total_count : 0,
-            ];
-        });
+        // $finalData = $allReasons->map(function ($reason) use ($data) {
+            // $found = $data->firstWhere('reason_name', $reason);
+            // return [
+                // 'reason_name' => $reason,
+                // 'total_count' => $found ? $found->total_count : 0,
+            // ];
+        // });
 
-        $users = DB::table('person')
-            ->join('user_sales_order', 'person.id', '=', 'user_sales_order.user_id')
-            ->where('person.company_id', $company_id)
-            ->where('user_sales_order.call_status', 0)
-            ->distinct()
-            ->select('person.id', DB::raw('CONCAT(person.first_name," ",person.last_name) as fullname'))
-            ->get();
+        // $users = DB::table('person')
+            // ->join('user_sales_order', 'person.id', '=', 'user_sales_order.user_id')
+            // ->where('person.company_id', $company_id)
+            // ->where('user_sales_order.call_status', 0)
+            // ->distinct()
+            // ->select('person.id', DB::raw('CONCAT(person.first_name," ",person.last_name) as fullname'))
+            // ->get();
 
-        return response()->json([
-            'status'     => true,
-            'chart_data' => $finalData,
-            'users'      => $users,
-        ]);
-    }
+        // return response()->json([
+            // 'status'     => true,
+            // 'chart_data' => $finalData,
+            // 'users'      => $users,
+        // ]);
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  Competitor Analysis                                                */
     /* ------------------------------------------------------------------ */
 
-    public function competitorAnalysisReport(Request $request)
-    {
-        $formatJson = function ($value) {
+    // public function competitorAnalysisReport(Request $request)
+    // {
+        // $formatJson = function ($value) {
 
-            if (!$value || $value === 'NULL' || $value === 'null') {
-                return '-';
-            }
+            // if (!$value || $value === 'NULL' || $value === 'null') {
+                // return '-';
+            // }
 
-            $decoded = json_decode($value, true);
+            // $decoded = json_decode($value, true);
 
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            // if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
 
-                if (array_values($decoded) === $decoded) {
-                    return implode(", ", $decoded);
-                }
+                // if (array_values($decoded) === $decoded) {
+                    // return implode(", ", $decoded);
+                // }
 
-                $result = [];
-                foreach ($decoded as $key => $item) {
-                    if (!empty($item['checked'])) {
-                        $text = $key;
-                        if (!empty($item['details'])) {
-                            $text .= " (" . $item['details'] . ")";
-                        }
-                        $result[] = $text;
-                    }
-                }
+                // $result = [];
+                // foreach ($decoded as $key => $item) {
+                    // if (!empty($item['checked'])) {
+                        // $text = $key;
+                        // if (!empty($item['details'])) {
+                            // $text .= " (" . $item['details'] . ")";
+                        // }
+                        // $result[] = $text;
+                    // }
+                // }
 
-                return $result ? implode(", ", $result) : "-";
-            }
+                // return $result ? implode(", ", $result) : "-";
+            // }
 
-            return $value;
-        };
+            // return $value;
+        // };
 
-        $data = DB::table('competitor_analysis')
-            ->orderBy('id', 'DESC')
-            ->get()
-            ->map(function ($row) use ($formatJson) {
+        // $data = DB::table('competitor_analysis')
+            // ->orderBy('id', 'DESC')
+            // ->get()
+            // ->map(function ($row) use ($formatJson) {
 
-                $row->channel_type          = $formatJson($row->channel_type);
-                $row->market_category       = $formatJson($row->market_category);
-                $row->schemes               = $formatJson($row->schemes);
-                $row->competitor_preference = $formatJson($row->competitor_preference);
-                $row->pop_material          = $formatJson($row->pop_material);
-                $row->issues                = $formatJson($row->issues);
+                // $row->channel_type          = $formatJson($row->channel_type);
+                // $row->market_category       = $formatJson($row->market_category);
+                // $row->schemes               = $formatJson($row->schemes);
+                // $row->competitor_preference = $formatJson($row->competitor_preference);
+                // $row->pop_material          = $formatJson($row->pop_material);
+                // $row->issues                = $formatJson($row->issues);
 
-                $stock_status = [1 => 'High', 2 => 'Medium', 3 => 'Low', 4 => 'Out of Stock'];
-                $row->stock_status = $stock_status[$row->stock_status] ?? '-';
+                // $stock_status = [1 => 'High', 2 => 'Medium', 3 => 'Low', 4 => 'Out of Stock'];
+                // $row->stock_status = $stock_status[$row->stock_status] ?? '-';
 
-                $push = [1 => 'Strong Competitor', 2 => 'Moderate Competitor', 3 => 'Neutral', 4 => 'Prefers Our Brand'];
-                $row->distributor_push = $push[$row->distributor_push] ?? '-';
+                // $push = [1 => 'Strong Competitor', 2 => 'Moderate Competitor', 3 => 'Neutral', 4 => 'Prefers Our Brand'];
+                // $row->distributor_push = $push[$row->distributor_push] ?? '-';
 
-                return $row;
-            });
+                // return $row;
+            // });
 
-        return response()->json([
-            'status' => true,
-            'data'   => $data,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $data,
+        // ]);
+    // }
 
-    public function getProducts(Request $request, $visitId)
-    {
-        $products = DB::table('competitor_products')
-            ->where('visit_id', $visitId)
-            ->get();
+    // public function getProducts(Request $request, $visitId)
+    // {
+        // $products = DB::table('competitor_products')
+            // ->where('visit_id', $visitId)
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $products,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $products,
+        // ]);
+    // }
 
-    public function getImages(Request $request, $visitId)
-    {
-        $images = DB::table('competitor_images')
-            ->where('visit_id', $visitId)
-            ->get();
+    // public function getImages(Request $request, $visitId)
+    // {
+        // $images = DB::table('competitor_images')
+            // ->where('visit_id', $visitId)
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $images,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $images,
+        // ]);
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  Simple Export (Attendance Summary — Excel download)                */
     /* ------------------------------------------------------------------ */
 
-    public function simpleExport(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function simpleExport(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        if (!empty($request->date_range_picker)) {
-            [$from_date, $to_date] = $this->parseDateRange($request->date_range_picker);
-        } else {
-            $from_date = $to_date = date('Y-m-d');
-        }
+        // if (!empty($request->date_range_picker)) {
+            // [$from_date, $to_date] = $this->parseDateRange($request->date_range_picker);
+        // } else {
+            // $from_date = $to_date = date('Y-m-d');
+        // }
 
-        $att_view_name = TableReturn::attendance_table_return_view($from_date, $to_date);
+        // $att_view_name = TableReturn::attendance_table_return_view($from_date, $to_date);
 
-        // User filter (seniors see juniors only)
-        $role_id  = $request->user()->is_admin;
-        $datasenior = null;
+        // // User filter (seniors see juniors only)
+        // $role_id  = $request->user()->is_admin;
+        // $datasenior = null;
 
-        if (!in_array($role_id, [1, 50], true)) {
-            $cacheKey = "juniordata_{$request->user()->id}";
-            Cache::forget($cacheKey);
-            JuniorData::getJuniorUser($request->user()->id, $company_id);
-            $datasenior = Cache::get($cacheKey, []);
-            if (!in_array($request->user()->id, $datasenior)) {
-                $datasenior[] = $request->user()->id;
-            }
-        }
+        // if (!in_array($role_id, [1, 50], true)) {
+            // $cacheKey = "juniordata_{$request->user()->id}";
+            // Cache::forget($cacheKey);
+            // JuniorData::getJuniorUser($request->user()->id, $company_id);
+            // $datasenior = Cache::get($cacheKey, []);
+            // if (!in_array($request->user()->id, $datasenior)) {
+                // $datasenior[] = $request->user()->id;
+            // }
+        // }
 
-        $maxIds = DB::table('user_daily_attendance')
-            ->select(
-                'user_id',
-                DB::raw("DATE_FORMAT(work_date, '%Y-%m-%d') as work_date"),
-                DB::raw("MAX(id) as max_id")
-            )
-            ->where('company_id', $company_id)
-            ->whereBetween(DB::raw("DATE_FORMAT(work_date,'%Y-%m-%d')"), [$from_date, $to_date])
-            ->groupBy('user_id', DB::raw("DATE_FORMAT(work_date, '%Y-%m-%d')"));
+        // $maxIds = DB::table('user_daily_attendance')
+            // ->select(
+                // 'user_id',
+                // DB::raw("DATE_FORMAT(work_date, '%Y-%m-%d') as work_date"),
+                // DB::raw("MAX(id) as max_id")
+            // )
+            // ->where('company_id', $company_id)
+            // ->whereBetween(DB::raw("DATE_FORMAT(work_date,'%Y-%m-%d')"), [$from_date, $to_date])
+            // ->groupBy('user_id', DB::raw("DATE_FORMAT(work_date, '%Y-%m-%d')"));
 
-        $query = DB::table('person')
-            ->join('person_login', 'person.id', '=', 'person_login.person_id')
-            ->leftJoin($att_view_name, function ($join) use ($from_date, $to_date, $att_view_name) {
-                $join->on($att_view_name . '.user_id', '=', 'person.id')
-                    ->whereBetween(DB::raw("DATE({$att_view_name}.work_date)"), [$from_date, $to_date]);
-            })
-            ->leftJoin('_role', '_role.role_id', '=', 'person.role_id')
-            ->leftJoin('location_5', 'location_5.id', '=', 'person.head_quater_id')
-            ->where('person.company_id', $company_id)
-            ->where('person_login.person_status', 1);
+        // $query = DB::table('person')
+            // ->join('person_login', 'person.id', '=', 'person_login.person_id')
+            // ->leftJoin($att_view_name, function ($join) use ($from_date, $to_date, $att_view_name) {
+                // $join->on($att_view_name . '.user_id', '=', 'person.id')
+                    // ->whereBetween(DB::raw("DATE({$att_view_name}.work_date)"), [$from_date, $to_date]);
+            // })
+            // ->leftJoin('_role', '_role.role_id', '=', 'person.role_id')
+            // ->leftJoin('location_5', 'location_5.id', '=', 'person.head_quater_id')
+            // ->where('person.company_id', $company_id)
+            // ->where('person_login.person_status', 1);
 
-        if (!empty($datasenior)) {
-            $query->whereIn('person.id', $datasenior);
-        }
+        // if (!empty($datasenior)) {
+            // $query->whereIn('person.id', $datasenior);
+        // }
 
-        $query = $query
-            ->leftJoinSub($maxIds, 'max_att', function ($join) {
-                $join->on('person.id', '=', 'max_att.user_id');
-            })
-            ->leftJoin('user_daily_attendance AS uda', 'uda.id', '=', 'max_att.max_id');
+        // $query = $query
+            // ->leftJoinSub($maxIds, 'max_att', function ($join) {
+                // $join->on('person.id', '=', 'max_att.user_id');
+            // })
+            // ->leftJoin('user_daily_attendance AS uda', 'uda.id', '=', 'max_att.max_id');
 
-        $rows = $query->select(
-                'location_5.name as headquarter',
-                DB::raw("CONCAT_WS(' ', person.first_name, NULLIF(person.middle_name,''), person.last_name) as full_name"),
-                '_role.rolename as role',
-                DB::raw("CASE WHEN {$att_view_name}.work_date IS NOT NULL THEN 'Marked' ELSE 'Not Marked' END as attendance_status"),
-                'uda.remarks as remarks'
-            )
-            ->orderBy('full_name', 'ASC')
-            ->get();
+        // $rows = $query->select(
+                // 'location_5.name as headquarter',
+                // DB::raw("CONCAT_WS(' ', person.first_name, NULLIF(person.middle_name,''), person.last_name) as full_name"),
+                // '_role.rolename as role',
+                // DB::raw("CASE WHEN {$att_view_name}.work_date IS NOT NULL THEN 'Marked' ELSE 'Not Marked' END as attendance_status"),
+                // 'uda.remarks as remarks'
+            // )
+            // ->orderBy('full_name', 'ASC')
+            // ->get();
 
-        $html = '
-        <table border="1" style="border-collapse: collapse; width: 100%;">
-            <tr>
-                <td colspan="6" style="text-align:center; font-weight:bold; font-size:18px;">
-                    Sales Staff Attendance Report
-                </td>
-            </tr>
-            <tr>
-                <td colspan="6" style="text-align:center; font-size:14px;">
-                    Date: ' . date('d-m-Y') . '
-                </td>
-            </tr>
-            <tr></tr>
-            <tr style="font-weight:bold; background:#d9d9d9; text-align:center;">
-                <td>Sr.no</td>
-                <td>Head Quarter</td>
-                <td>User Name</td>
-                <td>Role</td>
-                <td>Attendance Status</td>
-                <td>Attendance Remarks</td>
-            </tr>';
+        // $html = '
+        // <table border="1" style="border-collapse: collapse; width: 100%;">
+            // <tr>
+                // <td colspan="6" style="text-align:center; font-weight:bold; font-size:18px;">
+                    // Sales Staff Attendance Report
+                // </td>
+            // </tr>
+            // <tr>
+                // <td colspan="6" style="text-align:center; font-size:14px;">
+                    // Date: ' . date('d-m-Y') . '
+                // </td>
+            // </tr>
+            // <tr></tr>
+            // <tr style="font-weight:bold; background:#d9d9d9; text-align:center;">
+                // <td>Sr.no</td>
+                // <td>Head Quarter</td>
+                // <td>User Name</td>
+                // <td>Role</td>
+                // <td>Attendance Status</td>
+                // <td>Attendance Remarks</td>
+            // </tr>';
 
-        $i = 1;
-        foreach ($rows as $r) {
-            $html .= '
-            <tr>
-                <td>' . $i++ . '</td>
-                <td>' . $r->headquarter . '</td>
-                <td>' . $r->full_name . '</td>
-                <td>' . $r->role . '</td>
-                <td>' . $r->attendance_status . '</td>
-                <td>' . (
-                    $r->attendance_status == "Not Marked"
-                        ? "N/A"
-                        : htmlspecialchars($r->remarks ?? '')
-                ) . '</td>
-            </tr>';
-        }
-        $html .= '</table>';
+        // $i = 1;
+        // foreach ($rows as $r) {
+            // $html .= '
+            // <tr>
+                // <td>' . $i++ . '</td>
+                // <td>' . $r->headquarter . '</td>
+                // <td>' . $r->full_name . '</td>
+                // <td>' . $r->role . '</td>
+                // <td>' . $r->attendance_status . '</td>
+                // <td>' . (
+                    // $r->attendance_status == "Not Marked"
+                        // ? "N/A"
+                        // : htmlspecialchars($r->remarks ?? '')
+                // ) . '</td>
+            // </tr>';
+        // }
+        // $html .= '</table>';
 
-        $fileName = "AttendanceSummary-" . date('d-m-Y') . ".xls";
+        // $fileName = "AttendanceSummary-" . date('d-m-Y') . ".xls";
 
-        return response($html)
-            ->header('Content-Type', 'application/vnd.ms-excel')
-            ->header('Content-Disposition', "attachment; filename=\"$fileName\"");
-    }
+        // return response($html)
+            // ->header('Content-Type', 'application/vnd.ms-excel')
+            // ->header('Content-Disposition', "attachment; filename=\"$fileName\"");
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  Retailer Ledger                                                    */
@@ -1449,73 +1449,73 @@ class MainReportApiController extends Controller
     /*  DGR Claim                                                          */
     /* ------------------------------------------------------------------ */
 
-    public function dgrClaimReport(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dgrClaimReport(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'company_id'  => $company_id,
-                'region'      => Location1::where('status', 1)->where('company_id', $company_id)->select('name', 'id')->get(),
-                'state'       => Location3::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'area'        => Location4::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'head_quater' => Location5::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'town'        => Location6::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'beat'        => Location7::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'distributor' => Dealer::where('dealer_status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'division'    => DB::table('department')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
-                'users'       => DB::table('person')
-                    ->join('person_login', 'person_login.person_id', '=', 'person.id')
-                    ->select(DB::raw('CONCAT(person.first_name," ",person.last_name) as name'), 'person.id as uid')
-                    ->where('person_login.person_status', '=', '1')
-                    ->where('person.company_id', $company_id)
-                    ->pluck('name', 'uid'),
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'company_id'  => $company_id,
+                // 'region'      => Location1::where('status', 1)->where('company_id', $company_id)->select('name', 'id')->get(),
+                // 'state'       => Location3::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'area'        => Location4::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'head_quater' => Location5::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'town'        => Location6::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'beat'        => Location7::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'distributor' => Dealer::where('dealer_status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'division'    => DB::table('department')->where('status', 1)->where('company_id', $company_id)->pluck('name', 'id'),
+                // 'users'       => DB::table('person')
+                    // ->join('person_login', 'person_login.person_id', '=', 'person.id')
+                    // ->select(DB::raw('CONCAT(person.first_name," ",person.last_name) as name'), 'person.id as uid')
+                    // ->where('person_login.person_status', '=', '1')
+                    // ->where('person.company_id', $company_id)
+                    // ->pluck('name', 'uid'),
+            // ],
+        // ]);
+    // }
 
-    public function dgrClaimAjax(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function dgrClaimAjax(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
+        // [$from_date, $to_date] = $this->parseDateRange($request->input('date_range_picker'));
 
-        $main_data = DB::table('dms_retailer_images_amount_claim as claim')
-            ->join('challan_order as co', 'claim.order_id', '=', 'co.id')
-            ->join('dealer as d', 'claim.dealer_id', '=', 'd.id')
-            ->leftJoin('retailer as r', 'claim.retailer_id', '=', 'r.id')
-            ->leftJoin('_retailer_outlet_category as roc', 'r.class', '=', 'roc.id')
-            ->leftJoin('person as p', 'co.ch_user_id', '=', 'p.id')
-            ->leftJoin('location_7 as l7', 'r.location_id', '=', 'l7.id')
-            ->leftJoin('location_6 as l6', 'd.town_id', '=', 'l6.id')
-            ->where('claim.company_id', $company_id)
-            ->whereBetween(DB::raw('DATE(claim.date_time)'), [$from_date, $to_date])
-            ->select(
-                'claim.*',
-                'co.ch_no as invoice_no',
-                DB::raw("DATE_FORMAT(co.ch_date, '%d-%m-%Y') as invoice_date"),
-                'co.amount as invoice_amount',
-                'co.discount_amt',
-                'd.name as dealer_name',
-                'd.address as dealer_address',
-                'l6.name as town_name',
-                'r.name as retailer_name',
-                'r.address as retailer_address',
-                'r.contact_per_name',
-                'roc.outlet_category as retailer_category',
-                'l7.name as beat_name',
-                DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as tsm_name"),
-                'co.ch_user_id'
-            )
-            ->orderBy('claim.date_time', 'DESC')
-            ->get();
+        // $main_data = DB::table('dms_retailer_images_amount_claim as claim')
+            // ->join('challan_order as co', 'claim.order_id', '=', 'co.id')
+            // ->join('dealer as d', 'claim.dealer_id', '=', 'd.id')
+            // ->leftJoin('retailer as r', 'claim.retailer_id', '=', 'r.id')
+            // ->leftJoin('_retailer_outlet_category as roc', 'r.class', '=', 'roc.id')
+            // ->leftJoin('person as p', 'co.ch_user_id', '=', 'p.id')
+            // ->leftJoin('location_7 as l7', 'r.location_id', '=', 'l7.id')
+            // ->leftJoin('location_6 as l6', 'd.town_id', '=', 'l6.id')
+            // ->where('claim.company_id', $company_id)
+            // ->whereBetween(DB::raw('DATE(claim.date_time)'), [$from_date, $to_date])
+            // ->select(
+                // 'claim.*',
+                // 'co.ch_no as invoice_no',
+                // DB::raw("DATE_FORMAT(co.ch_date, '%d-%m-%Y') as invoice_date"),
+                // 'co.amount as invoice_amount',
+                // 'co.discount_amt',
+                // 'd.name as dealer_name',
+                // 'd.address as dealer_address',
+                // 'l6.name as town_name',
+                // 'r.name as retailer_name',
+                // 'r.address as retailer_address',
+                // 'r.contact_per_name',
+                // 'roc.outlet_category as retailer_category',
+                // 'l7.name as beat_name',
+                // DB::raw("CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) as tsm_name"),
+                // 'co.ch_user_id'
+            // )
+            // ->orderBy('claim.date_time', 'DESC')
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $main_data,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $main_data,
+        // ]);
+    // }
 
     /* ------------------------------------------------------------------ */
     /*  DB Van Summary                                                     */
@@ -1610,165 +1610,165 @@ class MainReportApiController extends Controller
     /*  Sales Score Card                                                   */
     /* ------------------------------------------------------------------ */
 
-    public function salesScoreCard(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function salesScoreCard(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        $userss = DB::table('person as p')
-            ->join('person_login', 'p.id', '=', 'person_login.person_id')
-            ->leftJoin('person as senior', 'p.person_id_senior', '=', 'senior.id')
-            ->where('p.company_id', $company_id)
-            ->where('person_login.person_status', 1)
-            ->select(
-                DB::raw("CONCAT(p.first_name, ' ', IFNULL(p.last_name,'')) as first_name"),
-                'p.id',
-                'p.emp_code',
-                DB::raw("CONCAT(senior.first_name, ' ', IFNULL(senior.last_name,'')) as senior_name")
-            )
-            ->orderBy('p.first_name')
-            ->get();
+        // $userss = DB::table('person as p')
+            // ->join('person_login', 'p.id', '=', 'person_login.person_id')
+            // ->leftJoin('person as senior', 'p.person_id_senior', '=', 'senior.id')
+            // ->where('p.company_id', $company_id)
+            // ->where('person_login.person_status', 1)
+            // ->select(
+                // DB::raw("CONCAT(p.first_name, ' ', IFNULL(p.last_name,'')) as first_name"),
+                // 'p.id',
+                // 'p.emp_code',
+                // DB::raw("CONCAT(senior.first_name, ' ', IFNULL(senior.last_name,'')) as senior_name")
+            // )
+            // ->orderBy('p.first_name')
+            // ->get();
 
-        return response()->json([
-            'status' => true,
-            'data'   => $userss,
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => $userss,
+        // ]);
+    // }
 
-    public function salesScoreCardData(Request $request)
-    {
-        $validated = $request->validate([
-            'user_id' => 'required|integer',
-            'from'    => 'required|date_format:Y-m',
-            'to'      => 'required|date_format:Y-m|after_or_equal:from',
-        ]);
+    // public function salesScoreCardData(Request $request)
+    // {
+        // $validated = $request->validate([
+            // 'user_id' => 'required|integer',
+            // 'from'    => 'required|date_format:Y-m',
+            // 'to'      => 'required|date_format:Y-m|after_or_equal:from',
+        // ]);
 
-        $userId = $validated['user_id'];
-        $from   = DateTime::createFromFormat('Y-m-d', $validated['from'] . '-01');
-        $to     = DateTime::createFromFormat('Y-m-d', $validated['to'] . '-01');
+        // $userId = $validated['user_id'];
+        // $from   = DateTime::createFromFormat('Y-m-d', $validated['from'] . '-01');
+        // $to     = DateTime::createFromFormat('Y-m-d', $validated['to'] . '-01');
 
-        $months = [];
-        $cursor = clone $from;
-        while ($cursor <= $to) {
-            $months[] = $cursor->format('Y-m');
-            $cursor->modify('+1 month');
-        }
+        // $months = [];
+        // $cursor = clone $from;
+        // while ($cursor <= $to) {
+            // $months[] = $cursor->format('Y-m');
+            // $cursor->modify('+1 month');
+        // }
 
-        $sectionDefs = [
-            'sales_tgt_vs_ach' => [
-                'label'      => 'Sales TGT V/S ACH (IN LAC)',
-                'weightage'  => 45,
-                'ytd_score'  => 0.0,
-                'month_score_dummy' => 0.0,
-                'rows'       => [
-                    'TGT'   => ['ytd' => 33,     'month_dummy' => 4],
-                    'ACH'   => ['ytd' => 2,      'month_dummy' => 1],
-                    '% ACH' => ['ytd' => '4.9%', 'month_dummy' => '32.9%'],
-                ],
-            ],
-            'forecast_deviation' => [
-                'label'      => 'Forecast Deviation (IN SQM)',
-                'weightage'  => 16,
-                'ytd_score'  => 3.2,
-                'month_score_dummy' => 1.6,
-                'rows'       => [
-                    'Forecast (In Lac)'  => ['ytd' => 4,       'month_dummy' => 0.5],
-                    'Sales (In Lac)'     => ['ytd' => 3,       'month_dummy' => 0.2],
-                    'Deviation (In Lac)' => ['ytd' => 3,       'month_dummy' => 0.4],
-                    'Deviation %'        => ['ytd' => '93.9%', 'month_dummy' => '187.7%'],
-                ],
-            ],
-            'active_customer' => [
-                'label'      => 'Active Customer (>6 Lac Annually)',
-                'weightage'  => 15,
-                'ytd_score'  => 12.0,
-                'month_score_dummy' => 12.0,
-                'rows'       => [
-                    'TGT'   => ['ytd' => 20,      'month_dummy' => 20],
-                    'ACH'   => ['ytd' => 16,      'month_dummy' => 16],
-                    '% ACH' => ['ytd' => '80.0%', 'month_dummy' => '80.0%'],
-                ],
-            ],
-            'sale_from_new_customers' => [
-                'label'      => 'Sale From New Customers',
-                'weightage'  => 25,
-                'ytd_score'  => 25.0,
-                'month_score_dummy' => 25.0,
-                'rows'       => [
-                    'Total Sale'                  => ['ytd' => 2,          'month_dummy' => 1],
-                    'New Customer Addition'       => ['ytd' => 13,         'month_dummy' => 0],
-                    'Count of New Customers Sale' => ['ytd' => 38,         'month_dummy' => 5],
-                    'Sale From New & Existing'    => ['ytd' => 109,        'month_dummy' => 13.2],
-                    '%Sale From New & Existing'   => ['ytd' => '6637.8%',  'month_dummy' => '966.5%'],
-                    'TGT% Sale From New'          => ['ytd' => '20%',      'month_dummy' => '20%'],
-                    '% Sale From New Customers'   => ['ytd' => '33188.8%', 'month_dummy' => '4832.6%'],
-                ],
-            ],
-            'punched_order_not_picked' => [
-                'label'      => 'The punched Order was not picked up',
-                'weightage'  => null,
-                'ytd_score'  => 0.0,
-                'month_score_dummy' => 0.0,
-                'rows'       => [
-                    'TGT'   => ['ytd' => 1,      'month_dummy' => 1],
-                    'ACH'   => ['ytd' => 0.04,   'month_dummy' => 0.04],
-                    '% ACH' => ['ytd' => '2.9%', 'month_dummy' => '2.9%'],
-                ],
-            ],
-            'collection' => [
-                'label'      => 'Collection',
-                'weightage'  => null,
-                'ytd_score'  => 0.0,
-                'month_score_dummy' => 0.0,
-                'rows'       => [
-                    'TGT'   => ['ytd' => 44,     'month_dummy' => 44],
-                    'ACH'   => ['ytd' => 35,     'month_dummy' => 35],
-                    '% ACH' => ['ytd' => '79.5%', 'month_dummy' => '79.5%'],
-                ],
-            ],
-        ];
+        // $sectionDefs = [
+            // 'sales_tgt_vs_ach' => [
+                // 'label'      => 'Sales TGT V/S ACH (IN LAC)',
+                // 'weightage'  => 45,
+                // 'ytd_score'  => 0.0,
+                // 'month_score_dummy' => 0.0,
+                // 'rows'       => [
+                    // 'TGT'   => ['ytd' => 33,     'month_dummy' => 4],
+                    // 'ACH'   => ['ytd' => 2,      'month_dummy' => 1],
+                    // '% ACH' => ['ytd' => '4.9%', 'month_dummy' => '32.9%'],
+                // ],
+            // ],
+            // 'forecast_deviation' => [
+                // 'label'      => 'Forecast Deviation (IN SQM)',
+                // 'weightage'  => 16,
+                // 'ytd_score'  => 3.2,
+                // 'month_score_dummy' => 1.6,
+                // 'rows'       => [
+                    // 'Forecast (In Lac)'  => ['ytd' => 4,       'month_dummy' => 0.5],
+                    // 'Sales (In Lac)'     => ['ytd' => 3,       'month_dummy' => 0.2],
+                    // 'Deviation (In Lac)' => ['ytd' => 3,       'month_dummy' => 0.4],
+                    // 'Deviation %'        => ['ytd' => '93.9%', 'month_dummy' => '187.7%'],
+                // ],
+            // ],
+            // 'active_customer' => [
+                // 'label'      => 'Active Customer (>6 Lac Annually)',
+                // 'weightage'  => 15,
+                // 'ytd_score'  => 12.0,
+                // 'month_score_dummy' => 12.0,
+                // 'rows'       => [
+                    // 'TGT'   => ['ytd' => 20,      'month_dummy' => 20],
+                    // 'ACH'   => ['ytd' => 16,      'month_dummy' => 16],
+                    // '% ACH' => ['ytd' => '80.0%', 'month_dummy' => '80.0%'],
+                // ],
+            // ],
+            // 'sale_from_new_customers' => [
+                // 'label'      => 'Sale From New Customers',
+                // 'weightage'  => 25,
+                // 'ytd_score'  => 25.0,
+                // 'month_score_dummy' => 25.0,
+                // 'rows'       => [
+                    // 'Total Sale'                  => ['ytd' => 2,          'month_dummy' => 1],
+                    // 'New Customer Addition'       => ['ytd' => 13,         'month_dummy' => 0],
+                    // 'Count of New Customers Sale' => ['ytd' => 38,         'month_dummy' => 5],
+                    // 'Sale From New & Existing'    => ['ytd' => 109,        'month_dummy' => 13.2],
+                    // '%Sale From New & Existing'   => ['ytd' => '6637.8%',  'month_dummy' => '966.5%'],
+                    // 'TGT% Sale From New'          => ['ytd' => '20%',      'month_dummy' => '20%'],
+                    // '% Sale From New Customers'   => ['ytd' => '33188.8%', 'month_dummy' => '4832.6%'],
+                // ],
+            // ],
+            // 'punched_order_not_picked' => [
+                // 'label'      => 'The punched Order was not picked up',
+                // 'weightage'  => null,
+                // 'ytd_score'  => 0.0,
+                // 'month_score_dummy' => 0.0,
+                // 'rows'       => [
+                    // 'TGT'   => ['ytd' => 1,      'month_dummy' => 1],
+                    // 'ACH'   => ['ytd' => 0.04,   'month_dummy' => 0.04],
+                    // '% ACH' => ['ytd' => '2.9%', 'month_dummy' => '2.9%'],
+                // ],
+            // ],
+            // 'collection' => [
+                // 'label'      => 'Collection',
+                // 'weightage'  => null,
+                // 'ytd_score'  => 0.0,
+                // 'month_score_dummy' => 0.0,
+                // 'rows'       => [
+                    // 'TGT'   => ['ytd' => 44,     'month_dummy' => 44],
+                    // 'ACH'   => ['ytd' => 35,     'month_dummy' => 35],
+                    // '% ACH' => ['ytd' => '79.5%', 'month_dummy' => '79.5%'],
+                // ],
+            // ],
+        // ];
 
-        $sections = [];
+        // $sections = [];
 
-        foreach ($sectionDefs as $sectionKey => $def) {
-            $rows = [];
-            foreach ($def['rows'] as $rowLabel => $rowDef) {
-                $rows[$rowLabel] = [
-                    'ytd'    => $rowDef['ytd'],
-                    'months' => $this->buildMonthlyRow($userId, $months, $sectionKey, $rowLabel, $rowDef['month_dummy']),
-                ];
-            }
+        // foreach ($sectionDefs as $sectionKey => $def) {
+            // $rows = [];
+            // foreach ($def['rows'] as $rowLabel => $rowDef) {
+                // $rows[$rowLabel] = [
+                    // 'ytd'    => $rowDef['ytd'],
+                    // 'months' => $this->buildMonthlyRow($userId, $months, $sectionKey, $rowLabel, $rowDef['month_dummy']),
+                // ];
+            // }
 
-            $sections[$sectionKey] = [
-                'label'        => $def['label'],
-                'weightage'    => $def['weightage'],
-                'rows'         => $rows,
-                'ytd_score'    => $def['ytd_score'],
-                'month_scores' => $this->buildMonthlyScores($userId, $months, $sectionKey, $def['month_score_dummy']),
-            ];
-        }
+            // $sections[$sectionKey] = [
+                // 'label'        => $def['label'],
+                // 'weightage'    => $def['weightage'],
+                // 'rows'         => $rows,
+                // 'ytd_score'    => $def['ytd_score'],
+                // 'month_scores' => $this->buildMonthlyScores($userId, $months, $sectionKey, $def['month_score_dummy']),
+            // ];
+        // }
 
-        $totalScore = [
-            'weightage'    => 100,
-            'ytd_score'    => 40,
-            'month_scores' => $this->buildMonthlyScores($userId, $months, 'total', 39),
-        ];
+        // $totalScore = [
+            // 'weightage'    => 100,
+            // 'ytd_score'    => 40,
+            // 'month_scores' => $this->buildMonthlyScores($userId, $months, 'total', 39),
+        // ];
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'user' => [
-                    'id'          => $userId,
-                    'name'        => 'Arun Kumar Bhatt',
-                    'senior_name' => 'Ajit Gupta Ji',
-                    'emp_code'    => 'E000002',
-                ],
-                'months'      => $months,
-                'sections'    => $sections,
-                'total_score' => $totalScore,
-                'note'        => "As per management's decision, a minimum threshold of 70% has been established for all evaluation parameters.",
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'user' => [
+                    // 'id'          => $userId,
+                    // 'name'        => 'Arun Kumar Bhatt',
+                    // 'senior_name' => 'Ajit Gupta Ji',
+                    // 'emp_code'    => 'E000002',
+                // ],
+                // 'months'      => $months,
+                // 'sections'    => $sections,
+                // 'total_score' => $totalScore,
+                // 'note'        => "As per management's decision, a minimum threshold of 70% has been established for all evaluation parameters.",
+            // ],
+        // ]);
+    // }
 
     private function buildMonthlyRow(int $userId, array $months, string $sectionKey, string $rowLabel, $dummyValue): array
     {
@@ -1798,274 +1798,274 @@ class MainReportApiController extends Controller
     /*  Complaint                                                          */
     /* ------------------------------------------------------------------ */
 
-    public function complaintForm(Request $request)
-    {
-        $company_id = $request->user()->company_id;
+    // public function complaintForm(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
 
-        $user = DB::table('person')
-            ->join('person_login', 'person.id', '=', 'person_login.person_id')
-            ->where('person.company_id', $company_id)
-            ->where('person_login.person_status', 1)
-            ->select('person.id', DB::raw("CONCAT(person.first_name, ' ', person.last_name) AS person_name"))
-            ->get();
+        // $user = DB::table('person')
+            // ->join('person_login', 'person.id', '=', 'person_login.person_id')
+            // ->where('person.company_id', $company_id)
+            // ->where('person_login.person_status', 1)
+            // ->select('person.id', DB::raw("CONCAT(person.first_name, ' ', person.last_name) AS person_name"))
+            // ->get();
 
-        $user_data = DB::table('person')
-            ->join('person_login', 'person.id', '=', 'person_login.person_id')
-            ->where('person.company_id', $company_id)
-            ->where('person_login.person_status', 1)
-            ->select('person.id', DB::raw("CONCAT(person.first_name, ' ', person.last_name) AS person_name"))
-            ->pluck('person_name', 'id')
-            ->toArray();
+        // $user_data = DB::table('person')
+            // ->join('person_login', 'person.id', '=', 'person_login.person_id')
+            // ->where('person.company_id', $company_id)
+            // ->where('person_login.person_status', 1)
+            // ->select('person.id', DB::raw("CONCAT(person.first_name, ' ', person.last_name) AS person_name"))
+            // ->pluck('person_name', 'id')
+            // ->toArray();
 
-        $status = DB::table('_complaint_status')
-            ->where('status', 1)
-            ->pluck('name', 'id')
-            ->toArray();
+        // $status = DB::table('_complaint_status')
+            // ->where('status', 1)
+            // ->pluck('name', 'id')
+            // ->toArray();
 
-        $case_no = DB::table('complain_details')
-            ->where('company_id', $company_id)
-            ->orderBy('id', 'desc')
-            ->pluck('case_no')
-            ->toArray();
+        // $case_no = DB::table('complain_details')
+            // ->where('company_id', $company_id)
+            // ->orderBy('id', 'desc')
+            // ->pluck('case_no')
+            // ->toArray();
 
-        $sub_department = DB::table('sub_department')
-            ->where('company_id', $company_id)
-            ->where('status', 1)
-            ->pluck('name', 'id');
+        // $sub_department = DB::table('sub_department')
+            // ->where('company_id', $company_id)
+            // ->where('status', 1)
+            // ->pluck('name', 'id');
 
-        $location_5 = Location5::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id');
+        // $location_5 = Location5::where('status', 1)->where('company_id', $company_id)->pluck('name', 'id');
 
-        return response()->json([
-            'status' => true,
-            'data'   => [
-                'company_id'     => $company_id,
-                'user'           => $user,
-                'user_data'      => $user_data,
-                'case_no'        => $case_no,
-                'location_5'     => $location_5,
-                'status'         => $status,
-                'sub_department' => $sub_department,
-            ],
-        ]);
-    }
+        // return response()->json([
+            // 'status' => true,
+            // 'data'   => [
+                // 'company_id'     => $company_id,
+                // 'user'           => $user,
+                // 'user_data'      => $user_data,
+                // 'case_no'        => $case_no,
+                // 'location_5'     => $location_5,
+                // 'status'         => $status,
+                // 'sub_department' => $sub_department,
+            // ],
+        // ]);
+    // }
 
-    public function storeComplaint(Request $request)
-    {
-        $request->validate([
-            'case_no'           => 'required|max:50',
-            'contact_no'        => 'required|max:11',
-            'customer_name'     => 'required|max:100',
-            'address'           => 'required',
-            'machine_serial_no' => 'required|max:100',
-            'machine_type'      => 'required|max:100',
-            'assigned_to'       => 'required|integer',
-            'fault_description' => 'required',
-        ]);
+    // public function storeComplaint(Request $request)
+    // {
+        // $request->validate([
+            // 'case_no'           => 'required|max:50',
+            // 'contact_no'        => 'required|max:11',
+            // 'customer_name'     => 'required|max:100',
+            // 'address'           => 'required',
+            // 'machine_serial_no' => 'required|max:100',
+            // 'machine_type'      => 'required|max:100',
+            // 'assigned_to'       => 'required|integer',
+            // 'fault_description' => 'required',
+        // ]);
 
-        $company_id = $request->user()->company_id;
-        $today      = now()->toDateString();
+        // $company_id = $request->user()->company_id;
+        // $today      = now()->toDateString();
 
-        $latestCase = DB::table('complain_details')
-            ->where('company_id', $company_id)
-            ->where('case_no', $request->case_no)
-            ->orderBy('id', 'desc')
-            ->first();
+        // $latestCase = DB::table('complain_details')
+            // ->where('company_id', $company_id)
+            // ->where('case_no', $request->case_no)
+            // ->orderBy('id', 'desc')
+            // ->first();
 
-        if ($latestCase && $latestCase->visit_count == 0) {
-            return response()->json([
-                'status'  => false,
-                'type'    => 'running_case',
-                'message' => 'This case number is already running. Showing existing details.',
-                'data'    => $latestCase,
-            ], 409);
-        }
+        // if ($latestCase && $latestCase->visit_count == 0) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'type'    => 'running_case',
+                // 'message' => 'This case number is already running. Showing existing details.',
+                // 'data'    => $latestCase,
+            // ], 409);
+        // }
 
-        DB::table('complain_details')->insert([
-            'company_id'        => $company_id,
-            'case_no'           => $request->case_no,
-            'case_status'       => 0,
-            'contact_no'        => $request->contact_no,
-            'customer_name'     => $request->customer_name,
-            'address'           => $request->address,
-            'machine_serial_no' => $request->machine_serial_no,
-            'machine_type'      => $request->machine_type,
-            'assigned_date'     => $today,
-            'assigned_to'       => $request->assigned_to,
-            'fault_description' => $request->fault_description,
-            'lro'               => $request->lro,
-            'visit_count'       => 0,
-            'created_at'        => now(),
-            'updated_at'        => now(),
-        ]);
+        // DB::table('complain_details')->insert([
+            // 'company_id'        => $company_id,
+            // 'case_no'           => $request->case_no,
+            // 'case_status'       => 0,
+            // 'contact_no'        => $request->contact_no,
+            // 'customer_name'     => $request->customer_name,
+            // 'address'           => $request->address,
+            // 'machine_serial_no' => $request->machine_serial_no,
+            // 'machine_type'      => $request->machine_type,
+            // 'assigned_date'     => $today,
+            // 'assigned_to'       => $request->assigned_to,
+            // 'fault_description' => $request->fault_description,
+            // 'lro'               => $request->lro,
+            // 'visit_count'       => 0,
+            // 'created_at'        => now(),
+            // 'updated_at'        => now(),
+        // ]);
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Complaint saved successfully',
-        ], 201);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Complaint saved successfully',
+        // ], 201);
+    // }
 
-    public function getRunningCase(Request $request)
-    {
-        $request->validate(['case_no' => 'required']);
+    // public function getRunningCase(Request $request)
+    // {
+        // $request->validate(['case_no' => 'required']);
 
-        $company_id = $request->user()->company_id;
+        // $company_id = $request->user()->company_id;
 
-        $latestCase = DB::table('complain_details')
-            ->where('company_id', $company_id)
-            ->where('case_no', $request->case_no)
-            ->orderBy('id', 'desc')
-            ->first();
+        // $latestCase = DB::table('complain_details')
+            // ->where('company_id', $company_id)
+            // ->where('case_no', $request->case_no)
+            // ->orderBy('id', 'desc')
+            // ->first();
 
-        if ($latestCase && $latestCase->visit_count == 0) {
-            return response()->json(['status' => true, 'data' => $latestCase]);
-        }
+        // if ($latestCase && $latestCase->visit_count == 0) {
+            // return response()->json(['status' => true, 'data' => $latestCase]);
+        // }
 
-        return response()->json(['status' => false]);
-    }
+        // return response()->json(['status' => false]);
+    // }
 
-    public function complaintList(Request $request)
-    {
-        $sub_department = $request->sub_department;
-        $assigned_to    = $request->user_data;
-        $case_no        = $request->case_no;
-        $location_5     = $request->location_5;
-        $status         = $request->status;
+    // public function complaintList(Request $request)
+    // {
+        // $sub_department = $request->sub_department;
+        // $assigned_to    = $request->user_data;
+        // $case_no        = $request->case_no;
+        // $location_5     = $request->location_5;
+        // $status         = $request->status;
 
-        $company_id = $request->user()->company_id;
+        // $company_id = $request->user()->company_id;
 
-        $datasenior = $this->getJuniorUserIds($request);
+        // $datasenior = $this->getJuniorUserIds($request);
 
-        $data = DB::table('complain_details')
-            ->leftJoin('person', 'person.id', '=', 'complain_details.assigned_to')
-            ->leftJoin('department', 'person.department_id', '=', 'department.id')
-            ->leftJoin('sub_department', 'department.id', '=', 'sub_department.super_id')
-            ->leftJoin('_complaint_status', '_complaint_status.id', '=', 'complain_details.case_status_pre')
-            ->leftJoin('travelling_expense_bill', 'travelling_expense_bill.complaint_id', '=', 'complain_details.id')
-            ->where('complain_details.company_id', $company_id)
-            ->select(
-                'complain_details.case_no',
-                'complain_details.visit_count',
-                'complain_details.customer_name',
-                'complain_details.contact_no',
-                'complain_details.machine_type',
-                'complain_details.assigned_date',
-                '_complaint_status.name as case_status',
-                'complain_details.machine_serial_no',
-                DB::raw("CONCAT(person.first_name,' ',person.last_name) as assigned_to_name"),
-                'travelling_expense_bill.complaint_id as expense_status',
-                'complain_details.id as complaint_id',
-            );
+        // $data = DB::table('complain_details')
+            // ->leftJoin('person', 'person.id', '=', 'complain_details.assigned_to')
+            // ->leftJoin('department', 'person.department_id', '=', 'department.id')
+            // ->leftJoin('sub_department', 'department.id', '=', 'sub_department.super_id')
+            // ->leftJoin('_complaint_status', '_complaint_status.id', '=', 'complain_details.case_status_pre')
+            // ->leftJoin('travelling_expense_bill', 'travelling_expense_bill.complaint_id', '=', 'complain_details.id')
+            // ->where('complain_details.company_id', $company_id)
+            // ->select(
+                // 'complain_details.case_no',
+                // 'complain_details.visit_count',
+                // 'complain_details.customer_name',
+                // 'complain_details.contact_no',
+                // 'complain_details.machine_type',
+                // 'complain_details.assigned_date',
+                // '_complaint_status.name as case_status',
+                // 'complain_details.machine_serial_no',
+                // DB::raw("CONCAT(person.first_name,' ',person.last_name) as assigned_to_name"),
+                // 'travelling_expense_bill.complaint_id as expense_status',
+                // 'complain_details.id as complaint_id',
+            // );
 
-        if (!empty($sub_department)) $data->where('sub_department.id', $sub_department);
-        if (!empty($assigned_to))    $data->where('complain_details.assigned_to', $assigned_to);
-        if (!empty($case_no))        $data->where('complain_details.case_no', $case_no);
-        if (!empty($location_5))     $data->where('person.head_quater_id', $location_5);
-        if (!empty($datasenior))     $data->whereIn('person.id', $datasenior);
+        // if (!empty($sub_department)) $data->where('sub_department.id', $sub_department);
+        // if (!empty($assigned_to))    $data->where('complain_details.assigned_to', $assigned_to);
+        // if (!empty($case_no))        $data->where('complain_details.case_no', $case_no);
+        // if (!empty($location_5))     $data->where('person.head_quater_id', $location_5);
+        // if (!empty($datasenior))     $data->whereIn('person.id', $datasenior);
 
-        if (!empty($status)) {
-            if ($status == 1) {
-                $data->where('complain_details.case_status_pre', 0);
-            } else {
-                $data->where('complain_details.case_status_pre', $status);
-            }
-        }
+        // if (!empty($status)) {
+            // if ($status == 1) {
+                // $data->where('complain_details.case_status_pre', 0);
+            // } else {
+                // $data->where('complain_details.case_status_pre', $status);
+            // }
+        // }
 
-        $data = $data
-            ->groupBy('complain_details.id')
-            ->orderBy('complain_details.assigned_date', 'desc')
-            ->get();
+        // $data = $data
+            // ->groupBy('complain_details.id')
+            // ->orderBy('complain_details.assigned_date', 'desc')
+            // ->get();
 
-        return response()->json(['status' => true, 'data' => $data]);
-    }
+        // return response()->json(['status' => true, 'data' => $data]);
+    // }
 
-    public function deleteComplaint(Request $request)
-    {
-        $request->validate(['case_no' => 'required']);
+    // public function deleteComplaint(Request $request)
+    // {
+        // $request->validate(['case_no' => 'required']);
 
-        $case_no    = $request->case_no;
-        $company_id = $request->user()->company_id;
+        // $case_no    = $request->case_no;
+        // $company_id = $request->user()->company_id;
 
-        $case = DB::table('complain_details')
-            ->where('case_no', $case_no)
-            ->where('company_id', $company_id)
-            ->first();
+        // $case = DB::table('complain_details')
+            // ->where('case_no', $case_no)
+            // ->where('company_id', $company_id)
+            // ->first();
 
-        if (empty($case->id)) {
-            return response()->json(['status' => false, 'message' => 'Case not found'], 404);
-        }
+        // if (empty($case->id)) {
+            // return response()->json(['status' => false, 'message' => 'Case not found'], 404);
+        // }
 
-        DB::table('complain_details')->where('case_no', $case_no)->delete();
+        // DB::table('complain_details')->where('case_no', $case_no)->delete();
 
-        return response()->json(['status' => true, 'message' => 'Case deleted successfully']);
-    }
+        // return response()->json(['status' => true, 'message' => 'Case deleted successfully']);
+    // }
 
-    public function showComplaint(Request $request)
-    {
-        $company_id = $request->user()->company_id;
-        $case_no    = $request->case_no;
+    // public function showComplaint(Request $request)
+    // {
+        // $company_id = $request->user()->company_id;
+        // $case_no    = $request->case_no;
 
-        $case_details = DB::table('complain_details')
-            ->where('case_no', $case_no)
-            ->where('company_id', $company_id)
-            ->first();
+        // $case_details = DB::table('complain_details')
+            // ->where('case_no', $case_no)
+            // ->where('company_id', $company_id)
+            // ->first();
 
-        if (!$case_details) {
-            return response()->json(['status' => false, 'message' => 'Case not found'], 404);
-        }
+        // if (!$case_details) {
+            // return response()->json(['status' => false, 'message' => 'Case not found'], 404);
+        // }
 
-        return response()->json(['status' => true, 'data' => $case_details]);
-    }
+        // return response()->json(['status' => true, 'data' => $case_details]);
+    // }
 
-    public function updateComplaint(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'case_no'           => 'required|max:50',
-            'contact_no'        => 'required|digits:10',
-            'customer_name'     => 'required|max:100',
-            'address'           => 'required',
-            'machine_serial_no' => 'required|max:100',
-            'machine_type'      => 'required|max:100',
-            'assigned_date'     => 'required|date',
-            'assigned_to'       => 'required|integer',
-            'fault_description' => 'required',
-        ]);
+    // public function updateComplaint(Request $request)
+    // {
+        // $validator = Validator::make($request->all(), [
+            // 'case_no'           => 'required|max:50',
+            // 'contact_no'        => 'required|digits:10',
+            // 'customer_name'     => 'required|max:100',
+            // 'address'           => 'required',
+            // 'machine_serial_no' => 'required|max:100',
+            // 'machine_type'      => 'required|max:100',
+            // 'assigned_date'     => 'required|date',
+            // 'assigned_to'       => 'required|integer',
+            // 'fault_description' => 'required',
+        // ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'status'  => false,
-                'message' => $validator->errors()->first(),
-            ], 422);
-        }
+        // if ($validator->fails()) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => $validator->errors()->first(),
+            // ], 422);
+        // }
 
-        $company_id = $request->user()->company_id;
-        $case_no    = $request->case_no;
+        // $company_id = $request->user()->company_id;
+        // $case_no    = $request->case_no;
 
-        $update = DB::table('complain_details')
-            ->where('case_no', $case_no)
-            ->where('company_id', $company_id)
-            ->update([
-                'contact_no'        => $request->contact_no,
-                'customer_name'     => $request->customer_name,
-                'address'           => $request->address,
-                'machine_serial_no' => $request->machine_serial_no,
-                'machine_type'      => $request->machine_type,
-                'assigned_date'     => $request->assigned_date,
-                'assigned_to'       => $request->assigned_to,
-                'fault_description' => $request->fault_description,
-                'lro'               => $request->lro,
-                'updated_at'        => now(),
-            ]);
+        // $update = DB::table('complain_details')
+            // ->where('case_no', $case_no)
+            // ->where('company_id', $company_id)
+            // ->update([
+                // 'contact_no'        => $request->contact_no,
+                // 'customer_name'     => $request->customer_name,
+                // 'address'           => $request->address,
+                // 'machine_serial_no' => $request->machine_serial_no,
+                // 'machine_type'      => $request->machine_type,
+                // 'assigned_date'     => $request->assigned_date,
+                // 'assigned_to'       => $request->assigned_to,
+                // 'fault_description' => $request->fault_description,
+                // 'lro'               => $request->lro,
+                // 'updated_at'        => now(),
+            // ]);
 
-        if (!$update) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'No complaint found or nothing to update.',
-            ], 404);
-        }
+        // if (!$update) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'No complaint found or nothing to update.',
+            // ], 404);
+        // }
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Complaint updated successfully',
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Complaint updated successfully',
+        // ]);
+    // }
 }

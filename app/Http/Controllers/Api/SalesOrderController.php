@@ -264,8 +264,8 @@ try {
                             total_sale_value, discount, amount, total_sale_qty, total_dispatch_qty, lat_lng,
                             mccmnclatcellid, track_address, date, time, image_name, override_status,
                             order_status, remarks, sync_status
-                       FROM user_sales_order WHERE order_id = ?",
-                    [$orderId]
+                       FROM user_sales_order WHERE order_id = ? AND dealer_id = ?",
+                    [$orderId, $dealerId]
                 );
 
                 // 2. Copy items into cancel_order_details
@@ -280,15 +280,15 @@ try {
                 // 3. Mark order cancelled
                 DB::update(
                     "UPDATE user_sales_order SET order_status = '8'
-                      WHERE order_id = ?",
-                    [$orderId]
+                      WHERE order_id = ? AND dealer_id = ?",
+                    [$orderId, $dealerId]
                 );
 
                 // 4. Stamp reason + remark on the cancel row
                 DB::update(
                     "UPDATE cancel_order SET remarks = ?, reasons = ?
-                      WHERE order_id = ?",
-                    [$remark, $reason, $orderId]
+                      WHERE order_id = ? AND dealer_id = ?",
+                    [$remark, $reason, $orderId, $dealerId]
                 );
 
                 $cancelled[] = $orderId;
@@ -305,7 +305,7 @@ try {
             DB::rollBack();
             return response()->json([
                 'status'  => false,
-                'message' => 'Cancel failed: ' . $e->getMessage(),
+                'message' => 'Cancel failed: ' . safe_error_message($e),
             ], 500);
         }
     }

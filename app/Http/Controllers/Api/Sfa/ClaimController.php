@@ -117,7 +117,7 @@ class ClaimController extends Controller
 
         } catch (\Throwable $e) {
             Log::error('sfaClaims failed', [
-                'error' => $e->getMessage(),
+                'error' => safe_error_message($e),
                 'trace' => $e->getTraceAsString(),
             ]);
 
@@ -186,7 +186,7 @@ class ClaimController extends Controller
         } catch (\Throwable $e) {
             Log::error('sfaClaimDetails failed', [
                 'replaceid' => $replaceid,
-                'error'     => $e->getMessage(),
+                'error'     => safe_error_message($e),
                 'trace'     => $e->getTraceAsString(),
             ]);
 

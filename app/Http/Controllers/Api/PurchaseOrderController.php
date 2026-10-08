@@ -146,7 +146,8 @@ class PurchaseOrderController extends Controller
         $dealerId = $user->dealer_id;
 
         $v = Validator::make($request->all(), [
-            'company_id' => 'required|integer',
+            'company_id' => 'nullable|integer',
+            'csa_id'     => 'nullable|integer',
             'firm_name'  => 'required|string|max:200',
             'order_no'   => 'required|string|max:50',
             'order_date' => 'required|string',
@@ -160,6 +161,20 @@ class PurchaseOrderController extends Controller
         ]);
         if ($v->fails()) {
             return response()->json(['status' => false, 'errors' => $v->errors()], 422);
+        }
+
+        $companyId = (int) $user->company_id;
+        $csaId     = (int) ($request->input('csa_id') ?: 0);
+        if ($request->filled('company_id') && (int) $request->input('company_id') !== $companyId) {
+            return response()->json(['status' => false, 'message' => 'Select your own company.'], 422);
+        }
+        if (!$this->csaAllowed((int) $dealerId, $csaId)) {
+            return response()->json(['status' => false, 'message' => 'Select a CSA linked to your account.'], 422);
+        }
+        $productIds = array_values(array_unique(array_map(fn ($it) => (int) $it['product_id'], $request->input('items'))));
+        $validProducts = DB::table('catalog_product')->where('company_id', $companyId)->whereIn('id', $productIds)->count();
+        if ($validProducts !== count($productIds)) {
+            return response()->json(['status' => false, 'message' => 'One or more products do not belong to your company.'], 422);
         }
 
         $orderIdStr = strtoupper(trim($request->input('order_no')));
@@ -179,7 +194,7 @@ class PurchaseOrderController extends Controller
 
         try {
             $newAuto = DB::transaction(function () use (
-                $request, $user, $dealerId,
+                $request, $user, $dealerId, $companyId, $csaId,
                 $businessId, $orderIdStr, $orderDate, $chDate, $challanNo
             ) {
                 DB::insert(
@@ -197,10 +212,10 @@ class PurchaseOrderController extends Controller
                         $orderDate,
                         now()->format('Y-m-d H:i:s'),
                         now()->format('Y-m-d H:i:s'),
-                        (int)$request->input('company_id'),
+                        $companyId,
                         $chDate,
                         $challanNo,
-                        (int)($request->input('csa_id') ?: 0),
+                        $csaId,
                         '0',
                         $request->input('firm_name'),
                         $orderDate,
@@ -210,12 +225,11 @@ class PurchaseOrderController extends Controller
                 $row = DB::selectOne("SELECT LAST_INSERT_ID() AS auto_id");
                 $headerAuto = $row ? (int)$row->auto_id : 0;
 
-                $companyId = (int)$request->input('company_id');
                 $this->insertItems($businessId, $companyId, $request->input('items'), now()->format('Y-m-d'));
 
                 foreach ($request->input('items') as $it) {
                     $this->addStock(
-                        (int) $dealerId, $companyId, (int)($request->input('csa_id') ?: 0), (int) $user->getKey(),
+                        (int) $dealerId, $companyId, $csaId, (int) $user->getKey(),
                         (int) $it['product_id'], (string) $it['batch_no'], (string) $this->parseDate($it['mfg_date']),
                         (float) ($it['mrp'] ?? 0), (float) ($it['rate'] ?? 0),
                         (float) $it['quantity'] + (float) ($it['scheme_qty'] ?? 0)
@@ -227,7 +241,7 @@ class PurchaseOrderController extends Controller
         } catch (\Throwable $e) {
             return response()->json([
                 'status'  => false,
-                'message' => 'Save failed: ' . $e->getMessage(),
+                'message' => 'Save failed: ' . safe_error_message($e),
             ], 500);
         }
 
@@ -242,82 +256,82 @@ class PurchaseOrderController extends Controller
     // -----------------------------------------------------------------
     // PUT /api/purchase-orders/{id}
     // -----------------------------------------------------------------
-    public function update(Request $request, $id)
-    {
-        $user     = $request->user();
-        $dealerId = $user->dealer_id;
+    // public function update(Request $request, $id)
+    // {
+        // $user     = $request->user();
+        // $dealerId = $user->dealer_id;
 
-        $existing = DB::selectOne(
-            "SELECT auto, id FROM purchase_order
-              WHERE (auto = ? OR id = ?) AND dealer_id = ? LIMIT 1",
-            [$id, $id, $dealerId]
-        );
-        if (!$existing) {
-            return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
-        }
+        // $existing = DB::selectOne(
+            // "SELECT auto, id FROM purchase_order
+              // WHERE (auto = ? OR id = ?) AND dealer_id = ? LIMIT 1",
+            // [$id, $id, $dealerId]
+        // );
+        // if (!$existing) {
+            // return response()->json(['status' => false, 'message' => 'Purchase order not found'], 404);
+        // }
 
-        $v = Validator::make($request->all(), [
-            'company_id' => 'required|integer',
-            'firm_name'  => 'required|string|max:200',
-            'order_no'   => 'required|string|max:50',
-            'order_date' => 'required|string',
-            'items'      => 'required|array|min:1',
-        ]);
-        if ($v->fails()) {
-            return response()->json(['status' => false, 'errors' => $v->errors()], 422);
-        }
+        // $v = Validator::make($request->all(), [
+            // 'company_id' => 'required|integer',
+            // 'firm_name'  => 'required|string|max:200',
+            // 'order_no'   => 'required|string|max:50',
+            // 'order_date' => 'required|string',
+            // 'items'      => 'required|array|min:1',
+        // ]);
+        // if ($v->fails()) {
+            // return response()->json(['status' => false, 'errors' => $v->errors()], 422);
+        // }
 
-        $orderDate = $this->parseDate($request->input('order_date'));
-        $chDate    = $request->filled('ch_date') ? $this->parseDate($request->input('ch_date')) : null;
-        $challanNo = $request->input('challan_no') ?: '0';
-        $headerId  = $existing->id;
+        // $orderDate = $this->parseDate($request->input('order_date'));
+        // $chDate    = $request->filled('ch_date') ? $this->parseDate($request->input('ch_date')) : null;
+        // $challanNo = $request->input('challan_no') ?: '0';
+        // $headerId  = $existing->id;
 
-        try {
-            DB::transaction(function () use (
-                $request, $existing, $headerId,
-                $orderDate, $chDate, $challanNo
-            ) {
-                DB::update(
-                    "UPDATE purchase_order
-                        SET order_id   = ?,
-                            firm_name  = ?,
-                            company_id = ?,
-                            csa_id     = ?,
-                            order_date = ?,
-                            sale_date  = ?,
-                            ch_date    = ?,
-                            challan_no = ?
-                      WHERE auto = ?",
-                    [
-                        strtoupper(trim($request->input('order_no'))),
-                        $request->input('firm_name'),
-                        (int)$request->input('company_id'),
-                        (int)($request->input('csa_id') ?: 0),
-                        $orderDate,
-                        $orderDate,
-                        $chDate,
-                        $challanNo,
-                        (int)$existing->auto,
-                    ]
-                );
+        // try {
+            // DB::transaction(function () use (
+                // $request, $existing, $headerId,
+                // $orderDate, $chDate, $challanNo
+            // ) {
+                // DB::update(
+                    // "UPDATE purchase_order
+                        // SET order_id   = ?,
+                            // firm_name  = ?,
+                            // company_id = ?,
+                            // csa_id     = ?,
+                            // order_date = ?,
+                            // sale_date  = ?,
+                            // ch_date    = ?,
+                            // challan_no = ?
+                      // WHERE auto = ?",
+                    // [
+                        // strtoupper(trim($request->input('order_no'))),
+                        // $request->input('firm_name'),
+                        // (int)$request->input('company_id'),
+                        // (int)($request->input('csa_id') ?: 0),
+                        // $orderDate,
+                        // $orderDate,
+                        // $chDate,
+                        // $challanNo,
+                        // (int)$existing->auto,
+                    // ]
+                // );
 
-                DB::delete("DELETE FROM purchase_order_details WHERE order_id = ?", [$headerId]);
-                $this->insertItems($headerId, (int)$request->input('company_id'), $request->input('items'));
-            });
-        } catch (\Throwable $e) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Update failed: ' . $e->getMessage(),
-            ], 500);
-        }
+                // DB::delete("DELETE FROM purchase_order_details WHERE order_id = ?", [$headerId]);
+                // $this->insertItems($headerId, (int)$request->input('company_id'), $request->input('items'));
+            // });
+        // } catch (\Throwable $e) {
+            // return response()->json([
+                // 'status'  => false,
+                // 'message' => 'Update failed: ' . $e->getMessage(),
+            // ], 500);
+        // }
 
-        return response()->json([
-            'status'  => true,
-            'message' => 'Purchase order updated.',
-            'auto'    => (int)$existing->auto,
-            'id'      => $headerId,
-        ]);
-    }
+        // return response()->json([
+            // 'status'  => true,
+            // 'message' => 'Purchase order updated.',
+            // 'auto'    => (int)$existing->auto,
+            // 'id'      => $headerId,
+        // ]);
+    // }
 
     // -----------------------------------------------------------------
     // POST /api/purchase-orders/{id}/receive
@@ -381,6 +395,9 @@ class PurchaseOrderController extends Controller
         }
 
         $csaId = (int) ($validated['csa_id'] ?? 0);
+        if (!$this->csaAllowed($dealerId, $csaId)) {
+            return response()->json(['status' => false, 'message' => 'Select a CSA linked to your account.'], 422);
+        }
 
         DB::transaction(function () use ($validated, $po, $details, $dealerId, $companyId, $personId, $csaId) {
             $today = now()->format('Y-m-d');
@@ -429,6 +446,14 @@ class PurchaseOrderController extends Controller
         });
 
         return response()->json(['status' => true, 'message' => 'Stock received successfully.']);
+    }
+
+    private function csaAllowed(int $dealerId, int $csaId): bool
+    {
+        return $csaId === 0 || (bool) DB::selectOne(
+            "SELECT 1 FROM dealer WHERE id = ? AND FIND_IN_SET(?, csa_id) LIMIT 1",
+            [$dealerId, $csaId]
+        );
     }
 
     private function addStock(

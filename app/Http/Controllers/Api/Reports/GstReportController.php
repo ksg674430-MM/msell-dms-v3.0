@@ -167,34 +167,34 @@ class GstReportController extends Controller
     // 4) HSN Detail (per invoice/challan)
     //    Legacy: dispatch_report::get_hsn_detailed_list()
     // =========================================================
-    public function hsnDetail(Request $request)
-    {
-        $hsn = $request->input('hsn_code');
-        if (!$hsn) return $this->fail('hsn_code is required');
+    // public function hsnDetail(Request $request)
+    // {
+        // $hsn = $request->input('hsn_code');
+        // if (!$hsn) return $this->fail('hsn_code is required');
 
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer] = $this->scope($request);
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer] = $this->scope($request);
 
-        $rows = DB::table('challan_order_details as cod')
-            ->join('challan_order as co', 'co.id', '=', 'cod.ch_id')
-            ->join('retailer as r', 'r.id', '=', 'co.ch_retailer_id')
-            ->where('co.ch_dealer_id', $dealer)
-            ->where('cod.hsn_code', $hsn)
-            ->whereDate('co.ch_date', '>=', $from)->whereDate('co.ch_date', '<=', $to)
-            ->groupBy('co.id', 'co.ch_no', 'co.ch_retailer_id', 'r.name', 'r.tin_no', 'r.address', 'co.ch_date', 'cod.hsn_code')
-            ->select('co.id',
-                'co.ch_retailer_id', 'co.ch_no',
-                'r.name as pert', 'r.tin_no',
-                DB::raw("DATE_FORMAT(co.ch_date,'%d-%m-%Y') as ch_date"),
-                'cod.hsn_code',
-                DB::raw('ROUND(SUM(cod.qty),2) as qty'),
-                DB::raw('ROUND(SUM(cod.taxable_amt),2) as total_amt'),
-                DB::raw('ROUND(SUM(cod.vat_amt),2) as vat_amt'),
-                DB::raw('ROUND(SUM(cod.taxable_amt - cod.vat_amt),2) as taxable_amt'))
-            ->orderBy('co.ch_no')->get();
+        // $rows = DB::table('challan_order_details as cod')
+            // ->join('challan_order as co', 'co.id', '=', 'cod.ch_id')
+            // ->join('retailer as r', 'r.id', '=', 'co.ch_retailer_id')
+            // ->where('co.ch_dealer_id', $dealer)
+            // ->where('cod.hsn_code', $hsn)
+            // ->whereDate('co.ch_date', '>=', $from)->whereDate('co.ch_date', '<=', $to)
+            // ->groupBy('co.id', 'co.ch_no', 'co.ch_retailer_id', 'r.name', 'r.tin_no', 'r.address', 'co.ch_date', 'cod.hsn_code')
+            // ->select('co.id',
+                // 'co.ch_retailer_id', 'co.ch_no',
+                // 'r.name as pert', 'r.tin_no',
+                // DB::raw("DATE_FORMAT(co.ch_date,'%d-%m-%Y') as ch_date"),
+                // 'cod.hsn_code',
+                // DB::raw('ROUND(SUM(cod.qty),2) as qty'),
+                // DB::raw('ROUND(SUM(cod.taxable_amt),2) as total_amt'),
+                // DB::raw('ROUND(SUM(cod.vat_amt),2) as vat_amt'),
+                // DB::raw('ROUND(SUM(cod.taxable_amt - cod.vat_amt),2) as taxable_amt'))
+            // ->orderBy('co.ch_no')->get();
 
-        return $this->ok($rows, ['from' => $from, 'to' => $to, 'hsn_code' => $hsn]);
-    }
+        // return $this->ok($rows, ['from' => $from, 'to' => $to, 'hsn_code' => $hsn]);
+    // }
 
     // =========================================================
     // 5) Bill Detailed (B2B / B2C / B2C-Large / All)
@@ -284,67 +284,67 @@ class GstReportController extends Controller
     // 7) Book-wise
     //    Legacy: dispatch_report::get_book_wise_list()
     // =========================================================
-   public function bookWise(Request $request)
-{
-    [$from, $to] = $this->dateRange($request);
-    ['dealer_id' => $dealer] = $this->scope($request);
-    $status = $request->input('book_status'); // null = dono
+   // public function bookWise(Request $request)
+// {
+    // [$from, $to] = $this->dateRange($request);
+    // ['dealer_id' => $dealer] = $this->scope($request);
+    // $status = $request->input('book_status'); // null = dono
 
-    $q = DB::table('challan_order as co')
-        ->join('challan_order_details as cod', 'cod.ch_id', '=', 'co.id')
-        ->join('retailer as r', 'r.id', '=', 'co.ch_retailer_id')
-        ->where('co.ch_dealer_id', $dealer)
-        ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to]);
+    // $q = DB::table('challan_order as co')
+        // ->join('challan_order_details as cod', 'cod.ch_id', '=', 'co.id')
+        // ->join('retailer as r', 'r.id', '=', 'co.ch_retailer_id')
+        // ->where('co.ch_dealer_id', $dealer)
+        // ->whereBetween(DB::raw('DATE(co.ch_date)'), [$from, $to]);
 
-    if ($status !== null && $status !== '') {
-        $q->where('co.book_status', $status);
-    }
+    // if ($status !== null && $status !== '') {
+        // $q->where('co.book_status', $status);
+    // }
 
-    $rows = $q->groupBy('co.ch_no', 'co.id', 'r.name', 'r.tin_no', 'co.book_status')
-        ->select('co.id',
-            'r.name as rname', 'r.tin_no', 'co.ch_no', 'co.book_status',
-            DB::raw('ROUND(SUM(cod.taxable_amt),2) as total_amt'),
-            DB::raw('ROUND(SUM(cod.vat_amt),2) as vat_amt'),
-            DB::raw('ROUND(SUM(cod.taxable_amt - cod.vat_amt),2) as taxable_amt'))
-        ->orderBy('co.ch_no')->get();
+    // $rows = $q->groupBy('co.ch_no', 'co.id', 'r.name', 'r.tin_no', 'co.book_status')
+        // ->select('co.id',
+            // 'r.name as rname', 'r.tin_no', 'co.ch_no', 'co.book_status',
+            // DB::raw('ROUND(SUM(cod.taxable_amt),2) as total_amt'),
+            // DB::raw('ROUND(SUM(cod.vat_amt),2) as vat_amt'),
+            // DB::raw('ROUND(SUM(cod.taxable_amt - cod.vat_amt),2) as taxable_amt'))
+        // ->orderBy('co.ch_no')->get();
 
-    return $this->ok($rows, ['from' => $from, 'to' => $to, 'book_status' => $status]);
-}
+    // return $this->ok($rows, ['from' => $from, 'to' => $to, 'book_status' => $status]);
+// }
 
     // =========================================================
     // 8) Book-wise Document Summary (ranges)
     //    Legacy: dispatch_report::get_book_wise_doc_list()
     // =========================================================
-    public function bookWiseDoc(Request $request)
-    {
-        [$from, $to] = $this->dateRange($request);
-        ['dealer_id' => $dealer] = $this->scope($request);
+    // public function bookWiseDoc(Request $request)
+    // {
+        // [$from, $to] = $this->dateRange($request);
+        // ['dealer_id' => $dealer] = $this->scope($request);
 
-        $sections = [
-            'bos' => ['label' => 'Bill of Supply',     'book_status' => 1],
-            'boc' => ['label' => 'Generated Invoice',  'book_status' => 0],
-        ];
+        // $sections = [
+            // 'bos' => ['label' => 'Bill of Supply',     'book_status' => 1],
+            // 'boc' => ['label' => 'Generated Invoice',  'book_status' => 0],
+        // ];
 
-        $out = [];
-        foreach ($sections as $key => $s) {
-            $base = DB::table('challan_order')
-                ->where('ch_dealer_id', $dealer)
-                ->where('book_status', $s['book_status'])
-                ->whereDate('ch_date', '>=', $from)->whereDate('ch_date', '<=', $to);
+        // $out = [];
+        // foreach ($sections as $key => $s) {
+            // $base = DB::table('challan_order')
+                // ->where('ch_dealer_id', $dealer)
+                // ->where('book_status', $s['book_status'])
+                // ->whereDate('ch_date', '>=', $from)->whereDate('ch_date', '<=', $to);
 
-            $count = (clone $base)->count();
-            $first = (clone $base)->orderBy('ch_no')->value('ch_no');
-            $last  = (clone $base)->orderByDesc('ch_no')->value('ch_no');
+            // $count = (clone $base)->count();
+            // $first = (clone $base)->orderBy('ch_no')->value('ch_no');
+            // $last  = (clone $base)->orderByDesc('ch_no')->value('ch_no');
 
-            $out[$key] = [
-                'pert'   => $s['label'],
-                'bfrom'  => $first,
-                'bto'    => $last,
-                'tot'    => $count,
-                'bcan'   => 0,
-            ];
-        }
+            // $out[$key] = [
+                // 'pert'   => $s['label'],
+                // 'bfrom'  => $first,
+                // 'bto'    => $last,
+                // 'tot'    => $count,
+                // 'bcan'   => 0,
+            // ];
+        // }
 
-        return $this->ok($out, ['from' => $from, 'to' => $to]);
-    }
+        // return $this->ok($out, ['from' => $from, 'to' => $to]);
+    // }
 }

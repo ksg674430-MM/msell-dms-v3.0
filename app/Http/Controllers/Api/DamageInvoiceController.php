@@ -38,17 +38,17 @@ class DamageInvoiceController extends Controller
         return response()->json($result, 201);
     }
 
-    public function update(UpdateDamageInvoiceRequest $request, string $id)
-    {
-        $result = $this->service->update($id, $request->validated(), $request->user());
-        return response()->json($result);
-    }
+    // public function update(UpdateDamageInvoiceRequest $request, string $id)
+    // {
+        // $result = $this->service->update($id, $request->validated(), $request->user());
+        // return response()->json($result);
+    // }
 
-    public function destroy(Request $request, string $id)
-    {
-        $this->service->delete($id, $request->user());
-        return response()->json(['status' => true]);
-    }
+    // public function destroy(Request $request, string $id)
+    // {
+        // $this->service->delete($id, $request->user());
+        // return response()->json(['status' => true]);
+    // }
 
     /** GET /api/damage-invoices/next-number */
     public function nextNumber(Request $request)

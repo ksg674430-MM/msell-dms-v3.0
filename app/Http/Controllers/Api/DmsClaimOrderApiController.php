@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\ScopesClaimDealers;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +13,8 @@ use PDF;
 
 class DmsClaimOrderApiController extends Controller
 {
+    use ScopesClaimDealers;
+
     /* ------------------------------------------------------------------ */
     /*  Context helpers                                                    */
     /* ------------------------------------------------------------------ */
@@ -154,180 +157,180 @@ class DmsClaimOrderApiController extends Controller
     /*  2. CREATE — form data                                              */
     /* ================================================================== */
 
-    public function create(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+    // public function create(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
 
-        $dealerData = $this->dealerLoginRow($ctx->dealer_id);
+        // $dealerData = $this->dealerLoginRow($ctx->dealer_id);
 
-        $divCodeEntry = DB::table('ACC_MAST')->where('ACC_CODE', $ctx->dealer_code)->first();
-        $divCodeLogin = DB::table('dealer_person_login')->where('dealer_id', $ctx->dealer_id)->first();
-        $divCodeElse  = $divCodeLogin->div_code_main ?? '0';
-        $divCode      = $divCodeEntry->DIV_CODE ?? $divCodeElse;
+        // $divCodeEntry = DB::table('ACC_MAST')->where('ACC_CODE', $ctx->dealer_code)->first();
+        // $divCodeLogin = DB::table('dealer_person_login')->where('dealer_id', $ctx->dealer_id)->first();
+        // $divCodeElse  = $divCodeLogin->div_code_main ?? '0';
+        // $divCode      = $divCodeEntry->DIV_CODE ?? $divCodeElse;
 
-        $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
-        $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
-        $conversionUnit = DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE');
+        // $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
+        // $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
+        // $conversionUnit = DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE');
 
-        $catalogProducts = DB::table('catalog_product')
-            ->select(DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
-            ->where('status', 1)
-            ->where('catalog_product.company_id', $ctx->company_id)
-            ->orderBy('itemcode', 'ASC')
-            ->get();
+        // $catalogProducts = DB::table('catalog_product')
+            // ->select(DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
+            // ->where('status', 1)
+            // ->where('catalog_product.company_id', $ctx->company_id)
+            // ->orderBy('itemcode', 'ASC')
+            // ->get();
 
-        $dealerArray = DB::table('retailer')
-            ->where('company_id', $ctx->company_id)
-            ->where('dealer_id', $ctx->dealer_id)
-            ->orderBy('id', 'ASC')
-            ->get();
+        // $dealerArray = DB::table('retailer')
+            // ->where('company_id', $ctx->company_id)
+            // ->where('dealer_id', $ctx->dealer_id)
+            // ->orderBy('id', 'ASC')
+            // ->get();
 
-        return response()->json([
-            'code'    => 200,
-            'message' => 'success',
-            'data'    => $this->utf8Clean([
-                'catalog_product_details'    => $catalogProducts,
-                'converstion_unit_item_code' => $conversionUnit,
-                'image_dyn'                  => $imageDyn,
-                'dealer_array'               => $dealerArray,
-                'div_code_master'            => $divCodeMaster,
-                'auth_id'                    => $ctx->dealer_id,
-                'role_id_cus'                => $ctx->role_id,
-                'quantity_type'              => $ctx->quantity_type,
-                'company_id'                 => $ctx->company_id,
-                'ownership_type_id'          => $ctx->ownership_type_id,
-            ]),
-        ]);
-    }
+        // return response()->json([
+            // 'code'    => 200,
+            // 'message' => 'success',
+            // 'data'    => $this->utf8Clean([
+                // 'catalog_product_details'    => $catalogProducts,
+                // 'converstion_unit_item_code' => $conversionUnit,
+                // 'image_dyn'                  => $imageDyn,
+                // 'dealer_array'               => $dealerArray,
+                // 'div_code_master'            => $divCodeMaster,
+                // 'auth_id'                    => $ctx->dealer_id,
+                // 'role_id_cus'                => $ctx->role_id,
+                // 'quantity_type'              => $ctx->quantity_type,
+                // 'company_id'                 => $ctx->company_id,
+                // 'ownership_type_id'          => $ctx->ownership_type_id,
+            // ]),
+        // ]);
+    // }
 
     /* ================================================================== */
     /*  3. STORE — create claim (dealer or retailer, multipart)            */
     /* ================================================================== */
 
-    public function store(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+    // public function store(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
 
-        $request->validate([
-            'dealer_id_cus_select' => 'required|in:1,2',
-            'item_code'            => 'required|array|min:1',
-            'product_rate'         => 'required|array',
-            'qty'                  => 'required|array',
-        ]);
+        // $request->validate([
+            // 'dealer_id_cus_select' => 'required|in:1,2',
+            // 'item_code'            => 'required|array|min:1',
+            // 'product_rate'         => 'required|array',
+            // 'qty'                  => 'required|array',
+        // ]);
 
-        $orderDate = $request->input('order_date', date('Y-m-d'));
-        $orderId   = date('YmdHis') . $ctx->dealer_id;
+        // $orderDate = $request->input('order_date', date('Y-m-d'));
+        // $orderId   = date('YmdHis') . $ctx->dealer_id;
 
-        $dealerData = $this->dealerLoginRow($ctx->dealer_id);
-        abort_if(!$dealerData, 422, "dealer_person_login missing");
+        // $dealerData = $this->dealerLoginRow($ctx->dealer_id);
+        // abort_if(!$dealerData, 422, "dealer_person_login missing");
 
-        $itemCode    = (array) $request->input('item_code');
-        $productRate = (array) $request->input('product_rate');
-        $qty         = (array) $request->input('qty');
-        $remarks     = (array) $request->input('remarks');
+        // $itemCode    = (array) $request->input('item_code');
+        // $productRate = (array) $request->input('product_rate');
+        // $qty         = (array) $request->input('qty');
+        // $remarks     = (array) $request->input('remarks');
 
-        $isRetailerClaim = $request->input('dealer_id_cus_select') == '2';
+        // $isRetailerClaim = $request->input('dealer_id_cus_select') == '2';
 
-        DB::beginTransaction();
-        try {
-            if ($isRetailerClaim) {
-                $retailerId = $request->input('dealer_id_cus');
+        // DB::beginTransaction();
+        // try {
+            // if ($isRetailerClaim) {
+                // $retailerId = $request->input('dealer_id_cus');
 
-                DB::table('dms_retailer_claim')->insert([
-                    'order_id'         => $orderId,
-                    'company_id'       => $dealerData->company_id,
-                    'dealer_id'        => $ctx->dealer_id,
-                    'retailer_id'      => $retailerId,
-                    'date'             => $orderDate,
-                    'time'             => date('H:i:s'),
-                    'server_date_time' => now(),
-                    'claim_status'     => 0,
-                ]);
+                // DB::table('dms_retailer_claim')->insert([
+                    // 'order_id'         => $orderId,
+                    // 'company_id'       => $dealerData->company_id,
+                    // 'dealer_id'        => $ctx->dealer_id,
+                    // 'retailer_id'      => $retailerId,
+                    // 'date'             => $orderDate,
+                    // 'time'             => date('H:i:s'),
+                    // 'server_date_time' => now(),
+                    // 'claim_status'     => 0,
+                // ]);
 
-                if ($request->hasFile('onlyforMt')) {
-                    $file = $request->file('onlyforMt');
-                    $rand = substr(str_shuffle('12345678901234567890'), 0, 2);
-                    $name = date('YmdHis') . $rand . '.' . $file->getClientOriginalExtension();
-                    $dir  = public_path('dgr_mt_images_claim');
-                    if (!is_dir($dir)) mkdir($dir, 0755, true);
-                    $file->move($dir, $name);
+                // if ($request->hasFile('onlyforMt')) {
+                    // $file = $request->file('onlyforMt');
+                    // $rand = substr(str_shuffle('12345678901234567890'), 0, 2);
+                    // $name = date('YmdHis') . $rand . '.' . $file->getClientOriginalExtension();
+                    // $dir  = public_path('dgr_mt_images_claim');
+                    // if (!is_dir($dir)) mkdir($dir, 0755, true);
+                    // $file->move($dir, $name);
 
-                    DB::table('dms_retailer_claim')
-                        ->where('order_id', $orderId)
-                        ->update(['image_name' => 'dgr_mt_images_claim/' . $name]);
-                }
+                    // DB::table('dms_retailer_claim')
+                        // ->where('order_id', $orderId)
+                        // ->update(['image_name' => 'dgr_mt_images_claim/' . $name]);
+                // }
 
-                foreach ($itemCode as $i => $pid) {
-                    $batchRaw = $request->input("batchmfgmrp{$i}", '');
-                    $ex       = explode('|', $batchRaw);
+                // foreach ($itemCode as $i => $pid) {
+                    // $batchRaw = $request->input("batchmfgmrp{$i}", '');
+                    // $ex       = explode('|', $batchRaw);
 
-                    DB::table('dms_retailer_claim_details')->insert([
-                        'order_id'   => $orderId,
-                        'company_id' => $dealerData->company_id,
-                        'product_id' => $pid,
-                        'quantity'   => $qty[$i]         ?? 0,
-                        'mfg_date'   => $ex[1]           ?? null,
-                        'batch_no'   => $ex[0]           ?? '',
-                        'rate'       => $productRate[$i] ?? 0,
-                        'mrp'        => $ex[2]           ?? 0,
-                        'reason'     => $remarks[$i]     ?? '',
-                    ]);
-                }
-            } else {
-                DB::table('dms_dealer_claim')->insert([
-                    'order_id'         => $orderId,
-                    'company_id'       => $dealerData->company_id,
-                    'dealer_id'        => $ctx->dealer_id,
-                    'date'             => $orderDate,
-                    'time'             => date('H:i:s'),
-                    'server_date_time' => now(),
-                    'claim_status'     => 0,
-                ]);
+                    // DB::table('dms_retailer_claim_details')->insert([
+                        // 'order_id'   => $orderId,
+                        // 'company_id' => $dealerData->company_id,
+                        // 'product_id' => $pid,
+                        // 'quantity'   => $qty[$i]         ?? 0,
+                        // 'mfg_date'   => $ex[1]           ?? null,
+                        // 'batch_no'   => $ex[0]           ?? '',
+                        // 'rate'       => $productRate[$i] ?? 0,
+                        // 'mrp'        => $ex[2]           ?? 0,
+                        // 'reason'     => $remarks[$i]     ?? '',
+                    // ]);
+                // }
+            // } else {
+                // DB::table('dms_dealer_claim')->insert([
+                    // 'order_id'         => $orderId,
+                    // 'company_id'       => $dealerData->company_id,
+                    // 'dealer_id'        => $ctx->dealer_id,
+                    // 'date'             => $orderDate,
+                    // 'time'             => date('H:i:s'),
+                    // 'server_date_time' => now(),
+                    // 'claim_status'     => 0,
+                // ]);
 
-                if ($request->hasFile('onlyforMt')) {
-                    $file = $request->file('onlyforMt');
-                    $rand = substr(str_shuffle('12345678901234567890'), 0, 2);
-                    $name = date('YmdHis') . $rand . '.' . $file->getClientOriginalExtension();
-                    $dir  = public_path('dgr_mt_images_claim');
-                    if (!is_dir($dir)) mkdir($dir, 0755, true);
-                    $file->move($dir, $name);
+                // if ($request->hasFile('onlyforMt')) {
+                    // $file = $request->file('onlyforMt');
+                    // $rand = substr(str_shuffle('12345678901234567890'), 0, 2);
+                    // $name = date('YmdHis') . $rand . '.' . $file->getClientOriginalExtension();
+                    // $dir  = public_path('dgr_mt_images_claim');
+                    // if (!is_dir($dir)) mkdir($dir, 0755, true);
+                    // $file->move($dir, $name);
 
-                    DB::table('dms_dealer_claim')
-                        ->where('order_id', $orderId)
-                        ->update(['image_name' => 'dgr_mt_images_claim/' . $name]);
-                }
+                    // DB::table('dms_dealer_claim')
+                        // ->where('order_id', $orderId)
+                        // ->update(['image_name' => 'dgr_mt_images_claim/' . $name]);
+                // }
 
-                foreach ($itemCode as $i => $pid) {
-                    $batchRaw = $request->input("batchmfgmrp{$i}", '');
-                    $ex       = explode('|', $batchRaw);
+                // foreach ($itemCode as $i => $pid) {
+                    // $batchRaw = $request->input("batchmfgmrp{$i}", '');
+                    // $ex       = explode('|', $batchRaw);
 
-                    DB::table('dms_dealer_claim_details')->insert([
-                        'order_id'   => $orderId,
-                        'company_id' => $dealerData->company_id,
-                        'product_id' => $pid,
-                        'quantity'   => $qty[$i]         ?? 0,
-                        'mfg_date'   => $ex[1]           ?? '0',
-                        'batch_no'   => $ex[0]           ?? '0',
-                        'rate'       => $productRate[$i] ?? 0,
-                        'mrp'        => $ex[2]           ?? '0',
-                        'reason'     => $remarks[$i]     ?? '',
-                    ]);
-                }
-            }
+                    // DB::table('dms_dealer_claim_details')->insert([
+                        // 'order_id'   => $orderId,
+                        // 'company_id' => $dealerData->company_id,
+                        // 'product_id' => $pid,
+                        // 'quantity'   => $qty[$i]         ?? 0,
+                        // 'mfg_date'   => $ex[1]           ?? '0',
+                        // 'batch_no'   => $ex[0]           ?? '0',
+                        // 'rate'       => $productRate[$i] ?? 0,
+                        // 'mrp'        => $ex[2]           ?? '0',
+                        // 'reason'     => $remarks[$i]     ?? '',
+                    // ]);
+                // }
+            // }
 
-            DB::commit();
+            // DB::commit();
 
-            return response()->json([
-                'code'     => 200,
-                'message'  => 'success',
-                'order_id' => $orderId,
-            ], 201);
+            // return response()->json([
+                // 'code'     => 200,
+                // 'message'  => 'success',
+                // 'order_id' => $orderId,
+            // ], 201);
 
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
-        }
-    }
+        // } catch (\Throwable $e) {
+            // DB::rollBack();
+            // return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+        // }
+    // }
 
     /* ================================================================== */
     /*  4. EDIT                                                            */
@@ -348,7 +351,7 @@ class DmsClaimOrderApiController extends Controller
         abort_if(!$dealerData, 422, "dealer_person_login missing");
         $company_id = $dealerData->company_id;
 
-        $getRetailer  = DB::table('retailer')->where('company_id', $company_id)->pluck('name', 'id');
+        $getRetailer  = DB::table('retailer')->where('company_id', $company_id)->where('dealer_id', $ctx->dealer_id)->pluck('name', 'id');
         $productNames = DB::table('catalog_product')->where('company_id', $company_id)->pluck('name', 'id');
 
         $currentStock = DB::table('stock')
@@ -361,6 +364,7 @@ class DmsClaimOrderApiController extends Controller
         $getData = DB::table('dms_retailer_claim')
             ->join('dms_retailer_claim_details', 'dms_retailer_claim_details.order_id', '=', 'dms_retailer_claim.order_id')
             ->where('dms_retailer_claim.company_id', $company_id)
+            ->where('dms_retailer_claim.dealer_id', $ctx->dealer_id)
             ->where('dms_retailer_claim_details.company_id', $company_id)
             ->where('dms_retailer_claim_details.order_id', $uid)
             ->groupBy('dms_retailer_claim_details.id')
@@ -710,7 +714,6 @@ class DmsClaimOrderApiController extends Controller
             $detailUpdated = DB::table('dms_retailer_claim_details')
                 ->where('order_id', $orderId)
                 ->where('company_id', $company_id)
-                ->where('dealer_id', $ctx->dealer_id)
                 ->where('product_id', $line['product_id'])
                 ->where('mfg_date', $line['mfg_date'])
                 ->where('batch_no', $line['batch_no'])
@@ -726,12 +729,7 @@ class DmsClaimOrderApiController extends Controller
                 throw new \RuntimeException("Claim detail row missing for product {$line['product_id']}");
             }
 
-            $this->stockService->deduct(
-                dealerId:  $ctx->dealer_id,
-                stockId:   $line['stock_id'],
-                qty:       $line['qty'],
-                reference: ['retailer_claim', $orderId],
-            );
+            $this->moveStock((int) $ctx->dealer_id, (int) $line['stock_id'], 'qty', -(float) $line['qty']);
         }
 
         // (d) Commit marker — flipped only after every line succeeded.
@@ -748,7 +746,7 @@ class DmsClaimOrderApiController extends Controller
 
     } catch (\Throwable $e) {
         DB::rollBack();
-        return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+        return response()->json(['code' => 500, 'message' => safe_error_message($e)], 500);
     }
 }
 
@@ -782,7 +780,9 @@ class DmsClaimOrderApiController extends Controller
             )
             ->where('dms_retailer_claim.order_id', $orderId)
             ->where('dms_retailer_claim.company_id', $company_id)
+            ->where('dms_retailer_claim.dealer_id', $ctx->dealer_id)
             ->first();
+        abort_if(!$mainData, 404, 'Claim not found');
 
         $oldDataPreview = [];
         if (!empty($mainData->return_ch_no)) {
@@ -791,6 +791,7 @@ class DmsClaimOrderApiController extends Controller
                 ->join('catalog_product', 'catalog_product.id', '=', 'damage_order_details.product_id')
                 ->select('damage_order_details.*', 'catalog_product.name as product_name', 'damage_order.ch_no as invoice_no')
                 ->where('damage_order.id', $mainData->return_ch_no)
+                ->where('damage_order.ch_dealer_id', $ctx->dealer_id)
                 ->groupBy('damage_order_details.id')
                 ->get();
         }
@@ -830,42 +831,42 @@ class DmsClaimOrderApiController extends Controller
     /*  8. Non-saleable qty                                                */
     /* ================================================================== */
 
-    public function getNonSaleableQty(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
-        $request->validate(['concatData' => 'required|string']);
+    // public function getNonSaleableQty(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
+        // $request->validate(['concatData' => 'required|string']);
 
-        $ex          = explode('|', $request->input('concatData'));
-        $product_id  = $ex[0] ?? null;
-        $batch_no    = $ex[1] ?? null;
-        $mfg         = $ex[2] ?? null;
-        $mrp         = $ex[3] ?? null;
-        $dynamic_row = $ex[4] ?? null;
+        // $ex          = explode('|', $request->input('concatData'));
+        // $product_id  = $ex[0] ?? null;
+        // $batch_no    = $ex[1] ?? null;
+        // $mfg         = $ex[2] ?? null;
+        // $mrp         = $ex[3] ?? null;
+        // $dynamic_row = $ex[4] ?? null;
 
-        $row = DB::table('stock')
-            ->where('product_id', $product_id)
-            ->where('mfg', $mfg)
-            ->where('batch_no', $batch_no)
-            ->where('mrp', $mrp)
-            ->where('dealer_id', $ctx->dealer_id)
-            ->first();
+        // $row = DB::table('stock')
+            // ->where('product_id', $product_id)
+            // ->where('mfg', $mfg)
+            // ->where('batch_no', $batch_no)
+            // ->where('mrp', $mrp)
+            // ->where('dealer_id', $ctx->dealer_id)
+            // ->first();
 
-        if (!empty($row)) {
-            return response()->json($this->utf8Clean([
-                'code'                => 200,
-                'message'             => 'success',
-                'getNonSaleableStock' => $row,
-                'dynamic_row'         => $dynamic_row,
-            ]));
-        }
+        // if (!empty($row)) {
+            // return response()->json($this->utf8Clean([
+                // 'code'                => 200,
+                // 'message'             => 'success',
+                // 'getNonSaleableStock' => $row,
+                // 'dynamic_row'         => $dynamic_row,
+            // ]));
+        // }
 
-        return response()->json([
-            'code'                => 401,
-            'message'             => 'Request Not Found!!',
-            'getNonSaleableStock' => '',
-            'dynamic_row'         => $dynamic_row,
-        ]);
-    }
+        // return response()->json([
+            // 'code'                => 401,
+            // 'message'             => 'Request Not Found!!',
+            // 'getNonSaleableStock' => '',
+            // 'dynamic_row'         => $dynamic_row,
+        // ]);
+    // }
 
     /* ================================================================== */
     /*  9. processClaimPreview                                             */
@@ -1065,7 +1066,7 @@ class DmsClaimOrderApiController extends Controller
         ]);
     } catch (\Throwable $e) {
         DB::rollBack();
-        return response()->json(['code' => 500, 'message' => $e->getMessage()], 500);
+        return response()->json(['code' => 500, 'message' => safe_error_message($e)], 500);
     }
 }
     /* ================================================================== */
@@ -1103,7 +1104,7 @@ class DmsClaimOrderApiController extends Controller
         $pid        = $request->input('pid');
         $company_id = $ctx->company_id;
 
-        $getData = DB::table('dms_dealer_claim')->where('id', $pid)->first();
+        $getData = DB::table('dms_dealer_claim')->where('id', $pid)->where('company_id', $company_id)->where('dealer_id', $ctx->dealer_id)->first();
         abort_if(!$getData, 404, 'Claim not found');
 
         $orderId    = $getData->order_id_string;
@@ -1182,8 +1183,8 @@ class DmsClaimOrderApiController extends Controller
         $orderId    = $request->input('pid');
         $company_id = $ctx->company_id;
 
-        $getData = DB::table('dms_dealer_claim')->where('order_id', $orderId)->first();
-        abort_if(!$getData, 404, 'Claim not found');
+        $getData = DB::table('dms_dealer_claim')->where('order_id', $orderId)->where('company_id', $company_id)->first();
+        abort_if(!$getData || !$this->claimDealerAllowed($ctx, (int) $getData->dealer_id), 404, 'Claim not found');
 
         $orderArray = [$orderId];
         $dealerId   = $getData->dealer_id;
@@ -1249,66 +1250,66 @@ class DmsClaimOrderApiController extends Controller
     /*  14. takeActionGenerateSra — returns 801 to redirect                */
     /* ================================================================== */
 
-    public function takeActionGenerateSra(Request $request)
-    {
-        $this->dealerContext($request);
+    // public function takeActionGenerateSra(Request $request)
+    // {
+        // $this->dealerContext($request);
 
-        return response()->json([
-            'code'     => 801,
-            'pdf_name' => 'processClaimPreview',
-            'message'  => 'success',
-        ]);
-    }
+        // return response()->json([
+            // 'code'     => 801,
+            // 'pdf_name' => 'processClaimPreview',
+            // 'message'  => 'success',
+        // ]);
+    // }
 
     /* ================================================================== */
     /*  15. new_Claim_details                                              */
     /* ================================================================== */
 
-    public function newClaimDetails(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
+    // public function newClaimDetails(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
 
-        $dealerData = $this->dealerLoginRow($ctx->dealer_id);
+        // $dealerData = $this->dealerLoginRow($ctx->dealer_id);
 
-        $divCodeEntry = DB::table('ACC_MAST')->where('ACC_CODE', $ctx->dealer_code)->first();
-        $divCodeLogin = DB::table('dealer_person_login')->where('dealer_id', $ctx->dealer_id)->first();
-        $divCodeElse  = $divCodeLogin->div_code_main ?? '0';
-        $divCode      = $divCodeEntry->DIV_CODE ?? $divCodeElse;
+        // $divCodeEntry = DB::table('ACC_MAST')->where('ACC_CODE', $ctx->dealer_code)->first();
+        // $divCodeLogin = DB::table('dealer_person_login')->where('dealer_id', $ctx->dealer_id)->first();
+        // $divCodeElse  = $divCodeLogin->div_code_main ?? '0';
+        // $divCode      = $divCodeEntry->DIV_CODE ?? $divCodeElse;
 
-        $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
-        $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
-        $conversionUnit = DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE');
+        // $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
+        // $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
+        // $conversionUnit = DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE');
 
-        $catalogProducts = DB::table('catalog_product')
-            ->select(DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
-            ->where('status', 1)
-            ->where('catalog_product.company_id', $ctx->company_id)
-            ->orderBy('itemcode', 'ASC')
-            ->get();
+        // $catalogProducts = DB::table('catalog_product')
+            // ->select(DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
+            // ->where('status', 1)
+            // ->where('catalog_product.company_id', $ctx->company_id)
+            // ->orderBy('itemcode', 'ASC')
+            // ->get();
 
-        $dealerArray = DB::table('retailer')
-            ->where('company_id', $ctx->company_id)
-            ->where('dealer_id', $ctx->dealer_id)
-            ->orderBy('id', 'ASC')
-            ->get();
+        // $dealerArray = DB::table('retailer')
+            // ->where('company_id', $ctx->company_id)
+            // ->where('dealer_id', $ctx->dealer_id)
+            // ->orderBy('id', 'ASC')
+            // ->get();
 
-        return response()->json([
-            'code'    => 200,
-            'message' => 'success',
-            'data'    => $this->utf8Clean([
-                'catalog_product_details'    => $catalogProducts,
-                'converstion_unit_item_code' => $conversionUnit,
-                'image_dyn'                  => $imageDyn,
-                'dealer_array'               => $dealerArray,
-                'div_code_master'            => $divCodeMaster,
-                'auth_id'                    => $ctx->dealer_id,
-                'role_id_cus'                => $ctx->role_id,
-                'quantity_type'              => $ctx->quantity_type,
-                'company_id'                 => $ctx->company_id,
-                'ownership_type_id'          => $ctx->ownership_type_id,
-            ]),
-        ]);
-    }
+        // return response()->json([
+            // 'code'    => 200,
+            // 'message' => 'success',
+            // 'data'    => $this->utf8Clean([
+                // 'catalog_product_details'    => $catalogProducts,
+                // 'converstion_unit_item_code' => $conversionUnit,
+                // 'image_dyn'                  => $imageDyn,
+                // 'dealer_array'               => $dealerArray,
+                // 'div_code_master'            => $divCodeMaster,
+                // 'auth_id'                    => $ctx->dealer_id,
+                // 'role_id_cus'                => $ctx->role_id,
+                // 'quantity_type'              => $ctx->quantity_type,
+                // 'company_id'                 => $ctx->company_id,
+                // 'ownership_type_id'          => $ctx->ownership_type_id,
+            // ]),
+        // ]);
+    // }
 
     /* ================================================================== */
     /*  16. createMultipleBatch                                            */
@@ -1344,6 +1345,7 @@ class DmsClaimOrderApiController extends Controller
                 ->join('catalog_product', 'catalog_product.id', '=', 'damage_order_details.product_id')
                 ->select('damage_order_details.*', 'catalog_product.name as product_name', 'damage_order.ch_no as invoice_no')
                 ->where('damage_order.id', $invoiceId)
+                ->where('damage_order.ch_dealer_id', $ctx->dealer_id)
                 ->groupBy('damage_order_details.id')
                 ->get();
         }
@@ -1502,7 +1504,7 @@ public function multipleBatchClaim(Request $request)
             if (!empty($returnChNo) && !empty($request->input('request_retailer'))) {
                 $DamageHead = DB::table('damage_order')
                     ->where('id', $returnChNo)
-                    ->where('dealer_id', $dealerId)        // scope!
+                    ->where('ch_dealer_id', $dealerId)
                     ->first();
                 $saleableNonSaleable = $DamageHead->damage_order_type_id ?? 2;
             }
@@ -1555,13 +1557,7 @@ foreach ($lines as $line) {
         // ADAPT the saleable column name to your schema ('qty' / 'saleable' / ...).
         $column = ($saleableNonSaleable == 1) ? 'qty' : 'nonsalable_damage';
 
-        $this->stockService->increaseStock(
-            dealerId:  $dealerId,
-            stockId:   $stockRow->id,
-            column:    $column,
-            qty:       $line['quantity'],
-            reference: ['retailer_claim_return', $orderId],
-        );
+        $this->moveStock((int) $dealerId, (int) $stockRow->id, $column, (float) $line['quantity']);
     }
 }
         } else {
@@ -1610,12 +1606,7 @@ foreach ($lines as $line) {
                     );
                 }
 
-                $this->stockService->adjustNonSalableDamage(
-                    dealerId:  $dealerId,
-                    stockId:   $stockQ->id,
-                    delta:     -$line['quantity'],           // negative = deduct
-                    reference: ['dealer_claim', $orderId],
-                );
+                $this->moveStock((int) $dealerId, (int) $stockQ->id, 'nonsalable_damage', -(float) $line['quantity']);
             }
         }
 
@@ -1638,10 +1629,24 @@ foreach ($lines as $line) {
         DB::rollBack();
         return response()->json([
             'code'    => 500,
-            'message' => $e->getMessage(),
+            'message' => safe_error_message($e),
         ], 500);
     }
 }
+
+    private function moveStock(int $dealerId, int $stockId, string $column, float $delta): void
+    {
+        if (!in_array($column, ['qty', 'nonsalable_damage'], true)) {
+            throw new \RuntimeException('Invalid stock column.');
+        }
+        $updated = DB::update(
+            "UPDATE stock SET {$column} = {$column} + ?, update_date_time = NOW() WHERE id = ? AND dealer_id = ? AND {$column} + ? >= 0",
+            [$delta, $stockId, $dealerId, $delta]
+        );
+        if (!$updated) {
+            throw new \RuntimeException('Not enough stock to complete this claim.');
+        }
+    }
 
     private function handleMultipleImages(Request $request, string $table, string $orderId, int $dealerId)
     {
@@ -1675,50 +1680,50 @@ foreach ($lines as $line) {
     /*  18. schemeDetails                                                  */
     /* ================================================================== */
 
-    public function schemeDetails(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
-        $request->validate(['order_id' => 'required']);
+    // public function schemeDetails(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
+        // $request->validate(['order_id' => 'required']);
 
-        $orderId    = $request->input('order_id');
-        $company_id = $ctx->company_id;
+        // $orderId    = $request->input('order_id');
+        // $company_id = $ctx->company_id;
 
-        $detailsData = DB::table('dms_dealer_claim_details')
-            ->join('catalog_product', 'catalog_product.id', '=', 'dms_dealer_claim_details.product_id')
-            ->select('catalog_product.name as product_name', 'dms_dealer_claim_details.*')
-            ->where('dms_dealer_claim_details.order_id', $orderId)
-            ->where('dms_dealer_claim_details.company_id', $company_id)
-            ->groupBy('dms_dealer_claim_details.id')
-            ->get();
+        // $detailsData = DB::table('dms_dealer_claim_details')
+            // ->join('catalog_product', 'catalog_product.id', '=', 'dms_dealer_claim_details.product_id')
+            // ->select('catalog_product.name as product_name', 'dms_dealer_claim_details.*')
+            // ->where('dms_dealer_claim_details.order_id', $orderId)
+            // ->where('dms_dealer_claim_details.company_id', $company_id)
+            // ->groupBy('dms_dealer_claim_details.id')
+            // ->get();
 
-        return response()->json([
-            'details' => $this->utf8Clean($detailsData),
-        ]);
-    }
+        // return response()->json([
+            // 'details' => $this->utf8Clean($detailsData),
+        // ]);
+    // }
 
     /* ================================================================== */
     /*  19. stock_check_dms                                                */
     /* ================================================================== */
 
-    public function stockCheckDms(Request $request)
-    {
-        $ctx = $this->dealerContext($request);
-        $request->validate([
-            'item_code' => 'required',
-            'qty'       => 'required',
-        ]);
+    // public function stockCheckDms(Request $request)
+    // {
+        // $ctx = $this->dealerContext($request);
+        // $request->validate([
+            // 'item_code' => 'required',
+            // 'qty'       => 'required',
+        // ]);
 
-        $itemId = $request->input('item_code');
+        // $itemId = $request->input('item_code');
 
-        $details = DB::table('stock')
-            ->where('dealer_id', $ctx->dealer_id)
-            ->where('product_id', $itemId)
-            ->get();
+        // $details = DB::table('stock')
+            // ->where('dealer_id', $ctx->dealer_id)
+            // ->where('product_id', $itemId)
+            // ->get();
 
-        return response()->json([
-            'code'    => 200,
-            'message' => 'success',
-            'data'    => $this->utf8Clean($details),
-        ]);
-    }
+        // return response()->json([
+            // 'code'    => 200,
+            // 'message' => 'success',
+            // 'data'    => $this->utf8Clean($details),
+        // ]);
+    // }
 }

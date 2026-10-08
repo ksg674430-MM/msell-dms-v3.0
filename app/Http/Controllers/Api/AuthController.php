@@ -82,7 +82,7 @@ class AuthController extends Controller
 
         $stid        = $user->state_id != 0 ? $user->state_id : $user->dpr_state;
         $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
-        $constant    = DB::selectOne("SELECT * FROM _constant LIMIT 1");
+        $constant    = DB::selectOne("SELECT * FROM _constant WHERE company_id = ? LIMIT 1", [$user->company_id]);
 
         $comp = DB::selectOne(
             "SELECT domain_url, company_image, title, id
@@ -95,9 +95,9 @@ class AuthController extends Controller
         DB::update(
             "UPDATE dealer_person_login
                 SET lastvisit = NOW(), ipaddress = ?
-              WHERE uname = ?
+              WHERE dpId = ?
               LIMIT 1",
-            [$ip, $uname]
+            [$ip, $user->id]
         );
 
         DB::insert(
@@ -136,7 +136,7 @@ class AuthController extends Controller
                 'csa_id'            => $user->csa_id,
                 'company_id'        => $user->company_id,
                 'company_name'      => $companyName,
-                'company_image'     => "https://demo.msell.in/public/".$companyImage,
+                'company_image'     => legacy_public_url($companyImage),
                 'domain_url'        => $comp->domain_url ?? null,
                 'state_id'          => $stid,
                 'quantity_type'     => $user->quantity_type,
@@ -153,13 +153,13 @@ class AuthController extends Controller
         ]);
     }
 // dsdshj
-    public function me(Request $request): JsonResponse
-    {
-        return response()->json([
-            'status' => true,
-            'user'   => $request->user(),
-        ]);
-    }
+    // public function me(Request $request): JsonResponse
+    // {
+        // return response()->json([
+            // 'status' => true,
+            // 'user'   => $request->user(),
+        // ]);
+    // }
 
     public function logout(Request $request): JsonResponse
     {
