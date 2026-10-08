@@ -344,7 +344,7 @@ class QuickOrderController extends Controller
 
     public function createData(Request $request)
     {
-        $ctx         = this->context($request);
+        $ctx         = $this->context($request);
         $dealer_id   = $ctx['dealer_id'];
         $company_id  = $ctx['company_id'];
         $role_id     = $ctx['role_id'];
