@@ -211,8 +211,8 @@ class QuickOrderController extends Controller
             $to_date   = date('Y-m-d');
         } else {
             $parts     = explode(" -", $request->date_range_picker);
-            fromdate=date('Y-m-d',strtotime(trim(parts[0])));
-            todate  =date('Y-m-d',strtotime(trim(parts[1])));
+            $fromdate =date('Y-m-d',strtotime(trim(parts[0])));
+            $todate  =date('Y-m-d',strtotime(trim(parts[1])));
         }
 
         $order_no = $request->order_no;
@@ -344,7 +344,7 @@ class QuickOrderController extends Controller
 
     public function createData(Request $request)
     {
-        $ctx         = $this->context($request);
+        $ctx         = this->context(request);
         $dealer_id   = $ctx['dealer_id'];
         $company_id  = $ctx['company_id'];
         $role_id     = $ctx['role_id'];
