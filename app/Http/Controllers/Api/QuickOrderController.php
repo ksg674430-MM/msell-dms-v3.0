@@ -30,22 +30,22 @@ class QuickOrderController extends Controller
         $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
 
         return [
-            'user'          => $user,
-            'dealer'        => $dealer,
-            'dealer_id'     => $dealer_id,
-            'company_id'    => $dealer->company_id  ?? ($user->company_id  ?? 0),
-            'dealer_code'   => $dealer->dealer_code ?? ($user->dealer_code ?? ''),
-            'csa_id'        => $dealer->csa_id      ?? ($user->csa_id      ?? 0),
-            'role_id'       => $user->role_id       ?? ($dealer->role_id   ?? 0),
-            'domain_url'    => $user->domain_url    ?? '',
+            'user' => $user,
+            'dealer' => $dealer,
+            'dealer_id' => $dealer_id,
+            'company_id' => $dealer->company_id ?? ($user->company_id ?? 0),
+            'dealer_code' => $dealer->dealer_code ?? ($user->dealer_code ?? ''),
+            'csa_id' => $dealer->csa_id ?? ($user->csa_id ?? 0),
+            'role_id' => $user->role_id ?? ($dealer->role_id ?? 0),
+            'domain_url' => $user->domain_url ?? '',
             'quantity_type' => $dealer->quantity_type ?? 0,
-            'date'          => date('Y-m-d'),
+            'date' => date('Y-m-d'),
         ];
     }
 
     private function allowedDealerId(array $ctx, $requested)
     {
-        $own       = (int) $ctx['dealer_id'];
+        $own = (int) $ctx['dealer_id'];
         $requested = (int) $requested;
 
         if (!$requested || $requested === $own) {
@@ -94,7 +94,7 @@ class QuickOrderController extends Controller
     private function dealerRate(array $ctx, $itemCode, $mode = 0)
     {
         $company_id = $ctx['company_id'];
-        $state_id   = $ctx['dealer']->state_id ?? 0;
+        $state_id = $ctx['dealer']->state_id ?? 0;
 
         if (empty($state_id)) {
             $csa_data = DB::table('csa')->where('c_id', $ctx['dealer']->csa_id ?? 0)->first();
@@ -115,23 +115,23 @@ class QuickOrderController extends Controller
             return null;
         }
 
-        $login   = DB::table('dealer_person_login')
+        $login = DB::table('dealer_person_login')
             ->where('company_id', $company_id)
             ->where('dealer_id', $ctx['dealer_id'])
             ->first();
         $qtyType = $login->order_quantity_type ?? 0;
 
         if ($company_id == 44) {
-            $result  = $rate->dealer_rate;
+            $result = $rate->dealer_rate;
             $perCase = true;
         } elseif ($company_id == 206) {
-            $result  = $rate->dealer_pcs_rate;
+            $result = $rate->dealer_pcs_rate;
             $perCase = false;
         } elseif ($qtyType == 1) {
-            $result  = ((int) $mode === 1) ? $rate->ss_case_rate : $rate->dealer_rate;
+            $result = ((int) $mode === 1) ? $rate->ss_case_rate : $rate->dealer_rate;
             $perCase = true;
         } else {
-            $result  = ((int) $mode === 1) ? $rate->ss_pcs_rate : $rate->dealer_pcs_rate;
+            $result = ((int) $mode === 1) ? $rate->ss_pcs_rate : $rate->dealer_pcs_rate;
             $perCase = false;
         }
 
@@ -146,14 +146,14 @@ class QuickOrderController extends Controller
 
         return [
             'rate' => (float) $result,
-            'um'   => $um,
-            'mrp'  => (float) ($mrp ?? 0),
+            'um' => $um,
+            'mrp' => (float) ($mrp ?? 0),
         ];
     }
 
     private function dealerScheme(array $ctx, $productId, float $qty, float $rate): array
     {
-        $none   = ['rate' => $rate, 'percent' => 0.0];
+        $none = ['rate' => $rate, 'percent' => 0.0];
         $dealer = $ctx['dealer'];
 
         if (empty($dealer->state_id) || $qty <= 0 || $rate <= 0) {
@@ -180,7 +180,7 @@ class QuickOrderController extends Controller
         }
 
         $first = (float) ($s->sale_value_range_first ?? 0);
-        $last  = trim((string) ($s->sale_value_range_last ?? '~'));
+        $last = trim((string) ($s->sale_value_range_last ?? '~'));
 
         if ($qty < $first || ($last !== '~' && $qty > (float) $last)) {
             return $none;
@@ -212,7 +212,7 @@ class QuickOrderController extends Controller
 
     private function resolveDivCode($dealer_id, $dealer_code)
     {
-        $div_code_entry  = DB::table('dealer')->where('id', $dealer_id)->first();
+        $div_code_entry = DB::table('dealer')->where('id', $dealer_id)->first();
         $deiv_code_login = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
 
         if ($dealer_code === '00001') {
@@ -230,19 +230,19 @@ class QuickOrderController extends Controller
 
     public function index(Request $request)
     {
-        $ctx         = $this->context($request);
-        $dealer_id   = $ctx['dealer_id'];
-        $company_id  = $ctx['company_id'];
-        $role_id     = $ctx['role_id'];
+        $ctx = $this->context($request);
+        $dealer_id = $ctx['dealer_id'];
+        $company_id = $ctx['company_id'];
+        $role_id = $ctx['role_id'];
         $dealer_code = $ctx['dealer_code'];
 
         if (empty($request->date_range_picker)) {
             $from_date = date('Y-m') . '-01';
-            $to_date   = date('Y-m-d');
+            $to_date = date('Y-m-d');
         } else {
-            $parts     = explode(" -", $request->date_range_picker);
+            $parts = explode(" -", $request->date_range_picker);
             $from_date = date('Y-m-d', strtotime(trim($parts[0])));
-            $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+            $to_date = date('Y-m-d', strtotime(trim($parts[1])));
         }
 
         $order_no = $request->order_no;
@@ -257,7 +257,7 @@ class QuickOrderController extends Controller
         if (!empty($order_no)) {
             $baseQ->where(function ($q) use ($order_no) {
                 $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                  ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                    ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
             });
         }
 
@@ -310,7 +310,7 @@ class QuickOrderController extends Controller
             if (!empty($order_no)) {
                 $depoQ->where(function ($q) use ($order_no) {
                     $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                      ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                        ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
                 });
             }
 
@@ -346,18 +346,18 @@ class QuickOrderController extends Controller
                 ->groupBy('demand_order.id');
 
             $adminQ->select(
-                    'demand_order.*',
-                    'demand_order.id as order_id',
-                    'demand_order.order_id as porder_id',
-                    'dealer.*',
-                    DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
-                )
+                'demand_order.*',
+                'demand_order.id as order_id',
+                'demand_order.order_id as porder_id',
+                'dealer.*',
+                DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
+            )
                 ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id');
 
             if (!empty($order_no)) {
                 $adminQ->where(function ($q) use ($order_no) {
                     $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                      ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                        ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
                 });
             }
 
@@ -383,15 +383,15 @@ class QuickOrderController extends Controller
         }
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Order list fetched',
-            'data'    => compact('records', 'erp_order_no', 'depo_filter', 'dealer_name') + [
-                'role_id'     => $role_id,
-                'dealer_id'   => $dealer_id,
-                'company_id'  => $company_id,
+            'data' => compact('records', 'erp_order_no', 'depo_filter', 'dealer_name') + [
+                'role_id' => $role_id,
+                'dealer_id' => $dealer_id,
+                'company_id' => $company_id,
                 'dealer_code' => $dealer_code,
-                'from_date'   => $from_date,
-                'to_date'     => $to_date,
+                'from_date' => $from_date,
+                'to_date' => $to_date,
             ],
         ]);
     }
@@ -402,12 +402,12 @@ class QuickOrderController extends Controller
 
     public function createData(Request $request)
     {
-        $ctx         = $this->context($request);
-        $dealer_id   = $ctx['dealer_id'];
-        $company_id  = $ctx['company_id'];
-        $role_id     = $ctx['role_id'];
+        $ctx = $this->context($request);
+        $dealer_id = $ctx['dealer_id'];
+        $company_id = $ctx['company_id'];
+        $role_id = $ctx['role_id'];
         $dealer_code = $ctx['dealer_code'];
-        $csa_id      = $ctx['csa_id'];
+        $csa_id = $ctx['csa_id'];
 
         $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
 
@@ -435,7 +435,7 @@ class QuickOrderController extends Controller
             ->where('demand_order_cart.dealer_id', $dealer_id)
             ->first();
 
-        $converstion_unit_item_code = DB::table('item_aum_mast')->pluck('UMTOAUM', 'ITEM_CODE');
+        $converstion_unit_item_code = [];
 
         $catalog_product_details = DB::table('catalog_product')
             ->select(
@@ -458,7 +458,7 @@ class QuickOrderController extends Controller
             ->where('company_id', $company_id)
             ->first();
 
-        $div_code     = $dealer->dealer_erp_div_code ?? ($selectCsa->div_code_main ?? '0');
+        $div_code = $dealer->dealer_erp_div_code ?? ($selectCsa->div_code_main ?? '0');
         $dealer_array = [];
 
         if ($selectCsa) {
@@ -482,25 +482,25 @@ class QuickOrderController extends Controller
             ->first();
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Create data fetched',
-            'data'    => [
-                'dealer_id'                  => $dealer_id,
-                'company_id'                 => $company_id,
-                'role_id'                    => $role_id,
-                'csa_id'                     => $csa_id,
-                'dealer_code'                => $dealer_code,
-                'div_code'                   => $div_code,
-                'div_code_master'            => $div_code_master,
-                'image_dyn'                  => $image_dyn,
-                'catalog_product_details'    => $catalog_product_details,
+            'data' => [
+                'dealer_id' => $dealer_id,
+                'company_id' => $company_id,
+                'role_id' => $role_id,
+                'csa_id' => $csa_id,
+                'dealer_code' => $dealer_code,
+                'div_code' => $div_code,
+                'div_code_master' => $div_code_master,
+                'image_dyn' => $image_dyn,
+                'catalog_product_details' => $catalog_product_details,
                 'converstion_unit_item_code' => $converstion_unit_item_code,
-                'sale_value_cart'            => $cart_details->sale_vale ?? '0',
-                'count_prod_cart'            => $cart_details->count     ?? '0',
-                'dealer_array'               => $dealer_array,
-                'checkSuper'                 => $checkSuper,
-                'currMonthOrder'             => $currMonthOrder,
-                'quantity_type'              => $selectCsa->order_quantity_type ?? 0,
+                'sale_value_cart' => $cart_details->sale_vale ?? '0',
+                'count_prod_cart' => $cart_details->count ?? '0',
+                'dealer_array' => $dealer_array,
+                'checkSuper' => $checkSuper,
+                'currMonthOrder' => $currMonthOrder,
+                'quantity_type' => $selectCsa->order_quantity_type ?? 0,
             ],
         ]);
     }
@@ -511,11 +511,11 @@ class QuickOrderController extends Controller
 
     public function store(Request $request)
     {
-        $ctx        = $this->context($request);
-        $auth_id    = $ctx['dealer_id'];
+        $ctx = $this->context($request);
+        $auth_id = $ctx['dealer_id'];
         $company_id = $ctx['company_id'];
-        $role_id    = $ctx['role_id'];
-        $dealer_id  = $ctx['dealer_id'];
+        $role_id = $ctx['role_id'];
+        $dealer_id = $ctx['dealer_id'];
 
         DB::beginTransaction();
 
@@ -530,7 +530,7 @@ class QuickOrderController extends Controller
             if (!$dealer_id_cus) {
                 DB::rollBack();
                 return response()->json([
-                    'status'  => false,
+                    'status' => false,
                     'message' => 'You cannot place an order for this distributor.',
                 ], 403);
             }
@@ -541,7 +541,7 @@ class QuickOrderController extends Controller
 
             $item_code = array_values(array_filter(
                 (array) ($request->item_code ?? []),
-                fn ($v) => $v !== null && $v !== ''
+                fn($v) => $v !== null && $v !== ''
             ));
 
             $valid_ids = DB::table('catalog_product')
@@ -549,7 +549,7 @@ class QuickOrderController extends Controller
                 ->where('company_id', $company_id)
                 ->where('status', 1)
                 ->pluck('id')
-                ->map(fn ($v) => (string) $v)
+                ->map(fn($v) => (string) $v)
                 ->toArray();
 
             $invalid = array_values(array_diff(array_map('strval', $item_code), $valid_ids));
@@ -557,15 +557,15 @@ class QuickOrderController extends Controller
             if (!empty($invalid)) {
                 DB::rollBack();
                 return response()->json([
-                    'status'  => false,
+                    'status' => false,
                     'message' => 'Invalid product id(s): ' . implode(', ', $invalid),
-                    'data'    => ['invalid_ids' => $invalid],
+                    'data' => ['invalid_ids' => $invalid],
                 ], 422);
             }
 
             if ($role_id == 37) {
                 $depo_dealer_status = 'DO';
-                $sale_div_code      = $request->sale_div_code ?: 'JH';
+                $sale_div_code = $request->sale_div_code ?: 'JH';
             } elseif ($role_id == 1) {
                 DB::rollBack();
                 return response()->json(['status' => false, 'message' => 'Admin cannot place order here'], 403);
@@ -587,8 +587,8 @@ class QuickOrderController extends Controller
             $check = DB::table('demand_order_cart')->where('dealer_id', $dealer_id_cus)->first();
 
             if ($check) {
-                $order_id   = $check->order_id;
-                $uid        = $check->id;
+                $order_id = $check->order_id;
+                $uid = $check->id;
                 $order_date = $check->order_date;
 
                 if (filled($request->final_remarks)) {
@@ -598,18 +598,18 @@ class QuickOrderController extends Controller
                 }
             } else {
                 $insert = DB::table('demand_order_cart')->insertGetId([
-                    'order_id'          => $order_id,
-                    'dealer_id'         => $dealer_id_cus,
-                    'created_date'      => $orderDate . ' ' . date('H:i:s'),
-                    'order_date'        => $orderDate,
+                    'order_id' => $order_id,
+                    'dealer_id' => $dealer_id_cus,
+                    'created_date' => $orderDate . ' ' . date('H:i:s'),
+                    'order_date' => $orderDate,
                     'created_person_id' => $auth_id,
-                    'date_time'         => $orderDate . ' ' . date('H:i:s'),
-                    'company_id'        => $company_id,
-                    'sale_div_code'     => $sale_div_code,
-                    'csa_id'            => $ctx['csa_id'],
-                    'order_remark'      => mb_substr((string) ($request->final_remarks ?? ''), 0, 150),
-                    'total_value'       => 0,
-                    'vr_no_define'      => $depo_dealer_status,
+                    'date_time' => $orderDate . ' ' . date('H:i:s'),
+                    'company_id' => $company_id,
+                    'sale_div_code' => $sale_div_code,
+                    'csa_id' => $ctx['csa_id'],
+                    'order_remark' => mb_substr((string) ($request->final_remarks ?? ''), 0, 150),
+                    'total_value' => 0,
+                    'vr_no_define' => $depo_dealer_status,
                 ]);
                 $uid = $insert;
             }
@@ -625,41 +625,41 @@ class QuickOrderController extends Controller
                 if (!$line || $update_qty <= 0) {
                     DB::rollBack();
                     return response()->json([
-                        'status'  => false,
+                        'status' => false,
                         'message' => $line ? 'Quantity must be greater than 0.' : 'Item not found in your cart.',
                     ], 422);
                 }
 
-                $base     = $this->dealerRate($ctx, $line->product_id, $request->for_self_for_db);
+                $base = $this->dealerRate($ctx, $line->product_id, $request->for_self_for_db);
                 $baseRate = $base['rate'] ?? (float) $line->rate;
 
-                $scheme   = $this->dealerScheme($ctx, $line->product_id, $update_qty, $baseRate);
-                $total    = $this->lineTotal($scheme['rate'], $update_qty, $scheme['percent']);
+                $scheme = $this->dealerScheme($ctx, $line->product_id, $update_qty, $baseRate);
+                $total = $this->lineTotal($scheme['rate'], $update_qty, $scheme['percent']);
                 $discount = $this->commonDiscountFunction($dealer_id_cus, $line->product_id, $total);
 
                 DB::table('demand_order_details_cart')
                     ->where('id', $line->id)
                     ->update([
-                        'rate'                   => $scheme['rate'],
-                        'quantity'               => $update_qty,
-                        'free_qty'               => 0,
-                        'total_rs'               => $total,
+                        'rate' => $scheme['rate'],
+                        'quantity' => $update_qty,
+                        'free_qty' => 0,
+                        'total_rs' => $total,
                         'order_converstion_unit' => $line->order_unit === 'PCS' ? $update_qty : $line->order_converstion_unit,
-                        't1_rate'                => $discount[1] ?? '0',
-                        'atd_rate'               => $discount[0] ?? '0',
-                        't1_rate_perc'           => $discount[2] ?? '0',
+                        't1_rate' => $discount[1] ?? '0',
+                        'atd_rate' => $discount[0] ?? '0',
+                        't1_rate_perc' => $discount[2] ?? '0',
                     ]);
             }
 
             // ---- Insert new rows ----
             $raw_items = array_values((array) ($request->item_code ?? []));
-            $qty       = array_values((array) ($request->qty ?? []));
-            $remarks   = array_values((array) ($request->remarks ?? []));
+            $qty = array_values((array) ($request->qty ?? []));
+            $remarks = array_values((array) ($request->remarks ?? []));
 
             $in_cart = DB::table('demand_order_details_cart')
                 ->where('order_id', $order_id)
                 ->pluck('product_id')
-                ->map(fn ($v) => (string) $v)
+                ->map(fn($v) => (string) $v)
                 ->toArray();
 
             $rows = [];
@@ -674,7 +674,7 @@ class QuickOrderController extends Controller
                 if (in_array((string) $value, $in_cart, true)) {
                     DB::rollBack();
                     return response()->json([
-                        'status'  => false,
+                        'status' => false,
                         'message' => "Product {$value} is already in your cart.",
                     ], 422);
                 }
@@ -686,47 +686,47 @@ class QuickOrderController extends Controller
                 if (!$base || $base['rate'] <= 0) {
                     DB::rollBack();
                     return response()->json([
-                        'status'  => false,
+                        'status' => false,
                         'message' => "Rate not found for product {$value}.",
                     ], 422);
                 }
 
-                $scheme     = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
+                $scheme = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
                 $line_total = $this->lineTotal($scheme['rate'], $line_qty, $scheme['percent']);
 
                 if ($base['um'] === 'PCS') {
                     $order_conv = $line_qty;
                 } else {
-                    $cd         = DB::table('item_aum_mast')->where('ITEM_CODE', $value)->first();
+                    $cd = DB::table('item_aum_mast')->where('ITEM_CODE', $value)->first();
                     $order_conv = ($cd->UMTOAUM ?? 0) * $line_qty;
                 }
 
                 $discount = $this->commonDiscountFunction($dealer_id_cus, $value, $line_total);
 
                 $rows[] = [
-                    'order_id'                 => $order_id,
-                    'product_id'               => $value,
-                    'rate'                     => $scheme['rate'],
-                    'mrp'                      => $base['mrp'],
-                    'quantity'                 => $line_qty,
-                    'scheme_qty'               => 0,
-                    'free_qty'                 => 0,
-                    'order_unit'               => $base['um'],
-                    'order_converstion_unit'   => $order_conv,
-                    'purchase_inv'             => '',
-                    'mfg_date'                 => '0000-00-00',
-                    'expiry_date'              => '0000-00-00',
-                    'receive_date'             => '0000-00-00',
-                    'batch_no'                 => '',
-                    'pr_rate'                  => '',
-                    'gst'                      => '',
-                    'cases'                    => '',
-                    'total_rs'                 => $line_total,
-                    'remarks'                  => mb_substr((string) ($remarks[$k] ?? ''), 0, 25),
+                    'order_id' => $order_id,
+                    'product_id' => $value,
+                    'rate' => $scheme['rate'],
+                    'mrp' => $base['mrp'],
+                    'quantity' => $line_qty,
+                    'scheme_qty' => 0,
+                    'free_qty' => 0,
+                    'order_unit' => $base['um'],
+                    'order_converstion_unit' => $order_conv,
+                    'purchase_inv' => '',
+                    'mfg_date' => '0000-00-00',
+                    'expiry_date' => '0000-00-00',
+                    'receive_date' => '0000-00-00',
+                    'batch_no' => '',
+                    'pr_rate' => '',
+                    'gst' => '',
+                    'cases' => '',
+                    'total_rs' => $line_total,
+                    'remarks' => mb_substr((string) ($remarks[$k] ?? ''), 0, 25),
                     'scheme_qty_with_free_qty' => '0',
-                    't1_rate'                  => $discount[1] ?? '0',
-                    'atd_rate'                 => $discount[0] ?? '0',
-                    't1_rate_perc'             => $discount[2] ?? '0',
+                    't1_rate' => $discount[1] ?? '0',
+                    'atd_rate' => $discount[0] ?? '0',
+                    't1_rate_perc' => $discount[2] ?? '0',
                 ];
             }
 
@@ -745,23 +745,23 @@ class QuickOrderController extends Controller
             $final_out = $this->buildCartPayload($dealer_id_cus, $uid, $company_id);
 
             return response()->json([
-                'status'  => true,
+                'status' => true,
                 'message' => 'Cart updated',
-                'data'    => [
-                    'uid'           => $uid,
-                    'order_id'      => 'B-' . $uid,
-                    'order_date'    => $order_date ?? $orderDate,
+                'data' => [
+                    'uid' => $uid,
+                    'order_id' => 'B-' . $uid,
+                    'order_date' => $order_date ?? $orderDate,
                     'dealer_id_cus' => $dealer_id_cus,
-                    'final_out'     => $final_out,
+                    'final_out' => $final_out,
                 ],
             ]);
 
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => 'Cart update failed',
-                'error'   => config('app.debug') ? $e->getMessage() : 'Something went wrong',
+                'error' => config('app.debug') ? $e->getMessage() : 'Something went wrong',
             ], 500);
         }
     }
@@ -777,18 +777,18 @@ class QuickOrderController extends Controller
         }
 
         $company_id = $ctx['company_id'];
-        $order_id   = date('YmdHis') . $ctx['dealer_id'];
-        $lines      = [];
-        $skipped    = [];
-        $seen       = [];
-        $line_no    = 1;
+        $order_id = date('YmdHis') . $ctx['dealer_id'];
+        $lines = [];
+        $skipped = [];
+        $seen = [];
+        $line_no = 1;
 
         fgetcsv($fh, 1000, ",");
 
         while (($row = fgetcsv($fh, 1000, ",")) !== false) {
             $line_no++;
 
-            if (count(array_filter($row, fn ($c) => trim((string) $c) !== '')) === 0) {
+            if (count(array_filter($row, fn($c) => trim((string) $c) !== '')) === 0) {
                 continue;
             }
 
@@ -798,7 +798,7 @@ class QuickOrderController extends Controller
             }
 
             $product_id = trim((string) $row[1]);
-            $quantity   = (float) str_replace(',', '', trim((string) $row[2]));
+            $quantity = (float) str_replace(',', '', trim((string) $row[2]));
 
             $product = DB::table('catalog_product')
                 ->where('id', $product_id)
@@ -829,32 +829,32 @@ class QuickOrderController extends Controller
             $seen[$product_id] = $line_no;
 
             $scheme = $this->dealerScheme($ctx, $product_id, $quantity, $base['rate']);
-            $total  = $this->lineTotal($scheme['rate'], $quantity, $scheme['percent']);
+            $total = $this->lineTotal($scheme['rate'], $quantity, $scheme['percent']);
 
             $lines[] = [
-                'order_id'                 => $order_id,
-                'product_id'               => $product_id,
-                'rate'                     => $scheme['rate'],
-                'mrp'                      => $base['mrp'],
-                'quantity'                 => $quantity,
-                'scheme_qty'               => 0,
-                'free_qty'                 => '0',
-                'order_unit'               => $base['um'],
-                'order_converstion_unit'   => $base['um'] === 'PCS' ? $quantity : 0,
-                'purchase_inv'             => '',
-                'mfg_date'                 => '0000-00-00',
-                'expiry_date'              => '0000-00-00',
-                'receive_date'             => '0000-00-00',
-                'batch_no'                 => '',
-                'pr_rate'                  => '0',
-                'gst'                      => '0',
-                'cases'                    => '0',
-                'total_rs'                 => $total,
-                'remarks'                  => '',
+                'order_id' => $order_id,
+                'product_id' => $product_id,
+                'rate' => $scheme['rate'],
+                'mrp' => $base['mrp'],
+                'quantity' => $quantity,
+                'scheme_qty' => 0,
+                'free_qty' => '0',
+                'order_unit' => $base['um'],
+                'order_converstion_unit' => $base['um'] === 'PCS' ? $quantity : 0,
+                'purchase_inv' => '',
+                'mfg_date' => '0000-00-00',
+                'expiry_date' => '0000-00-00',
+                'receive_date' => '0000-00-00',
+                'batch_no' => '',
+                'pr_rate' => '0',
+                'gst' => '0',
+                'cases' => '0',
+                'total_rs' => $total,
+                'remarks' => '',
                 'scheme_qty_with_free_qty' => '0',
-                't1_rate'                  => '0',
-                'atd_rate'                 => '0',
-                't1_rate_perc'             => '0',
+                't1_rate' => '0',
+                'atd_rate' => '0',
+                't1_rate_perc' => '0',
             ];
         }
 
@@ -863,7 +863,7 @@ class QuickOrderController extends Controller
         if (!$lines) {
             DB::rollBack();
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => $skipped ? 'No item was ordered. ' . implode(' ', $skipped) : 'The file has no order rows.',
                 'skipped' => $skipped,
             ], 422);
@@ -871,50 +871,50 @@ class QuickOrderController extends Controller
 
         DB::table('demand_order_details')->insert($lines);
 
-        DB::table('purchase_order_details')->insert(array_map(fn ($l) => [
-            'id'         => $order_id,
-            'order_id'   => $order_id,
+        DB::table('purchase_order_details')->insert(array_map(fn($l) => [
+            'id' => $order_id,
+            'order_id' => $order_id,
             'product_id' => $l['product_id'],
-            'mrp'        => $l['mrp'],
-            'rate'       => $l['rate'],
-            'quantity'   => $l['quantity'],
+            'mrp' => $l['mrp'],
+            'rate' => $l['rate'],
+            'quantity' => $l['quantity'],
             'scheme_qty' => 0,
-            'cases'      => 0,
-            'pcs'        => 0,
-            'pr_rate'    => 0,
+            'cases' => 0,
+            'pcs' => 0,
+            'pr_rate' => 0,
             'company_id' => $company_id,
         ], $lines));
 
         DB::table('demand_order')->insert([
-            'order_id'          => $order_id,
-            'dealer_id'         => $dealer_id_cus,
-            'company_id'        => $company_id,
-            'created_date'      => $orderDate . ' ' . date('H:i:s'),
-            'order_date'        => $orderDate,
+            'order_id' => $order_id,
+            'dealer_id' => $dealer_id_cus,
+            'company_id' => $company_id,
+            'created_date' => $orderDate . ' ' . date('H:i:s'),
+            'order_date' => $orderDate,
             'created_person_id' => $ctx['dealer_id'],
-            'date_time'         => $orderDate . ' ' . date('H:i:s'),
-            'sale_div_code'     => 'JH',
-            'csa_id'            => $ctx['csa_id'],
-            'order_remark'      => '',
-            'total_value'       => array_sum(array_column($lines, 'total_rs')),
-            'vr_no_define'      => '',
+            'date_time' => $orderDate . ' ' . date('H:i:s'),
+            'sale_div_code' => 'JH',
+            'csa_id' => $ctx['csa_id'],
+            'order_remark' => '',
+            'total_value' => array_sum(array_column($lines, 'total_rs')),
+            'vr_no_define' => '',
         ]);
 
         DB::table('purchase_order')->insert([
-            'id'                       => $order_id,
-            'order_id'                 => $order_id,
-            'dealer_id'                => $dealer_id_cus,
-            'created_date'             => $orderDate . ' ' . date('H:i:s'),
-            'created_person_id'        => $ctx['dealer_id'],
-            'sale_date'                => $orderDate,
-            'order_date'               => $orderDate,
-            'receive_date'             => null,
-            'date_time'                => $orderDate . ' ' . date('H:i:s'),
-            'company_id'               => $company_id,
-            'vehicle_id'               => 11,
-            'dms_manual_order_status'  => 0,
-            'dms_order_reason_id'      => 2,
-            'd_palnt_id'               => 0,
+            'id' => $order_id,
+            'order_id' => $order_id,
+            'dealer_id' => $dealer_id_cus,
+            'created_date' => $orderDate . ' ' . date('H:i:s'),
+            'created_person_id' => $ctx['dealer_id'],
+            'sale_date' => $orderDate,
+            'order_date' => $orderDate,
+            'receive_date' => null,
+            'date_time' => $orderDate . ' ' . date('H:i:s'),
+            'company_id' => $company_id,
+            'vehicle_id' => 11,
+            'dms_manual_order_status' => 0,
+            'dms_order_reason_id' => 2,
+            'd_palnt_id' => 0,
             'dms_order_confirm_remaks' => 'NA',
         ]);
 
@@ -936,11 +936,11 @@ class QuickOrderController extends Controller
         // );
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Order uploaded successfully (' . count($lines) . ' items).'
                 . ($skipped ? ' Not ordered: ' . implode(' ', $skipped) : ''),
             'skipped' => $skipped,
-            'data'    => ['order_id' => $order_id],
+            'data' => ['order_id' => $order_id],
         ]);
     }
 
@@ -950,11 +950,11 @@ class QuickOrderController extends Controller
 
     public function storeFinal(Request $request)
     {
-        $ctx        = $this->context($request);
-        $auth_id    = $ctx['dealer_id'];
+        $ctx = $this->context($request);
+        $auth_id = $ctx['dealer_id'];
         $company_id = $ctx['company_id'];
-        $role_id    = $ctx['role_id'];
-        $csa_id     = $ctx['csa_id'];
+        $role_id = $ctx['role_id'];
+        $csa_id = $ctx['csa_id'];
 
         $order_id_for_use = $request->order_id_for_use;
 
@@ -974,7 +974,7 @@ class QuickOrderController extends Controller
             ->get();
 
         $dealer_id = $head->dealer_id;
-        $sale_div  = $head->sale_div_code ?? '';
+        $sale_div = $head->sale_div_code ?? '';
 
         if ($role_id == 37) {
             $vr_status = 'DO';
@@ -987,49 +987,49 @@ class QuickOrderController extends Controller
         $order_id = date('YmdHis') . $auth_id;
 
         $detailRows = [];
-        $poRows     = [];
-        $total_rs   = [];
+        $poRows = [];
+        $total_rs = [];
 
         foreach ($lines as $v) {
             $total_rs[] = $v->total_rs;
 
             $detailRows[] = [
-                'order_id'                 => $order_id,
-                'product_id'               => $v->product_id,
-                'rate'                     => $v->rate,
-                'mrp'                      => $v->mrp,
-                'quantity'                 => $v->quantity,
-                'scheme_qty'               => $v->scheme_qty,
-                'free_qty'                 => $v->free_qty,
-                'order_unit'               => $v->order_unit,
-                'order_converstion_unit'   => $v->order_converstion_unit,
-                'purchase_inv'             => $v->purchase_inv,
-                'mfg_date'                 => $v->mfg_date,
-                'expiry_date'              => $v->expiry_date,
-                'receive_date'             => $v->receive_date,
-                'batch_no'                 => $v->batch_no,
-                'pr_rate'                  => $v->pr_rate,
-                'gst'                      => $v->gst,
-                'cases'                    => $v->cases,
-                'total_rs'                 => $v->total_rs,
-                'remarks'                  => $v->remarks,
+                'order_id' => $order_id,
+                'product_id' => $v->product_id,
+                'rate' => $v->rate,
+                'mrp' => $v->mrp,
+                'quantity' => $v->quantity,
+                'scheme_qty' => $v->scheme_qty,
+                'free_qty' => $v->free_qty,
+                'order_unit' => $v->order_unit,
+                'order_converstion_unit' => $v->order_converstion_unit,
+                'purchase_inv' => $v->purchase_inv,
+                'mfg_date' => $v->mfg_date,
+                'expiry_date' => $v->expiry_date,
+                'receive_date' => $v->receive_date,
+                'batch_no' => $v->batch_no,
+                'pr_rate' => $v->pr_rate,
+                'gst' => $v->gst,
+                'cases' => $v->cases,
+                'total_rs' => $v->total_rs,
+                'remarks' => $v->remarks,
                 'scheme_qty_with_free_qty' => $v->scheme_qty_with_free_qty,
-                't1_rate'                  => $v->t1_rate,
-                'atd_rate'                 => $v->atd_rate,
-                't1_rate_perc'             => $v->t1_rate_perc,
+                't1_rate' => $v->t1_rate,
+                'atd_rate' => $v->atd_rate,
+                't1_rate_perc' => $v->t1_rate_perc,
             ];
 
             $poRows[] = [
-                'id'         => $order_id,
-                'order_id'   => $order_id,
+                'id' => $order_id,
+                'order_id' => $order_id,
                 'product_id' => $v->product_id,
-                'mrp'        => $v->mrp,
-                'rate'       => $v->rate,
-                'quantity'   => $v->quantity,
+                'mrp' => $v->mrp,
+                'rate' => $v->rate,
+                'quantity' => $v->quantity,
                 'scheme_qty' => $v->scheme_qty,
-                'cases'      => $v->cases,
-                'pcs'        => $v->pcs ?? 0,
-                'pr_rate'    => $v->pr_rate,
+                'cases' => $v->cases,
+                'pcs' => $v->pcs ?? 0,
+                'pr_rate' => $v->pr_rate,
                 'company_id' => $company_id,
             ];
         }
@@ -1043,11 +1043,11 @@ class QuickOrderController extends Controller
             ->where('company_id', $company_id)
             ->where('status', 1)
             ->pluck('id')
-            ->map(fn ($v) => (string) $v)
+            ->map(fn($v) => (string) $v)
             ->all();
 
         $unavailable = $lines
-            ->reject(fn ($v) => in_array((string) $v->product_id, $available, true))
+            ->reject(fn($v) => in_array((string) $v->product_id, $available, true))
             ->pluck('product_id')
             ->all();
 
@@ -1058,7 +1058,7 @@ class QuickOrderController extends Controller
                 ->all() ?: $unavailable;
 
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => 'Remove items that are not available for your company before processing: '
                     . implode(', ', $names),
             ], 422);
@@ -1071,35 +1071,35 @@ class QuickOrderController extends Controller
             DB::table('purchase_order_details')->insert($poRows);
 
             DB::table('demand_order')->insert([
-                'order_id'          => $order_id,
-                'dealer_id'         => $dealer_id,
-                'created_date'      => $order_date . ' ' . date('H:i:s'),
-                'order_date'        => $order_date,
+                'order_id' => $order_id,
+                'dealer_id' => $dealer_id,
+                'created_date' => $order_date . ' ' . date('H:i:s'),
+                'order_date' => $order_date,
                 'created_person_id' => $auth_id,
-                'date_time'         => $order_date . ' ' . date('H:i:s'),
-                'company_id'        => $company_id,
-                'sale_div_code'     => $sale_div,
-                'csa_id'            => $csa_id,
-                'order_remark'      => $head->order_remark ?? '',
-                'total_value'       => array_sum($total_rs),
-                'vr_no_define'      => $vr_status,
+                'date_time' => $order_date . ' ' . date('H:i:s'),
+                'company_id' => $company_id,
+                'sale_div_code' => $sale_div,
+                'csa_id' => $csa_id,
+                'order_remark' => $head->order_remark ?? '',
+                'total_value' => array_sum($total_rs),
+                'vr_no_define' => $vr_status,
             ]);
 
             DB::table('purchase_order')->insert([
-                'id'                       => $order_id,
-                'order_id'                 => $order_id,
-                'dealer_id'                => $dealer_id,
-                'created_date'             => $order_date . ' ' . date('H:i:s'),
-                'created_person_id'        => $auth_id,
-                'sale_date'                => $order_date,
-                'order_date'               => $order_date,
-                'receive_date'             => null,
-                'date_time'                => $order_date . ' ' . date('H:i:s'),
-                'company_id'               => $company_id,
-                'vehicle_id'               => 11,
-                'dms_manual_order_status'  => 0,
-                'dms_order_reason_id'      => 2,
-                'd_palnt_id'               => 0,
+                'id' => $order_id,
+                'order_id' => $order_id,
+                'dealer_id' => $dealer_id,
+                'created_date' => $order_date . ' ' . date('H:i:s'),
+                'created_person_id' => $auth_id,
+                'sale_date' => $order_date,
+                'order_date' => $order_date,
+                'receive_date' => null,
+                'date_time' => $order_date . ' ' . date('H:i:s'),
+                'company_id' => $company_id,
+                'vehicle_id' => 11,
+                'dms_manual_order_status' => 0,
+                'dms_order_reason_id' => 2,
+                'd_palnt_id' => 0,
                 'dms_order_confirm_remaks' => 'NA',
             ]);
 
@@ -1119,17 +1119,17 @@ class QuickOrderController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'  => true,
+                'status' => true,
                 'message' => 'Order finalized',
-                'data'    => ['order_id' => $order_id],
+                'data' => ['order_id' => $order_id],
             ]);
 
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => 'Finalize failed',
-                'error'   => config('app.debug') ? $e->getMessage() : 'Something went wrong',
+                'error' => config('app.debug') ? $e->getMessage() : 'Something went wrong',
             ], 500);
         }
     }
@@ -1140,14 +1140,14 @@ class QuickOrderController extends Controller
 
     public function cartDataForModal(Request $request)
     {
-        $ctx        = $this->context($request);
+        $ctx = $this->context($request);
         $company_id = $ctx['company_id'];
 
         $dealer_id_cus = $this->allowedDealerId($ctx, $request->dealer_id_cus);
 
         if (!$dealer_id_cus) {
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => "You cannot view this distributor's cart.",
             ], 403);
         }
@@ -1158,24 +1158,24 @@ class QuickOrderController extends Controller
             ->where('demand_order_cart.dealer_id', $dealer_id_cus)
             ->first();
 
-        $uid        = $head->ppid ?? '';
+        $uid = $head->ppid ?? '';
         $order_date = '';
-        $final_out  = [];
+        $final_out = [];
 
         if ($uid) {
             $final_out = $this->buildCartPayload($dealer_id_cus, $uid, $company_id, $order_date);
         }
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Cart data',
-            'data'    => [
-                'uid'           => $uid,
-                'order_id'      => 'B-' . $uid,
-                'order_date'    => $order_date,
-                'party_name'    => $head->name ?? '',
-                'order_remark'  => $head->cart_remark ?? '',
-                'final_out'     => $final_out,
+            'data' => [
+                'uid' => $uid,
+                'order_id' => 'B-' . $uid,
+                'order_date' => $order_date,
+                'party_name' => $head->name ?? '',
+                'order_remark' => $head->cart_remark ?? '',
+                'final_out' => $final_out,
                 'dealer_id_cus' => $dealer_id_cus,
             ],
         ]);
@@ -1239,7 +1239,7 @@ class QuickOrderController extends Controller
         $final_out = [];
 
         foreach ($rows as $v) {
-            $catId   = $v->cat2_id   ?: 'uncategorized';
+            $catId = $v->cat2_id ?: 'uncategorized';
             $catName = $v->cat2_name ?: 'Uncategorized';
 
             if (!isset($final_out[$catId])) {
@@ -1247,21 +1247,21 @@ class QuickOrderController extends Controller
             }
 
             $final_out[$catId]['rows'][] = [
-                'total_rs'               => $v->total_rs,
-                'pid'                    => $v->pid,
-                'order_id'               => $v->cart_order_id,
+                'total_rs' => $v->total_rs,
+                'pid' => $v->pid,
+                'order_id' => $v->cart_order_id,
                 'order_converstion_unit' => $v->order_converstion_unit,
-                'ITEM_CODE'              => $v->cp_id ?? $v->product_id,
-                'ITEM_NAME'              => $v->cp_name ?? ('Product #' . $v->product_id),
-                'rate'                   => $v->rate,
-                'order_unit'             => $v->order_unit,
-                'quantity'               => $v->quantity,
-                'quantity_per_case'      => $v->cp_qty_per_case,
-                'gst_percent'            => $v->cp_gst ?? '0',
-                'free_qty'               => $v->free_qty,
-                'remarks'                => $v->remarks,
-                't1_rate'                => $v->t1_rate,
-                'atd_rate'               => $v->atd_rate,
+                'ITEM_CODE' => $v->cp_id ?? $v->product_id,
+                'ITEM_NAME' => $v->cp_name ?? ('Product #' . $v->product_id),
+                'rate' => $v->rate,
+                'order_unit' => $v->order_unit,
+                'quantity' => $v->quantity,
+                'quantity_per_case' => $v->cp_qty_per_case,
+                'gst_percent' => $v->cp_gst ?? '0',
+                'free_qty' => $v->free_qty,
+                'remarks' => $v->remarks,
+                't1_rate' => $v->t1_rate,
+                'atd_rate' => $v->atd_rate,
             ];
         }
 
@@ -1275,8 +1275,8 @@ class QuickOrderController extends Controller
     public function deleteCartItem(Request $request)
     {
         $request->validate([
-            'id'         => 'required|integer',
-            'order_id'   => 'required|integer',
+            'id' => 'required|integer',
+            'order_id' => 'required|integer',
             'product_id' => 'required|integer',
         ]);
 
@@ -1301,7 +1301,7 @@ class QuickOrderController extends Controller
         ]);
 
         $order_date = null;
-        $final_out  = $this->buildCartPayload(
+        $final_out = $this->buildCartPayload(
             $cart->dealer_id,
             $request->order_id,
             $ctx['company_id'],
@@ -1311,14 +1311,14 @@ class QuickOrderController extends Controller
         $head = DB::table('demand_order_cart')->where('id', $request->order_id)->first();
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Item removed',
-            'data'    => [
-                'uid'           => $request->order_id,
-                'order_id'      => 'B-' . $request->order_id,
-                'order_date'    => $head->order_date ?? '',
-                'dealer_id_cus' => $head->dealer_id  ?? $ctx['dealer_id'],
-                'final_out'     => $final_out,
+            'data' => [
+                'uid' => $request->order_id,
+                'order_id' => 'B-' . $request->order_id,
+                'order_date' => $head->order_date ?? '',
+                'dealer_id_cus' => $head->dealer_id ?? $ctx['dealer_id'],
+                'final_out' => $final_out,
             ],
         ]);
     }
@@ -1329,7 +1329,7 @@ class QuickOrderController extends Controller
 
     public function edit(Request $request, $id)
     {
-        $ctx        = $this->context($request);
+        $ctx = $this->context($request);
         $company_id = $ctx['company_id'];
 
         // encrypted id from UI → decrypt
@@ -1365,9 +1365,9 @@ class QuickOrderController extends Controller
             ->orderBy('demand_order_details.id')
             ->get();
 
-        $final_out      = $this->groupOrderLines($rows);
-        $mktg_cat_array = array_map(fn ($g) => $g['name'], $final_out);
-        $order_date     = $order->order_date ?? '';
+        $final_out = $this->groupOrderLines($rows);
+        $mktg_cat_array = array_map(fn($g) => $g['name'], $final_out);
+        $order_date = $order->order_date ?? '';
 
         $currMonth = date('Y-m');
 
@@ -1384,18 +1384,18 @@ class QuickOrderController extends Controller
             ->first();
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Order detail',
-            'data'    => [
-                'order_id'                   => 'B-' . $uid,
-                'party_name'                 => $head->name ?? '',
-                'order_remark'               => $order->order_remark ?? '',
-                'order_date'                 => $order_date,
-                'mktg_cat_array'             => $mktg_cat_array,
-                'final_out'                  => $final_out,
+            'data' => [
+                'order_id' => 'B-' . $uid,
+                'party_name' => $head->name ?? '',
+                'order_remark' => $order->order_remark ?? '',
+                'order_date' => $order_date,
+                'mktg_cat_array' => $mktg_cat_array,
+                'final_out' => $final_out,
                 'converstion_unit_item_code' => $converstion_unit_item_code,
-                'checkSuper'                 => $checkSuper,
-                'currMonthOrder'             => $currMonthOrder,
+                'checkSuper' => $checkSuper,
+                'currMonthOrder' => $currMonthOrder,
             ],
         ]);
     }
@@ -1435,7 +1435,7 @@ class QuickOrderController extends Controller
             $ref = '%' . trim((string) $request->ref_no) . '%';
             $q->where(function ($w) use ($ref) {
                 $w->where('purchase_order.invoice_no_p', 'LIKE', $ref)
-                  ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
+                    ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
             });
         }
 
@@ -1446,10 +1446,10 @@ class QuickOrderController extends Controller
 
         return response()->json([
             'status' => true,
-            'data'   => [
+            'data' => [
                 'from_date' => $from_date,
-                'to_date'   => $to_date,
-                'rows'      => $rows,
+                'to_date' => $to_date,
+                'rows' => $rows,
             ],
         ]);
     }
@@ -1464,12 +1464,12 @@ class QuickOrderController extends Controller
 
         if ((int) $ctx['role_id'] !== 37) {
             return response()->json([
-                'status'  => false,
+                'status' => false,
                 'message' => 'Only a depot can send orders to ERP.',
             ], 403);
         }
 
-        $scope = fn (array $ids) => DB::table('demand_order')
+        $scope = fn(array $ids) => DB::table('demand_order')
             ->whereIn('id', $ids)
             ->where('company_id', $ctx['company_id'])
             ->where('sale_div_code', $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']))
@@ -1477,25 +1477,25 @@ class QuickOrderController extends Controller
             ->pluck('id')
             ->all();
 
-        $ids       = $scope((array) $request->order_no);
+        $ids = $scope((array) $request->order_no);
         $unchecked = $scope((array) $request->checkbox_uncheck);
 
         if ($unchecked) {
             DB::table('demand_order')->whereIn('id', $unchecked)->update([
-                'send_order_erp_status'    => 2,
+                'send_order_erp_status' => 2,
                 'send_order_erp_date_time' => date('Y-m-d H:i:s'),
             ]);
         }
 
         if ($ids) {
             DB::table('demand_order')->whereIn('id', $ids)->update([
-                'send_order_erp_status'    => 1,
+                'send_order_erp_status' => 1,
                 'send_order_erp_date_time' => date('Y-m-d H:i:s'),
             ]);
         }
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => count($ids) . ' order(s) sent to ERP.',
         ]);
     }
@@ -1506,12 +1506,12 @@ class QuickOrderController extends Controller
 
     public function productRate(Request $request)
     {
-        $ctx        = $this->context($request);
+        $ctx = $this->context($request);
         $company_id = $ctx['company_id'];
 
-        $item_code      = $request->item_code;
-        $dealer_id_cus  = $this->allowedDealerId($ctx, $request->dealer_id_cus) ?? $ctx['dealer_id'];
-        $catg           = $request->catg;
+        $item_code = $request->item_code;
+        $dealer_id_cus = $this->allowedDealerId($ctx, $request->dealer_id_cus) ?? $ctx['dealer_id'];
+        $catg = $request->catg;
         $item_codes_str = array_filter(explode(',', (string) $request->item_codes_str));
 
         $blocked = DB::table('demand_order_cart')
@@ -1546,29 +1546,29 @@ class QuickOrderController extends Controller
 
         if (!$base) {
             return response()->json([
-                'status'  => false,
-                'code'    => 401,
+                'status' => false,
+                'code' => 401,
                 'message' => 'Rate not found',
-                'data'    => ['products' => $products],
+                'data' => ['products' => $products],
             ]);
         }
 
-        $qty    = (float) $request->input('qty', 0);
+        $qty = (float) $request->input('qty', 0);
         $scheme = $this->dealerScheme($ctx, $item_code, $qty, $base['rate']);
 
         return response()->json([
-            'status'  => true,
-            'code'    => 200,
+            'status' => true,
+            'code' => 200,
             'message' => 'success',
-            'data'    => [
-                'result'              => $base['rate'],
-                'item_mast_name'      => $item_mast->name ?? '',
+            'data' => [
+                'result' => $base['rate'],
+                'item_mast_name' => $item_mast->name ?? '',
                 'item_aum_mast_array' => $products,
-                'selection_size_um'   => $base['um'],
-                'case_size'           => $item_mast->quantity_per_case ?? null,
-                'scheme_rate'         => $scheme['rate'],
-                'scheme_percent'      => $scheme['percent'],
-                'line_total'          => $this->lineTotal($scheme['rate'], $qty, $scheme['percent']),
+                'selection_size_um' => $base['um'],
+                'case_size' => $item_mast->quantity_per_case ?? null,
+                'scheme_rate' => $scheme['rate'],
+                'scheme_percent' => $scheme['percent'],
+                'line_total' => $this->lineTotal($scheme['rate'], $qty, $scheme['percent']),
             ],
         ]);
     }
@@ -1613,10 +1613,10 @@ class QuickOrderController extends Controller
 
         $gst_rate = (float) $final_stax_discount;
         $atd_rate = $gst_rate > 0 ? (($gst_rate * 100) / ($gst_rate + 100)) : 0;
-        $tr_rate  = (float) $final_tr_rate;
+        $tr_rate = (float) $final_tr_rate;
 
-        $step1        = $total_rs * $tr_rate;
-        $td_discount  = $step1 / 100;
+        $step1 = $total_rs * $tr_rate;
+        $td_discount = $step1 / 100;
         $atd_discount = round((($total_rs - $td_discount) * $atd_rate) / 100, 2);
 
         return [$atd_discount, $td_discount, $tr_rate];
@@ -1630,8 +1630,8 @@ class QuickOrderController extends Controller
     {
         if ($request->check_status == '1') {
             $dealer_id_cus = $request->filled('dealer_id_cus') ? explode(',', $request->dealer_id_cus) : [];
-            $terr_id       = $request->filled('terr_id')       ? explode(',', $request->terr_id)       : [];
-            $div_code_cus  = $request->filled('div_code_cus')  ? explode(',', $request->div_code_cus)  : [];
+            $terr_id = $request->filled('terr_id') ? explode(',', $request->terr_id) : [];
+            $div_code_cus = $request->filled('div_code_cus') ? explode(',', $request->div_code_cus) : [];
 
             $sec = DB::table('dealer_report_section_data')
                 ->where('dealer_id', $ctx['dealer_id'])
@@ -1672,16 +1672,16 @@ class QuickOrderController extends Controller
 
             if ($div_code_cus) {
                 $codeQ->join('dealer_person_login', 'dealer_person_login.dealer_id', '=', 'dealer.id')
-                      ->whereIn('div_code_main', $div_code_cus);
+                    ->whereIn('div_code_main', $div_code_cus);
             }
 
             $dealer_code = $codeQ->pluck('dealer_code')->toArray();
         } else {
             $dealer = DB::table('dealer')->where('id', $ctx['dealer_id'])->first();
-            $login  = DB::table('dealer_person_login')->where('dealer_id', $ctx['dealer_id'])->first();
+            $login = DB::table('dealer_person_login')->where('dealer_id', $ctx['dealer_id'])->first();
 
             $dealer_code = $ctx['dealer_code'];
-            $div_code    = $dealer->dealer_erp_div_code ?: ($login->div_code_main ?: '0');
+            $div_code = $dealer->dealer_erp_div_code ?: ($login->div_code_main ?: '0');
         }
 
         return [$dealer_code, $div_code];
@@ -1765,15 +1765,15 @@ class QuickOrderController extends Controller
     private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
     {
         $from_target_date = "01-APR-" . date('y');
-        $to_target_date   = "31-MAR-" . (date('y') + 1);
-        $from_sale_date   = date('Y') . "-04-01";
-        $to_sale_date     = (date('Y') + 1) . "-03-31";
-        $month_from       = date('Y-m') . '-01';
-        $month_to         = date('Y-m-t');
+        $to_target_date = "31-MAR-" . (date('y') + 1);
+        $from_sale_date = date('Y') . "-04-01";
+        $to_sale_date = (date('Y') + 1) . "-03-31";
+        $month_from = date('Y-m') . '-01';
+        $month_to = date('Y-m-t');
 
         $quarter = DB::table('_quater_master')->where('details_month', date('Y-m'))->first();
-        $q_from  = $quarter->quater_from_date ?? $month_from;
-        $q_to    = $quarter->quater_to_date   ?? $month_to;
+        $q_from = $quarter->quater_from_date ?? $month_from;
+        $q_to = $quarter->quater_to_date ?? $month_to;
 
         $prod_catg_mast_array = DB::table('prod_catg_mast')
             ->where('MKTG_CATG', $mktg_catg)
@@ -1841,13 +1841,13 @@ class QuickOrderController extends Controller
             ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
 
         return [
-            'prod_catg_mast_array'                => $prod_catg_mast_array,
-            'um_array'                            => $um_array,
-            'prod_wise_target_mast'               => $targets,
-            'prod_wise_sales_mast_data_qty'       => $salesQtyYtd,
-            'prod_wise_sales_mast_data_val'       => $salesValYtd,
+            'prod_catg_mast_array' => $prod_catg_mast_array,
+            'um_array' => $um_array,
+            'prod_wise_target_mast' => $targets,
+            'prod_wise_sales_mast_data_qty' => $salesQtyYtd,
+            'prod_wise_sales_mast_data_val' => $salesValYtd,
             'month_prod_wise_sales_mast_data_qty' => $salesQtyMonth,
-            'quad_prod_wise_sales_mast_data_qty'  => $salesQtyQuat,
+            'quad_prod_wise_sales_mast_data_qty' => $salesQtyQuat,
         ];
     }
 
@@ -2039,8 +2039,8 @@ class QuickOrderController extends Controller
     //---Dealer Dashboard
     public function dealerDashboard(Request $request)
     {
-        $ctx       = $this->context($request);
-        $dealerId  = (int) $ctx['dealer_id'];
+        $ctx = $this->context($request);
+        $dealerId = (int) $ctx['dealer_id'];
         $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
 
         $banners = DB::table('image_mast')
@@ -2048,8 +2048,8 @@ class QuickOrderController extends Controller
             ->where('company_id', $ctx['company_id'])
             ->orderBy('id', 'DESC')
             ->pluck('img')
-            ->map(fn ($img) => [
-                'url'   => "https://{$domainUrl}/public/baidyanath_images/{$img}",
+            ->map(fn($img) => [
+                'url' => "https://{$domainUrl}/public/baidyanath_images/{$img}",
                 'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4',
             ]);
 
@@ -2061,12 +2061,12 @@ class QuickOrderController extends Controller
 
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
 
-        $rows = $entries->whereNotNull('trans_date')->values()->map(fn ($r) => [
-            'date'       => $r->trans_date,
+        $rows = $entries->whereNotNull('trans_date')->values()->map(fn($r) => [
+            'date' => $r->trans_date,
             'voucher_no' => $r->vocuher_number,
-            'vch_type'   => $r->vocuher_type,
-            'account'    => $r->narration,
-            'amount'     => (float) $r->amount,
+            'vch_type' => $r->vocuher_type,
+            'account' => $r->narration,
+            'amount' => (float) $r->amount,
         ]);
 
         $summary = DB::table('dealer_ledger_busy')
@@ -2075,22 +2075,22 @@ class QuickOrderController extends Controller
             ->first(['closing_balance', 'server_date_time']);
 
         return response()->json([
-            'status'  => true,
+            'status' => true,
             'message' => 'Dealer dashboard',
-            'data'    => [
+            'data' => [
                 'banners' => $banners,
                 'account' => [
-                    'name'     => $ctx['dealer']->name ?? '',
+                    'name' => $ctx['dealer']->name ?? '',
                     'erp_code' => $ctx['dealer_code'],
                 ],
-                'ledger'  => [
+                'ledger' => [
                     'opening_balance' => $opening,
                     'closing_balance' => round(
                         $summary ? (float) $summary->closing_balance : $opening + $rows->sum('amount'),
                         2
                     ),
-                    'fetched_at'      => $summary->server_date_time ?? null,
-                    'rows'            => $rows,
+                    'fetched_at' => $summary->server_date_time ?? null,
+                    'rows' => $rows,
                 ],
             ],
         ]);
