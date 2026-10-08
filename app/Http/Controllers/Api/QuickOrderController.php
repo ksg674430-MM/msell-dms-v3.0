@@ -351,9 +351,7 @@ class QuickOrderController extends Controller
         $dealer_code = $ctx['dealer_code'];
         $csa_id      = $ctx['csa_id'];
 
-        $div_code_entry  = DB::table('acc_mast')->where('ACC_CODE', $dealer_code)->first();
-        $deiv_code_login = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
-        $div_code        = divcodeentry->DIVCODE??(deiv_code_login->div_code_main ?? '0');
+       $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
 
         $image_dyn = DB::table('image_mast')
             ->where('img_locn', 'Order')
@@ -394,7 +392,7 @@ class QuickOrderController extends Controller
             ->where('dealer_id', $dealer_id)
             ->where('company_id', $company_id)
             ->first();
-
+        $div_code = $dealer->dealer_erp_div_code ?? ($selectCsa->div_code_main ?? '0');
         $dealer_array = [];
         if ($selectCsa) {
             $dealer_array = DB::table('dealer')
@@ -1371,41 +1369,47 @@ class QuickOrderController extends Controller
      |  13) COMMON DISCOUNT
      * ============================================================ */
 
-    private function commonDiscountFunction($dealer_id, $product_id, $total_rs)
-    {
-        $dealer      = DB::table('dealer')->where('id', $dealer_id)->first();
-        $dealer_code = $dealer->dealer_code ?? '0';
-        $dealer_dt   = DB::table('acc_mast')->where('ACC_CODE', $dealer_code)->first();
-        if (!dealerdt||empty(dealer_code)) return [0, 0, 0];
+   private function commonDiscountFunction($dealer_id, $product_id, $total_rs)
+{
+    $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
+    if (!$dealer || empty($dealer->state_id)) return [0, 0, 0];
 
-        $final_stax_discount = 0;
-        $stax_list = DB::table('prod_tax_mast')
-            ->where('STATE_CODE', $dealer_dt->STATE_CODE)
-            ->orderBy('id', 'DESC')->get();
+    $dealer_code = $dealer->dealer_code ?? '0';
 
-        if ($stax_list->isNotEmpty()) {
-            $final_stax_discount = $stax_list->first()->STAX_RATE ?? 0;
-        }
+    // STAX rate by dealer's state
+    $final_stax_discount = 0;
+    $stax_list = DB::table('prod_mast_tax')                 // <-- your replacement table
+        ->where('STATE_CODE', $dealer->state_id)
+        ->orderBy('id', 'DESC')
+        ->get();
 
-        $final_tr_rate = 0;
+    if ($stax_list->isNotEmpty()) {
+        $final_stax_discount = $stax_list->first()->STAX_RATE ?? 0;
+    }
+
+    // Bill tax rate by dealer code
+    $final_tr_rate = 0;
+    if (!empty($dealer_code)) {
         $bill_list = DB::table('dealer_billtax_mast')
             ->where('ACC_CODE', $dealer_code)
-            ->orderBy('id', 'DESC')->get();
+            ->orderBy('id', 'DESC')
+            ->get();
 
         if ($bill_list->isNotEmpty()) {
             $final_tr_rate = $bill_list->first()->TI_RATE ?? 0;
         }
-
-        $gst_rate  = (float) $final_stax_discount;
-        $atd_rate  = gstrate>0?((gst_rate * 100) / ($gst_rate + 100)) : 0;
-        $tr_rate   = (float) $final_tr_rate;
-
-        $step1        = $total_rs * $tr_rate;
-        $td_discount  = $step1 / 100;
-        atddiscount=round(((total_rs - $td_discount) * $atd_rate) / 100, 2);
-
-        return [$atd_discount, $td_discount, $tr_rate];
     }
+
+    $gst_rate = (float) $final_stax_discount;
+    $atd_rate = $gst_rate > 0 ? (($gst_rate * 100) / ($gst_rate + 100)) : 0;
+    $tr_rate  = (float) $final_tr_rate;
+
+    $step1        = $total_rs * $tr_rate;
+    $td_discount  = $step1 / 100;
+    $atd_discount = round((($total_rs - $td_discount) * $atd_rate) / 100, 2);
+
+    return [$atd_discount, $td_discount, $tr_rate];
+}
 
     /* ============================================================
      |  14) Dealer Dashboard
@@ -1445,10 +1449,10 @@ class QuickOrderController extends Controller
             }
             $dealer_code = $codeQ->pluck('dealer_code')->toArray();
         } else {
-            $dealer_code = [$ctx['dealer_code']];
-            $acc = DB::table('acc_mast')->where('ACC_CODE', $ctx['dealer_code'])->first();
-            $login = DB::table('dealer_person_login')->where('dealer_id', $ctx['dealer_id'])->first();
-            $div_code = [$acc->DIV_CODE ?? ($login->div_code_main ?? '0')];
+            $dealer = DB::table('dealer')->where('id', $ctx['dealer_id'])->first();
+            $login  = DB::table('dealer_person_login')->where('dealer_id', $ctx['dealer_id'])->first();
+            $dealer_code = $ctx['dealer_code'];
+            $div_code    = $dealer->dealer_erp_div_code ?: ($login->div_code_main ?: '0');
         }
 
         return [$dealer_code, $div_code];
