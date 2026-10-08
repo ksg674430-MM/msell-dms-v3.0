@@ -113,7 +113,8 @@ if (!function_exists('legacy_public_url')) {
         if (preg_match('#^https?://#i', $path)) {
             return $path;
         }
-        return rtrim((string) config('app.legacy_public_url'), '/') . '/' . ltrim($path, '/');
+        $base = (string) config('app.legacy_public_url') ?: 'https://demo.msell.in/public';
+        return rtrim($base, '/') . '/' . ltrim($path, '/');
     }
 }
 

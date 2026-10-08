@@ -73,7 +73,7 @@ use App\Http\Controllers\Api\Sfa\ClaimController;
 // PUBLIC (no auth)
 // ============================================================
 // MENU: Login screen
-Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -435,7 +435,7 @@ Route::prefix('reports')->group(function () {
     Route::get('/gst/bill-detailed',             [GstReportController::class, 'billDetailed']);
     Route::get('/gst/purchase-detailed',         [GstReportController::class, 'purchaseDetailed']);
     // Route::get('/gst/book-wise',                 [GstReportController::class, 'bookWise']);
-    // Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
+    Route::get('/gst/book-wise-doc',             [GstReportController::class, 'bookWiseDoc']);
     Route::get('/gst/gstr1-return',              [Gstr1Controller::class, 'index']);
     Route::get('/gst/gstr1-return/json',         [Gstr1Controller::class, 'json']);
     Route::get('/gst/gstr1-return/excel',        [Gstr1Controller::class, 'excel']);

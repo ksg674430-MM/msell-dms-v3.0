@@ -351,7 +351,9 @@ class DmsClaimOrderApiController extends Controller
         abort_if(!$dealerData, 422, "dealer_person_login missing");
         $company_id = $dealerData->company_id;
 
-        $getRetailer  = DB::table('retailer')->where('company_id', $company_id)->where('dealer_id', $ctx->dealer_id)->pluck('name', 'id');
+        $getRetailer  = DB::table('retailer')->where('company_id', $company_id)
+            ->whereIn('id', DB::table('dms_retailer_claim')->select('retailer_id')->where('order_id', $uid)->where('dealer_id', $ctx->dealer_id))
+            ->pluck('name', 'id');
         $productNames = DB::table('catalog_product')->where('company_id', $company_id)->pluck('name', 'id');
 
         $currentStock = DB::table('stock')

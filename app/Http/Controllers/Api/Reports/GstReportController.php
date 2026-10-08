@@ -315,36 +315,36 @@ class GstReportController extends Controller
     // 8) Book-wise Document Summary (ranges)
     //    Legacy: dispatch_report::get_book_wise_doc_list()
     // =========================================================
-    // public function bookWiseDoc(Request $request)
-    // {
-        // [$from, $to] = $this->dateRange($request);
-        // ['dealer_id' => $dealer] = $this->scope($request);
+    public function bookWiseDoc(Request $request)
+    {
+        [$from, $to] = $this->dateRange($request);
+        ['dealer_id' => $dealer] = $this->scope($request);
 
-        // $sections = [
-            // 'bos' => ['label' => 'Bill of Supply',     'book_status' => 1],
-            // 'boc' => ['label' => 'Generated Invoice',  'book_status' => 0],
-        // ];
+        $sections = [
+            'bos' => ['label' => 'Bill of Supply',     'book_status' => 1],
+            'boc' => ['label' => 'Generated Invoice',  'book_status' => 0],
+        ];
 
-        // $out = [];
-        // foreach ($sections as $key => $s) {
-            // $base = DB::table('challan_order')
-                // ->where('ch_dealer_id', $dealer)
-                // ->where('book_status', $s['book_status'])
-                // ->whereDate('ch_date', '>=', $from)->whereDate('ch_date', '<=', $to);
+        $out = [];
+        foreach ($sections as $key => $s) {
+            $base = DB::table('challan_order')
+                ->where('ch_dealer_id', $dealer)
+                ->where('book_status', $s['book_status'])
+                ->whereDate('ch_date', '>=', $from)->whereDate('ch_date', '<=', $to);
 
-            // $count = (clone $base)->count();
-            // $first = (clone $base)->orderBy('ch_no')->value('ch_no');
-            // $last  = (clone $base)->orderByDesc('ch_no')->value('ch_no');
+            $count = (clone $base)->count();
+            $first = (clone $base)->orderBy('ch_no')->value('ch_no');
+            $last  = (clone $base)->orderByDesc('ch_no')->value('ch_no');
 
-            // $out[$key] = [
-                // 'pert'   => $s['label'],
-                // 'bfrom'  => $first,
-                // 'bto'    => $last,
-                // 'tot'    => $count,
-                // 'bcan'   => 0,
-            // ];
-        // }
+            $out[$key] = [
+                'pert'   => $s['label'],
+                'bfrom'  => $first,
+                'bto'    => $last,
+                'tot'    => $count,
+                'bcan'   => 0,
+            ];
+        }
 
-        // return $this->ok($out, ['from' => $from, 'to' => $to]);
-    // }
+        return $this->ok($out, ['from' => $from, 'to' => $to]);
+    }
 }

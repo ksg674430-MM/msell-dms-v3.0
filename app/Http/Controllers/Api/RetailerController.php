@@ -498,7 +498,7 @@ class RetailerController extends Controller
         $dealerId = (int) $user->dealer_id;
 
         $existing = DB::selectOne(
-            "SELECT id, image_name FROM retailer
+            "SELECT id, image_name, location_id, outlet_type_id FROM retailer
               WHERE id = ? AND dealer_id = ?
               LIMIT 1",
             [$id, $dealerId]
@@ -519,10 +519,10 @@ class RetailerController extends Controller
             'contact_per_name'  => ['nullable', 'string', 'max:80'],
             'pin_no'            => ['nullable', 'string', 'max:20'],
             'tin_no'            => ['nullable', 'string', 'max:20'],
-            'outlet_type_id'    => ['nullable', 'integer', Rule::exists('_retailer_outlet_type', 'id')->where('company_id', (int) $request->user()->company_id)],
+            'outlet_type_id'    => ['nullable', 'integer', ...((string) $request->input('outlet_type_id') === (string) $existing->outlet_type_id ? [] : [Rule::exists('_retailer_outlet_type', 'id')->where('company_id', (int) $request->user()->company_id)])],
             'class'             => ['nullable', 'integer'],
             'avg_per_month_pur' => ['nullable', 'numeric'],
-            'location_id'       => ['nullable', 'integer', Rule::exists('location_7', 'id')->where('company_id', (int) $request->user()->company_id)],
+            'location_id'       => ['nullable', 'integer', ...((string) $request->input('location_id') === (string) $existing->location_id ? [] : [Rule::exists('location_7', 'id')->where('company_id', (int) $request->user()->company_id)])],
             'state_id'          => ['nullable', 'integer'],
             'lat_long'          => ['nullable', 'string', 'max:30'],
             'track_address'     => ['nullable', 'string'],

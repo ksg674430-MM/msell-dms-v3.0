@@ -338,8 +338,10 @@ class InvoiceController extends Controller
                 $product = DB::selectOne(
                     "SELECT id, name, gst_percent FROM catalog_product p
                       WHERE p.id = ?
-                        AND (p.company_id = ? OR EXISTS (SELECT 1 FROM stock s WHERE s.product_id = p.id AND s.dealer_id = ?))",
-                    [(int) $row['product_id'], $companyId, $dealerId]
+                        AND (p.company_id = ?
+                             OR EXISTS (SELECT 1 FROM stock s WHERE s.product_id = p.id AND s.dealer_id = ?)
+                             OR EXISTS (SELECT 1 FROM challan_order_details d WHERE d.ch_id = ? AND d.product_id = p.id))",
+                    [(int) $row['product_id'], $companyId, $dealerId, $id]
                 );
                 if (!$product) {
                     throw new \RuntimeException("Product {$row['product_id']} not found.");
