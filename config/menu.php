@@ -208,6 +208,7 @@ return [
             ['slug' => 'help',            'label' => 'Help Desk',       'icon' => 'fa-caret-right', 'route' => '/help'],
             ['slug' => 'feedback',        'label' => 'Feedback',        'icon' => 'fa-caret-right', 'route' => '/feedback'],
             ['slug' => 'change_password', 'label' => 'Change Password', 'icon' => 'fa-caret-right', 'route' => '/account/password'],
+            ['slug' => 'keyboard_shortcuts', 'label' => 'Keyboard Shortcuts', 'icon' => 'fa-caret-right', 'route' => '/account/shortcuts'],
             // ['slug' => 'backup_db',       'label' => 'Backup Database', 'icon' => 'fa-caret-right', 'route' => '/admin/backup', 'local_only' => true],
             // ['slug' => 'sync_data',       'label' => 'Sync to Server',  'icon' => 'fa-caret-right', 'route' => '/admin/sync',   'local_only' => true],
         ],

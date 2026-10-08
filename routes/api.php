@@ -50,6 +50,7 @@ use App\Http\Controllers\Api\DepotDamageLookupController;
 
 use App\Http\Controllers\Api\ChangePasswordController;
 use App\Http\Controllers\Api\FeedbackController;
+use App\Http\Controllers\Api\KeyboardShortcutController;
 
 
 use App\Http\Controllers\Api\Reports\SalesReportController;
@@ -107,6 +108,9 @@ Route::prefix('dms-reports')->group(function () {
     Route::get('/feedback', [FeedbackController::class, 'index']);
     Route::post('/feedback', [FeedbackController::class, 'store']);
     Route::put('/feedback/{id}', [FeedbackController::class, 'update'])->whereNumber('id');
+    Route::get('/keyboard-shortcuts', [KeyboardShortcutController::class, 'index']);
+    Route::put('/keyboard-shortcuts', [KeyboardShortcutController::class, 'update']);
+    Route::delete('/keyboard-shortcuts', [KeyboardShortcutController::class, 'reset']);
 
     // ========================================================
     // MENU  → MENU: Sidebar / Hamburger
