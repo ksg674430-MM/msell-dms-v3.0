@@ -388,7 +388,6 @@ class QuickOrderController extends Controller
             ->orderBy('itemcode', 'ASC')
             ->get();
 
-            
         $selectCsa = DB::table('dealer_person_login')
             ->where('dealer_id', $dealer_id)
             ->where('company_id', $company_id)
