@@ -45,4 +45,8 @@ return [
     'test_mode'   => env('IRN_TEST_MODE',   true),
 ],
 
+'dms_order' => [
+    'url' => env('DMS_ORDER_SYNC_URL', 'http://c9erp.msell.in/public/api/submitOrderToErp'),
+],
+
 ];
