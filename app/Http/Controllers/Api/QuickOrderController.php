@@ -45,6 +45,36 @@ class QuickOrderController extends Controller
         ];
     }
 
+    private function submitOrderToErp(string $orderId, int $dealerId, int $companyId, array $lines): void
+    {
+        $itemCodes = DB::table('catalog_product')->whereIn('id', array_column($lines, 'product_id'))->pluck('itemcode', 'id');
+        $payload = [
+            'DMS_ORDER_ID' => $orderId,
+            'ACC_CODE' => (string) DB::table('dealer')->where('id', $dealerId)->value('dealer_code'),
+            'company_id' => (string) $companyId,
+            'item_details' => array_map(fn ($l) => [
+                'ITEM_CODE' => (string) ($itemCodes[$l['product_id']] ?? $l['product_id']),
+                'RATE' => (float) $l['rate'],
+                'QTY' => (string) (float) $l['quantity'],
+                'REMARKS' => trim((string) ($l['remarks'] ?? '')) !== '' ? trim((string) $l['remarks']) : 'NA',
+                'UM' => (string) ($l['order_unit'] ?: 'PCS'),
+            ], array_values($lines)),
+        ];
+
+        app()->terminating(function () use ($payload) {
+            try {
+                $res = Http::timeout(15)->acceptJson()->post(config('services.dms_order.url'), $payload);
+                Log::info('[SendToERP] ' . ($res->successful() ? 'sent' : 'ERP returned an error'), [
+                    'http_status' => $res->status(),
+                    'payload' => $payload,
+                    'response' => mb_substr($res->body(), 0, 2000),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('[SendToERP] could not reach ERP', ['error' => $e->getMessage(), 'payload' => $payload]);
+            }
+        });
+    }
+
     private function newOrderId($dealerId): string
     {
         $id = date('YmdHis') . (int) $dealerId;
@@ -912,20 +942,7 @@ class QuickOrderController extends Controller
 
         DB::commit();
 
-        // External sync is optional — uncomment if method is implemented
-        // $accCode = DB::table('dealer')->where('id', $dealer_id_cus)->value('dealer_code') ?? '';
-        // $this->sendOrderToExternalApi(
-        //     $order_id,
-        //     $accCode,
-        //     $company_id,
-        //     array_map(fn ($l) => [
-        //         'product_id' => $l['product_id'],
-        //         'rate'       => $l['rate'],
-        //         'quantity'   => $l['quantity'],
-        //         'order_unit' => $l['order_unit'],
-        //         'remarks'    => $l['remarks'],
-        //     ], $lines)
-        // );
+        $this->submitOrderToErp((string) $order_id, (int) $dealer_id_cus, (int) $company_id, $lines);
 
         return response()->json([
             'status' => true,
@@ -1109,6 +1126,8 @@ class QuickOrderController extends Controller
             DB::table('demand_order_cart')->where('id', $order_id_for_use)->delete();
 
             DB::commit();
+
+            $this->submitOrderToErp((string) $order_id, (int) $dealer_id, (int) $company_id, $detailRows);
 
             return response()->json([
                 'status' => true,
@@ -1443,75 +1462,6 @@ class QuickOrderController extends Controller
                 'to_date' => $to_date,
                 'rows' => $rows,
             ],
-        ]);
-    }
-
-    /* ============================================================
-     |  9) SEND TO ERP (flag only — legacy)
-     * ============================================================ */
-
-    public function sendToErp(Request $request)
-    {
-        $ctx = $this->context($request);
-        $log = [
-            'dealer_id' => $ctx['dealer_id'],
-            'company_id' => $ctx['company_id'],
-            'role_id' => $ctx['role_id'],
-            'requested' => array_values((array) $request->order_no),
-            'unchecked' => array_values((array) $request->checkbox_uncheck),
-        ];
-
-        if ((int) $ctx['role_id'] !== 37) {
-            Log::warning('[SendToERP] refused: login is not role 37 (depot)', $log);
-            return response()->json([
-                'status' => false,
-                'message' => 'Only a depot can send orders to ERP.',
-            ], 403);
-        }
-
-        $scope = fn(array $ids) => DB::table('demand_order')
-            ->whereIn('id', $ids)
-            ->where('company_id', $ctx['company_id'])
-            ->where('sale_div_code', $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']))
-            ->where('dealer_id', '<>', $ctx['dealer_id'])
-            ->pluck('id')
-            ->all();
-
-        if (!Schema::hasColumns('demand_order', ['send_order_erp_status', 'send_order_erp_date_time'])) {
-            Log::info('[SendToERP] skipped: demand_order has no ERP columns on this database', $log);
-            return response()->json([
-                'status' => true,
-                'message' => 'ERP is not set up for your company, orders were not sent.',
-            ]);
-        }
-
-        $ids = $scope((array) $request->order_no);
-        $unchecked = $scope((array) $request->checkbox_uncheck);
-
-        if ($unchecked) {
-            DB::table('demand_order')->whereIn('id', $unchecked)->update([
-                'send_order_erp_status' => 2,
-                'send_order_erp_date_time' => date('Y-m-d H:i:s'),
-            ]);
-        }
-
-        if ($ids) {
-            DB::table('demand_order')->whereIn('id', $ids)->update([
-                'send_order_erp_status' => 1,
-                'send_order_erp_date_time' => date('Y-m-d H:i:s'),
-            ]);
-        }
-
-        Log::info('[SendToERP] done: orders flagged for ERP pickup (send_order_erp_status=1); no external ERP call is made here', $log + [
-            'div_code' => $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']),
-            'flagged_sent' => $ids,
-            'flagged_unchecked' => $unchecked,
-            'ignored_not_allowed' => array_values(array_diff(array_map('intval', $log['requested']), array_map('intval', $ids))),
-        ]);
-
-        return response()->json([
-            'status' => true,
-            'message' => count($ids) . ' order(s) sent to ERP.',
         ]);
     }
 

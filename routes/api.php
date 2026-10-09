@@ -510,7 +510,6 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
     Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);             // perfoma / view order
     // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
-    Route::post  ('/send-to-erp',     [QuickOrderController::class, 'sendToErp']);        // mark for ERP
 
     // ---------- HELPERS ----------
     Route::get   ('/helpers/product-rate',       [QuickOrderController::class, 'productRate']);

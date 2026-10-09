@@ -17,7 +17,8 @@ class MenuController extends Controller
         $companyId = (int) $user->company_id;
         $appEnv    = config('app.env');
 
-        $items = require config_path('menu.php');
+        $config = require config_path('menu.php');
+        $items  = $this->assignedMenu($companyId, $roleName, $config) ?: $config;
 
         $visible = [];
 
@@ -80,6 +81,78 @@ class MenuController extends Controller
                 ],
             ],
         ]);
+    }
+
+    private function assignedMenu(int $companyId, string $roleName, array $config): array
+    {
+        try {
+            $modules = DB::table('web_module as w')
+                ->join('modules_bucket as b', 'b.id', '=', 'w.module_id')
+                ->where('w.company_id', $companyId)->where('w.status', 1)
+                ->where('b.status', 1)->where('b.source', 2)
+                ->orderBy('w.sequence')->orderBy('b.id')
+                ->get(['b.id', 'b.title as route', DB::raw("COALESCE(NULLIF(TRIM(w.title),''), b.name) as label")])
+                ->unique('id');
+            if ($modules->isEmpty()) {
+                return [];
+            }
+            $subs = DB::table('sub_web_module as w')
+                ->join('sub_web_module_bucket as b', 'b.id', '=', 'w.sub_module_id')
+                ->where('w.company_id', $companyId)->where('w.status', 1)->where('b.status', 1)
+                ->whereIn('b.module_id', $modules->pluck('id'))
+                ->orderBy('b.id')
+                ->get(['b.id', 'b.module_id as parent', 'b.title as route', DB::raw("COALESCE(NULLIF(TRIM(w.title),''), b.sub_module_name) as label")])
+                ->unique('id');
+            $subSubs = DB::table('sub_sub_web_module as w')
+                ->join('sub_sub_web_module_bucket as b', 'b.id', '=', 'w.sub_sub_module_id')
+                ->where('w.company_id', $companyId)->where('w.status', 1)->where('b.status', 1)
+                ->whereIn('b.sub_web_module_id', $subs->pluck('id'))
+                ->orderBy('b.id')
+                ->get(['b.id', 'b.sub_web_module_id as parent', 'b.title as route', DB::raw("COALESCE(NULLIF(TRIM(w.title),''), b.sub_module_name) as label")])
+                ->unique('id');
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        $levels = [[$modules, 'm'], [$subs, 's'], [$subSubs, 'ss']];
+        $roleRules = $this->routeRoles($config);
+        $build = function (int $depth, $parentId) use (&$build, $levels, $roleRules, $roleName) {
+            [$rows, $prefix] = $levels[$depth];
+            $nodes = [];
+            foreach ($depth ? $rows->where('parent', $parentId) : $rows as $row) {
+                $node = ['slug' => $prefix . $row->id, 'label' => $row->label];
+                if (isset($levels[$depth + 1]) && $levels[$depth + 1][0]->where('parent', $row->id)->isNotEmpty()) {
+                    if ($children = $build($depth + 1, $row->id)) {
+                        $nodes[] = $node + ['icon' => 'fa-desktop', 'children' => $children];
+                    }
+                    continue;
+                }
+                $route = in_array(trim((string) $row->route), ['', '#'], true) ? null : '/' . ltrim(trim($row->route), '/');
+                if ($route === null) {
+                    continue;
+                }
+                $allowed = $roleRules[$route] ?? null;
+                if (!$allowed || in_array($roleName, $allowed, true)) {
+                    $nodes[] = $node + ['icon' => 'fa-caret-right', 'route' => $route];
+                }
+            }
+            return $nodes;
+        };
+
+        return $build(0, null);
+    }
+
+    private function routeRoles(array $nodes, array $inherited = []): array
+    {
+        $rules = [];
+        foreach ($nodes as $node) {
+            $roles = array_map('trim', $node['roles'] ?? $inherited);
+            if (!empty($node['route']) && $roles) {
+                $rules[$node['route']] = $roles;
+            }
+            $rules += $this->routeRoles($node['children'] ?? [], $roles);
+        }
+        return $rules;
     }
 
     // -----------------------------------------------------------------
