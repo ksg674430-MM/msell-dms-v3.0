@@ -45,32 +45,105 @@ class QuickOrderController extends Controller
         ];
     }
 
+    private function erpOrderUrl(int $companyId): string
+    {
+        if ($companyId !== 379 && !DB::table('url_list')
+                ->join('assign_url_list', 'assign_url_list.url_list_id', '=', 'url_list.id')
+                ->where('assign_url_list.status', 1)
+                ->where('assign_url_list.company_id', $companyId)
+                ->where('url_list.code', 'sumbitOrderToErp')
+                ->exists()) {
+            return '';
+        }
+        $base = rtrim(trim((string) DB::table('company')->where('id', $companyId)->value('erp_url')), '/');
+        if ($base === '') {
+            return '';
+        }
+        return (preg_match('#^https?://#i', $base) ? $base : 'http://' . $base) . '/public/api/submitOrderToErp';
+    }
+
     private function submitOrderToErp(string $orderId, int $dealerId, int $companyId, array $lines): void
     {
-        $itemCodes = DB::table('catalog_product')->whereIn('id', array_column($lines, 'product_id'))->pluck('itemcode', 'id');
-        $payload = [
-            'DMS_ORDER_ID' => $orderId,
-            'ACC_CODE' => (string) DB::table('dealer')->where('id', $dealerId)->value('dealer_code'),
-            'company_id' => (string) $companyId,
-            'item_details' => array_map(fn ($l) => [
-                'ITEM_CODE' => (string) ($itemCodes[$l['product_id']] ?? $l['product_id']),
-                'RATE' => (float) $l['rate'],
-                'QTY' => (string) (float) $l['quantity'],
-                'REMARKS' => trim((string) ($l['remarks'] ?? '')) !== '' ? trim((string) $l['remarks']) : 'NA',
-                'UM' => (string) ($l['order_unit'] ?: 'PCS'),
-            ], array_values($lines)),
-        ];
+        try {
+            $this->queueOrderToErp($orderId, $dealerId, $companyId, $lines);
+        } catch (\Throwable $e) {
+            Log::warning('[SendToERP] could not prepare ERP request', ['company_id' => $companyId, 'order_id' => $orderId, 'error' => $e->getMessage()]);
+        }
+    }
 
-        app()->terminating(function () use ($payload) {
+    private function queueOrderToErp(string $orderId, int $dealerId, int $companyId, array $lines): void
+    {
+        $log = ['company_id' => $companyId, 'order_id' => $orderId];
+        $url = $this->erpOrderUrl($companyId);
+        if ($url === '') {
+            Log::info('[SendToERP] skipped: no ERP assigned to company', $log);
+            return;
+        }
+
+        $lines = array_values($lines);
+        $products = DB::table('catalog_product')->whereIn('id', array_column($lines, 'product_id'))->get(['id', 'itemcode', 'gst_percent'])->keyBy('id');
+        $remarks = fn ($l) => trim((string) ($l['remarks'] ?? '')) !== '' ? trim((string) $l['remarks']) : 'NA';
+
+        if ($companyId === 379) {
+            $asForm = true;
+            $payload = [
+                'order_id' => $orderId,
+                'dealer_id' => $dealerId,
+                'company_id' => $companyId,
+                'primary_sale_summary' => json_encode(array_map(function ($l) use ($remarks) {
+                    $pcs = ($l['order_unit'] ?: 'PCS') === 'PCS';
+                    $qty = (float) $l['quantity'];
+                    return [
+                        'product_id' => $l['product_id'],
+                        'rate' => $pcs ? (float) $l['rate'] : 0,
+                        'case_rate' => $pcs ? 0 : (float) $l['rate'],
+                        'case' => $pcs ? 0 : $qty,
+                        'quantity' => $pcs ? $qty : 0,
+                        'pcs' => $pcs ? $qty : 0,
+                        'remarks' => $remarks($l),
+                    ];
+                }, $lines)),
+            ];
+        } else {
+            $asForm = false;
+            $dealerCode = trim((string) DB::table('dealer')->where('id', $dealerId)->value('dealer_code'));
+            $unmapped = array_values(array_filter(array_column($lines, 'product_id'), fn ($id) => empty(trim((string) ($products[$id]->itemcode ?? '')))));
+            if (empty($dealerCode) || $unmapped) {
+                Log::warning('[SendToERP] skipped: ' . (empty($dealerCode) ? 'dealer code not mapped' : 'item code not mapped'), $log + ['dealer_id' => $dealerId, 'product_ids' => $unmapped]);
+                return;
+            }
+            $payload = [
+                'DMS_ORDER_ID' => $orderId,
+                'ACC_CODE' => $dealerCode,
+                'company_id' => (string) $companyId,
+                'item_details' => array_map(function ($l) use ($products, $companyId, $remarks) {
+                    $gst = (float) ($products[$l['product_id']]->gst_percent ?? 0);
+                    $rate = (float) $l['rate'];
+                    return [
+                        'ITEM_CODE' => trim((string) $products[$l['product_id']]->itemcode),
+                        'RATE' => round($companyId === 309 ? $rate * (1 + $gst / 100) : $rate / (1 + $gst / 100), 4),
+                        'QTY' => (string) (float) $l['quantity'],
+                        'REMARKS' => $remarks($l),
+                        'UM' => (string) ($l['order_unit'] ?: 'PCS'),
+                    ];
+                }, $lines),
+            ];
+        }
+
+        app()->terminating(function () use ($url, $payload, $asForm, $companyId, $log) {
             try {
-                $res = Http::timeout(15)->acceptJson()->post(config('services.dms_order.url'), $payload);
-                Log::info('[SendToERP] ' . ($res->successful() ? 'sent' : 'ERP returned an error'), [
+                $http = Http::timeout(15)->acceptJson();
+                $res = $asForm ? $http->asForm()->post($url, $payload) : $http->post($url, $payload);
+                $json = $res->json() ?? [];
+                $ok = $companyId === 379 ? (int) ($json['status'] ?? 0) === 200 : !empty($json['VRNO']);
+                Log::info('[SendToERP] ' . ($ok ? 'sent' : 'ERP did not accept the order'), $log + [
+                    'url' => $url,
                     'http_status' => $res->status(),
                     'payload' => $payload,
                     'response' => mb_substr($res->body(), 0, 2000),
                 ]);
             } catch (\Throwable $e) {
-                Log::warning('[SendToERP] could not reach ERP', ['error' => $e->getMessage(), 'payload' => $payload]);
+                Log::warning('[SendToERP] could not reach ERP', $log + ['url' => $url, 'error' => $e->getMessage(), 'payload' => $payload]);
             }
         });
     }
