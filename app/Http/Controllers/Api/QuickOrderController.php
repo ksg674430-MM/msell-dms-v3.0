@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use PDF;
 
 class QuickOrderController extends Controller
@@ -257,7 +258,7 @@ class QuickOrderController extends Controller
         if (!empty($order_no)) {
             $baseQ->where(function ($q) use ($order_no) {
                 $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                    ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                    ->when(Schema::hasColumn('demand_order', 'erp_order_no'), fn ($w) => $w->orWhere('demand_order.erp_order_no', 'LIKE', "%{$order_no}%"));
             });
         }
 
@@ -310,7 +311,7 @@ class QuickOrderController extends Controller
             if (!empty($order_no)) {
                 $depoQ->where(function ($q) use ($order_no) {
                     $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                        ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                        ->when(Schema::hasColumn('demand_order', 'erp_order_no'), fn ($w) => $w->orWhere('demand_order.erp_order_no', 'LIKE', "%{$order_no}%"));
                 });
             }
 
@@ -357,7 +358,7 @@ class QuickOrderController extends Controller
             if (!empty($order_no)) {
                 $adminQ->where(function ($q) use ($order_no) {
                     $q->where('demand_order.order_id', 'LIKE', "%{$order_no}%")
-                        ->orWhere('erp_order_no', 'LIKE', "%{$order_no}%");
+                        ->when(Schema::hasColumn('demand_order', 'erp_order_no'), fn ($w) => $w->orWhere('demand_order.erp_order_no', 'LIKE', "%{$order_no}%"));
                 });
             }
 
@@ -635,8 +636,6 @@ class QuickOrderController extends Controller
 
                 $scheme = $this->dealerScheme($ctx, $line->product_id, $update_qty, $baseRate);
                 $total = $this->lineTotal($scheme['rate'], $update_qty, $scheme['percent']);
-                $discount = $this->commonDiscountFunction($dealer_id_cus, $line->product_id, $total);
-
                 DB::table('demand_order_details_cart')
                     ->where('id', $line->id)
                     ->update([
@@ -645,9 +644,9 @@ class QuickOrderController extends Controller
                         'free_qty' => 0,
                         'total_rs' => $total,
                         'order_converstion_unit' => $line->order_unit === 'PCS' ? $update_qty : $line->order_converstion_unit,
-                        't1_rate' => $discount[1] ?? '0',
-                        'atd_rate' => $discount[0] ?? '0',
-                        't1_rate_perc' => $discount[2] ?? '0',
+                        't1_rate' => '0',
+                        'atd_rate' => '0',
+                        't1_rate_perc' => '0',
                     ]);
             }
 
@@ -694,14 +693,7 @@ class QuickOrderController extends Controller
                 $scheme = $this->dealerScheme($ctx, $value, $line_qty, $base['rate']);
                 $line_total = $this->lineTotal($scheme['rate'], $line_qty, $scheme['percent']);
 
-                if ($base['um'] === 'PCS') {
-                    $order_conv = $line_qty;
-                } else {
-                    $cd = DB::table('item_aum_mast')->where('ITEM_CODE', $value)->first();
-                    $order_conv = ($cd->UMTOAUM ?? 0) * $line_qty;
-                }
-
-                $discount = $this->commonDiscountFunction($dealer_id_cus, $value, $line_total);
+                $order_conv = $base['um'] === 'PCS' ? $line_qty : 0;
 
                 $rows[] = [
                     'order_id' => $order_id,
@@ -724,9 +716,9 @@ class QuickOrderController extends Controller
                     'total_rs' => $line_total,
                     'remarks' => mb_substr((string) ($remarks[$k] ?? ''), 0, 25),
                     'scheme_qty_with_free_qty' => '0',
-                    't1_rate' => $discount[1] ?? '0',
-                    'atd_rate' => $discount[0] ?? '0',
-                    't1_rate_perc' => $discount[2] ?? '0',
+                    't1_rate' => '0',
+                    'atd_rate' => '0',
+                    't1_rate_perc' => '0',
                 ];
             }
 
@@ -1477,6 +1469,13 @@ class QuickOrderController extends Controller
             ->pluck('id')
             ->all();
 
+        if (!Schema::hasColumns('demand_order', ['send_order_erp_status', 'send_order_erp_date_time'])) {
+            return response()->json([
+                'status' => true,
+                'message' => 'ERP is not set up for your company, orders were not sent.',
+            ]);
+        }
+
         $ids = $scope((array) $request->order_no);
         $unchecked = $scope((array) $request->checkbox_uncheck);
 
@@ -1576,51 +1575,6 @@ class QuickOrderController extends Controller
     /* ============================================================
      |  13) COMMON DISCOUNT
      * ============================================================ */
-
-    private function commonDiscountFunction($dealer_id, $product_id, $total_rs)
-    {
-        $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
-
-        if (!$dealer || empty($dealer->state_id)) {
-            return [0, 0, 0];
-        }
-
-        $dealer_code = $dealer->dealer_code ?? '0';
-
-        // STAX rate by dealer's state
-        $final_stax_discount = 0;
-        $stax_list = DB::table('prod_mast_tax')
-            ->where('STATE_CODE', $dealer->state_id)
-            ->orderBy('id', 'DESC')
-            ->get();
-
-        if ($stax_list->isNotEmpty()) {
-            $final_stax_discount = $stax_list->first()->STAX_RATE ?? 0;
-        }
-
-        // Bill tax rate by dealer code
-        $final_tr_rate = 0;
-        if (!empty($dealer_code)) {
-            $bill_list = DB::table('dealer_billtax_mast')
-                ->where('ACC_CODE', $dealer_code)
-                ->orderBy('id', 'DESC')
-                ->get();
-
-            if ($bill_list->isNotEmpty()) {
-                $final_tr_rate = $bill_list->first()->TI_RATE ?? 0;
-            }
-        }
-
-        $gst_rate = (float) $final_stax_discount;
-        $atd_rate = $gst_rate > 0 ? (($gst_rate * 100) / ($gst_rate + 100)) : 0;
-        $tr_rate = (float) $final_tr_rate;
-
-        $step1 = $total_rs * $tr_rate;
-        $td_discount = $step1 / 100;
-        $atd_discount = round((($total_rs - $td_discount) * $atd_rate) / 100, 2);
-
-        return [$atd_discount, $td_discount, $tr_rate];
-    }
 
     /* ============================================================
      |  14) Dealer Dashboard
@@ -1759,97 +1713,97 @@ class QuickOrderController extends Controller
     //     ]);
     // }
 
-    /**
-     * Common market/category-wise target vs achievement data builder.
-     */
-    private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
-    {
-        $from_target_date = "01-APR-" . date('y');
-        $to_target_date = "31-MAR-" . (date('y') + 1);
-        $from_sale_date = date('Y') . "-04-01";
-        $to_sale_date = (date('Y') + 1) . "-03-31";
-        $month_from = date('Y-m') . '-01';
-        $month_to = date('Y-m-t');
+    // /**
+    //  * Common market/category-wise target vs achievement data builder.
+    //  */
+    // private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
+    // {
+    //     $from_target_date = "01-APR-" . date('y');
+    //     $to_target_date = "31-MAR-" . (date('y') + 1);
+    //     $from_sale_date = date('Y') . "-04-01";
+    //     $to_sale_date = (date('Y') + 1) . "-03-31";
+    //     $month_from = date('Y-m') . '-01';
+    //     $month_to = date('Y-m-t');
 
-        $quarter = DB::table('_quater_master')->where('details_month', date('Y-m'))->first();
-        $q_from = $quarter->quater_from_date ?? $month_from;
-        $q_to = $quarter->quater_to_date ?? $month_to;
+    //     $quarter = DB::table('_quater_master')->where('details_month', date('Y-m'))->first();
+    //     $q_from = $quarter->quater_from_date ?? $month_from;
+    //     $q_to = $quarter->quater_to_date ?? $month_to;
 
-        $prod_catg_mast_array = DB::table('prod_catg_mast')
-            ->where('MKTG_CATG', $mktg_catg)
-            ->orderBy('USER_SEQ', 'ASC')
-            ->get();
+    //     $prod_catg_mast_array = DB::table('prod_catg_mast')
+    //         ->where('MKTG_CATG', $mktg_catg)
+    //         ->orderBy('USER_SEQ', 'ASC')
+    //         ->get();
 
-        $um_array = DB::table('prod_catg_mast')
-            ->join('item_mast', 'item_mast.PROD_CATG', '=', 'prod_catg_mast.PROD_CATG')
-            ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-            ->pluck('item_aum_mast.AUM', 'prod_catg_mast.PROD_CATG');
+    //     $um_array = DB::table('prod_catg_mast')
+    //         ->join('item_mast', 'item_mast.PROD_CATG', '=', 'prod_catg_mast.PROD_CATG')
+    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
+    //         ->pluck('item_aum_mast.AUM', 'prod_catg_mast.PROD_CATG');
 
-        $targets = DB::table('dealer_target_mast')
-            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'dealer_target_mast.PROD_CATG')
-            ->where('dealer_target_mast.FROM_DATE', $from_target_date)
-            ->where('dealer_target_mast.TO_DATE', $to_target_date)
-            ->whereIn('dealer_target_mast.ACC_CODE', $dealer_code)
-            ->groupBy('dealer_target_mast.PROD_CATG')
-            ->pluck(DB::raw('SUM(dealer_target_mast.TARGET_QTY) as TARGET_QTY'), 'dealer_target_mast.PROD_CATG');
+    //     $targets = DB::table('dealer_target_mast')
+    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'dealer_target_mast.PROD_CATG')
+    //         ->where('dealer_target_mast.FROM_DATE', $from_target_date)
+    //         ->where('dealer_target_mast.TO_DATE', $to_target_date)
+    //         ->whereIn('dealer_target_mast.ACC_CODE', $dealer_code)
+    //         ->groupBy('dealer_target_mast.PROD_CATG')
+    //         ->pluck(DB::raw('SUM(dealer_target_mast.TARGET_QTY) as TARGET_QTY'), 'dealer_target_mast.PROD_CATG');
 
-        $salesQtyYtd = DB::table('itemtran_body')
-            ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-            ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-            ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
-            ->whereIn('itemtran_head.DIV_CODE', $div_code)
-            ->whereIn('itemtran_body.DIV_CODE', $div_code)
-            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-            ->groupBy('prod_catg_mast.PROD_CATG')
-            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    //     $salesQtyYtd = DB::table('itemtran_body')
+    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
+    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
+    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
+    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
+    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
+    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+    //         ->groupBy('prod_catg_mast.PROD_CATG')
+    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
 
-        $salesValYtd = DB::table('itemtran_body')
-            ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-            ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
-            ->whereIn('itemtran_head.DIV_CODE', $div_code)
-            ->whereIn('itemtran_body.DIV_CODE', $div_code)
-            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-            ->groupBy('prod_catg_mast.PROD_CATG')
-            ->pluck(DB::raw('SUM(itemtran_body.VALISSUED) as VALISSUED'), 'prod_catg_mast.PROD_CATG');
+    //     $salesValYtd = DB::table('itemtran_body')
+    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
+    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
+    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
+    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
+    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+    //         ->groupBy('prod_catg_mast.PROD_CATG')
+    //         ->pluck(DB::raw('SUM(itemtran_body.VALISSUED) as VALISSUED'), 'prod_catg_mast.PROD_CATG');
 
-        $salesQtyMonth = DB::table('itemtran_body')
-            ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-            ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-            ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$month_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$month_to'")
-            ->whereIn('itemtran_head.DIV_CODE', $div_code)
-            ->whereIn('itemtran_body.DIV_CODE', $div_code)
-            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-            ->groupBy('prod_catg_mast.PROD_CATG')
-            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    //     $salesQtyMonth = DB::table('itemtran_body')
+    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
+    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
+    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
+    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
+    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$month_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$month_to'")
+    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+    //         ->groupBy('prod_catg_mast.PROD_CATG')
+    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
 
-        $salesQtyQuat = DB::table('itemtran_body')
-            ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-            ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-            ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-            ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$q_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$q_to'")
-            ->whereIn('itemtran_head.DIV_CODE', $div_code)
-            ->whereIn('itemtran_body.DIV_CODE', $div_code)
-            ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-            ->groupBy('prod_catg_mast.PROD_CATG')
-            ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    //     $salesQtyQuat = DB::table('itemtran_body')
+    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
+    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
+    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
+    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
+    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$q_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$q_to'")
+    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
+    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
+    //         ->groupBy('prod_catg_mast.PROD_CATG')
+    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
 
-        return [
-            'prod_catg_mast_array' => $prod_catg_mast_array,
-            'um_array' => $um_array,
-            'prod_wise_target_mast' => $targets,
-            'prod_wise_sales_mast_data_qty' => $salesQtyYtd,
-            'prod_wise_sales_mast_data_val' => $salesValYtd,
-            'month_prod_wise_sales_mast_data_qty' => $salesQtyMonth,
-            'quad_prod_wise_sales_mast_data_qty' => $salesQtyQuat,
-        ];
-    }
+    //     return [
+    //         'prod_catg_mast_array' => $prod_catg_mast_array,
+    //         'um_array' => $um_array,
+    //         'prod_wise_target_mast' => $targets,
+    //         'prod_wise_sales_mast_data_qty' => $salesQtyYtd,
+    //         'prod_wise_sales_mast_data_val' => $salesValYtd,
+    //         'month_prod_wise_sales_mast_data_qty' => $salesQtyMonth,
+    //         'quad_prod_wise_sales_mast_data_qty' => $salesQtyQuat,
+    //     ];
+    // }
 
     /* ---------- Sale Statement ---------- */
     // public function saleStatement(Request $request)

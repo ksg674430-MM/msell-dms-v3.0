@@ -1327,7 +1327,6 @@ class DmsClaimOrderApiController extends Controller
 
         $imageDyn       = DB::table('image_mast')->where('img_locn', 'Order')->where('company_id', $ctx->company_id)->get();
         $divCodeMaster  = DB::table('_div_code_master')->where('status', 1)->pluck('name', 'id');
-        $conversionUnit = DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE');
 
         $catalogProducts = DB::table('catalog_product')
             ->select(DB::raw("CONCAT(name,' (',itemcode,')') AS ITEM_NAME"))
@@ -1360,7 +1359,6 @@ class DmsClaimOrderApiController extends Controller
             'message' => 'success',
             'data'    => $this->utf8Clean([
                 'catalog_product_details'    => $catalogProducts,
-                'converstion_unit_item_code' => $conversionUnit,
                 'data_get'                   => $dataGet,
                 'image_dyn'                  => $imageDyn,
                 'dealer_array'               => $dealerArray,
