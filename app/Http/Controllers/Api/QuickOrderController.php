@@ -45,6 +45,15 @@ class QuickOrderController extends Controller
         ];
     }
 
+    private function newOrderId($dealerId): string
+    {
+        $id = date('YmdHis') . (int) $dealerId;
+
+        return strlen($id) < 19 || (strlen($id) === 19 && strcmp($id, (string) PHP_INT_MAX) <= 0)
+            ? $id
+            : date('ymdHis') . (int) $dealerId;
+    }
+
     private function allowedDealerId(array $ctx, $requested)
     {
         $own = (int) $ctx['dealer_id'];
@@ -81,7 +90,7 @@ class QuickOrderController extends Controller
 
         $role_id = (int) $ctx['role_id'];
 
-        if ($role_id === 1 || (int) $order->dealer_id === (int) $ctx['dealer_id']) {
+        if ($role_id === 1 || (int) $order->dealer_id === (int) $ctx['dealer_id'] || (int) ($order->created_person_id ?? 0) === (int) $ctx['dealer_id']) {
             return true;
         }
 
@@ -237,6 +246,7 @@ class QuickOrderController extends Controller
 
         $baseQ = DB::table('demand_order')
             ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+            ->where('demand_order.company_id', $company_id)
             ->whereDate('demand_order.order_date', '>=', $from_date)
             ->whereDate('demand_order.order_date', '<=', $to_date)
             ->groupBy('demand_order.id');
@@ -282,7 +292,7 @@ class QuickOrderController extends Controller
                     'demand_order.order_id as porder_id',
                     DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
                 )
-                ->where('demand_order.dealer_id', $dealer_id)
+                ->where(fn ($q) => $q->where('demand_order.dealer_id', $dealer_id)->orWhere('demand_order.created_person_id', $dealer_id))
                 ->orderBy('demand_order.order_date', 'DESC')
                 ->get()->toArray();
         }
@@ -290,6 +300,7 @@ class QuickOrderController extends Controller
         if ($dealer_id != 1170 && $role_id == 37) {
             $depoQ = DB::table('demand_order')
                 ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+                ->where('demand_order.company_id', $company_id)
                 ->whereDate('demand_order.order_date', '>=', $from_date)
                 ->whereDate('demand_order.order_date', '<=', $to_date)
                 ->groupBy('demand_order.id');
@@ -339,7 +350,8 @@ class QuickOrderController extends Controller
                 'dealer.*',
                 DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
             )
-                ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id');
+                ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
+                ->where('demand_order.company_id', $company_id);
 
             if (!empty($order_no)) {
                 $adminQ->where(function ($q) use ($order_no) {
@@ -362,10 +374,12 @@ class QuickOrderController extends Controller
                 ->join('dealer_person_login', 'dealer_person_login.dealer_id', '=', 'dealer.id')
                 ->where('dealer_status', 1)
                 ->where('role_id', 37)
+                ->where('dealer.company_id', $company_id)
                 ->pluck(DB::raw("CONCAT(dealer_code,' - ',name) as dealer_name"), 'div_code_main');
 
             $dealer_name = DB::table('dealer')
                 ->where('dealer_status', 1)
+                ->where('company_id', $company_id)
                 ->pluck(DB::raw("CONCAT(dealer_code,' - ',name) as name"), 'id');
         }
 
@@ -569,7 +583,7 @@ class QuickOrderController extends Controller
                 $sale_div_code = $row->DIV_CODE ?? 'JH';
             }
 
-            $order_id = date('YmdHis') . $auth_id;
+            $order_id = $this->newOrderId($auth_id);
 
             $check = DB::table('demand_order_cart')->where('dealer_id', $dealer_id_cus)->first();
 
@@ -755,7 +769,7 @@ class QuickOrderController extends Controller
         }
 
         $company_id = $ctx['company_id'];
-        $order_id = date('YmdHis') . $ctx['dealer_id'];
+        $order_id = $this->newOrderId($ctx['dealer_id']);
         $lines = [];
         $skipped = [];
         $seen = [];
@@ -962,7 +976,7 @@ class QuickOrderController extends Controller
             $vr_status = 'SO';
         }
 
-        $order_id = date('YmdHis') . $auth_id;
+        $order_id = $this->newOrderId($auth_id);
 
         $detailRows = [];
         $poRows = [];
@@ -1439,8 +1453,16 @@ class QuickOrderController extends Controller
     public function sendToErp(Request $request)
     {
         $ctx = $this->context($request);
+        $log = [
+            'dealer_id' => $ctx['dealer_id'],
+            'company_id' => $ctx['company_id'],
+            'role_id' => $ctx['role_id'],
+            'requested' => array_values((array) $request->order_no),
+            'unchecked' => array_values((array) $request->checkbox_uncheck),
+        ];
 
         if ((int) $ctx['role_id'] !== 37) {
+            Log::warning('[SendToERP] refused: login is not role 37 (depot)', $log);
             return response()->json([
                 'status' => false,
                 'message' => 'Only a depot can send orders to ERP.',
@@ -1456,6 +1478,7 @@ class QuickOrderController extends Controller
             ->all();
 
         if (!Schema::hasColumns('demand_order', ['send_order_erp_status', 'send_order_erp_date_time'])) {
+            Log::info('[SendToERP] skipped: demand_order has no ERP columns on this database', $log);
             return response()->json([
                 'status' => true,
                 'message' => 'ERP is not set up for your company, orders were not sent.',
@@ -1478,6 +1501,13 @@ class QuickOrderController extends Controller
                 'send_order_erp_date_time' => date('Y-m-d H:i:s'),
             ]);
         }
+
+        Log::info('[SendToERP] done: orders flagged for ERP pickup (send_order_erp_status=1); no external ERP call is made here', $log + [
+            'div_code' => $this->resolveDivCode($ctx['dealer_id'], $ctx['dealer_code']),
+            'flagged_sent' => $ids,
+            'flagged_unchecked' => $unchecked,
+            'ignored_not_allowed' => array_values(array_diff(array_map('intval', $log['requested']), array_map('intval', $ids))),
+        ]);
 
         return response()->json([
             'status' => true,
