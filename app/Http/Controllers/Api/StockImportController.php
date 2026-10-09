@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\StockService;
@@ -271,22 +272,10 @@ class StockImportController extends Controller
         $mrpCol  = $pcs ? 'mrp_pcs' : 'mrp';
         $rateCol = $pcs ? 'dealer_pcs_rate' : 'dealer_rate';
 
-        $rateRows = DB::select(
-            "SELECT cp.id, prl.{$mrpCol} AS mrp, prl.{$rateCol} AS dealer_rate
-               FROM catalog_product cp
-               INNER JOIN product_rate_list prl ON prl.product_id = cp.id
-              WHERE cp.company_id = ?
-              GROUP BY cp.id",
-            [$companyId]
-        );
-
-        $rateMap = [];
-        foreach ($rateRows as $r) {
-            $rateMap[(int) $r->id] = [
-                'mrp'         => (float) $r->mrp,
-                'dealer_rate' => (float) $r->dealer_rate,
-            ];
-        }
+        $rateMap = RateList::forDealer($dealerId, $companyId)
+            ->rows(DB::table('catalog_product')->where('company_id', $companyId)->pluck('id')->all())
+            ->map(fn ($r) => ['mrp' => (float) $r->{$mrpCol}, 'dealer_rate' => (float) $r->{$rateCol}])
+            ->all();
 
         $fh = fopen($request->file('excelFile')->getRealPath(), 'r');
         if ($fh === false) {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -103,7 +104,6 @@ class ChallanHelperController extends Controller
     $stateId    = (int) ($user->state_id ?? 0);
     $roleName   = (string) ($user->rolename ?? '');
     $qtyType    = (string) ($user->quantity_type ?? '1');
-    $templateId = (int) ($user->template_id ?? 0);
     $productId  = (int) $id;
 
     $retailerId = $request->input('retailer_id');
@@ -151,28 +151,17 @@ class ChallanHelperController extends Controller
 
     // ---- Rate column decide karo (role + qty type) ----
     $rateColumn = $this->pickRateColumn($roleName, $qtyType, $companyId);
-    $useTemplate = ($companyId === 213 && $templateId > 0);
+    $rateRow = RateList::forDealer($dealerId, $companyId)->row($productId);
+    $listRate = (float) ($rateRow->{$rateColumn} ?? 0);
 
-    $rateTable = $useTemplate ? 'product_rate_list_template' : 'product_rate_list';
-    $rateFilter = $useTemplate
-        ? " AND prl.template_type = ?"
-        : " AND prl.state_id = ?";
-    $rateFilterVal = $useTemplate ? $templateId : $stateId;
-
-    // ---- Stock + rate ek hi query me ----
     $rows = DB::select(
-        "SELECT s.id, s.batch_no, s.mrp, s.qty, s.remaining, s.mfg, s.expire,
-                prl.{$rateColumn} AS rate
+        "SELECT s.id, s.batch_no, s.mrp, s.qty, s.remaining, s.mfg, s.expire
            FROM stock s
-           LEFT JOIN {$rateTable} prl
-                  ON prl.product_id = s.product_id
-                 AND prl.company_id = ?
-                 {$rateFilter}
           WHERE s.dealer_id  = ?
             AND s.product_id = ?
             AND s.qty        > 0
           ORDER BY s.mfg ASC",
-        [$companyId, $rateFilterVal, $dealerId, $productId]
+        [$dealerId, $productId]
     );
 
     // ---- Response build ----
@@ -183,7 +172,7 @@ class ChallanHelperController extends Controller
         $mrp = (float) $s->mrp;
 
         // Rate ko GST-inclusive se GST-exclusive me convert (agar company 213/40/215)
-        $rate = (float) $s->rate;
+        $rate = $listRate;
         if (in_array($companyId, [40, 213, 215], true) && $igst > 0) {
             $beforeGst = round($rate - ($rate * (100 / (100 + $igst))), 3);
             $rate = round($rate - $beforeGst, 2);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -260,18 +261,21 @@ class ThresholdController extends Controller
         $user      = $request->user();
         $dealerId  = (int) $user->dealer_id;
         $companyId = (int) $user->company_id;
-        $stateId   = (int) ($user->state_id ?? 0);
 
         $products = DB::select(
-            "SELECT cp.id, cp.name, MAX(prl.mrp) AS mrp, MAX(COALESCE(g.igst, 0)) AS gst
+            "SELECT cp.id, cp.name, MAX(COALESCE(g.igst, 0)) AS gst
                FROM catalog_product cp
-               INNER JOIN product_rate_list prl ON prl.product_id = cp.id AND prl.state_id = ?
                LEFT JOIN _gst g ON g.hsn_code = cp.hsn_code
               WHERE cp.company_id = ?
               GROUP BY cp.id, cp.name
               ORDER BY cp.id",
-            [$stateId, $companyId]
+            [$companyId]
         );
+        $rates    = RateList::forDealer($dealerId, $companyId)->rows(array_map(fn ($p) => (int) $p->id, $products));
+        $products = array_values(array_filter($products, fn ($p) => $rates->has($p->id)));
+        foreach ($products as $p) {
+            $p->mrp = $rates[$p->id]->mrp;
+        }
 
         $stock     = app(StockService::class)->totalsByProduct($dealerId);
         $minLabels = DB::table('threshold')->where('dealer_id', $dealerId)->orderByDesc('id')->pluck('qty', 'product_id');

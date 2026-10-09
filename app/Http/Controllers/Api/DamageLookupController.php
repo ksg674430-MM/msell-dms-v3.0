@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\ScopesProducts;
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\Request;
 use App\Services\StockService;
 use Illuminate\Support\Facades\DB;
@@ -77,37 +78,30 @@ class DamageLookupController extends Controller
         $u = $request->user();
         $dealerId     = (int) $u->dealer_id;
         $companyIdCus = (int) $u->company_id;
-        $stateId      = (string) ($u->state_id ?? 0);
-        $templateId   = (int) ($u->template_id ?? 0);
         $qtyType      = (string) ($u->quantity_type ?? '1');
 
         $mrpCol = $qtyType === '0' ? 'mrp_pcs' : 'mrp';
 
         if ($companyIdCus === 213) {
-
-            $base = DB::table('catalog_product as p')
-                ->join('product_rate_list as prl', 'prl.product_id', '=', 'p.id')
+            $product = DB::table('catalog_product as p')
                 ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
                 ->where('p.id', $id);
-
-            if ($templateId > 0) {
-                $base = DB::table('catalog_product as p')
-                    ->join('product_rate_list_template as prl', 'prl.product_id', '=', 'p.id')
-                    ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
-                    ->where('p.id', $id)
-                    ->where('prl.template_type', (string) $templateId);
-            } else {
-                $base->where('prl.state_id', $stateId);
-            }
-
-            $this->ownProduct($base, $companyIdCus, $dealerId);
-            $row = $base->first([
+            $this->ownProduct($product, $companyIdCus, $dealerId);
+            $product = $product->first([
                 'p.id as product_id',
-                DB::raw("CAST(prl.{$mrpCol} AS DECIMAL(16,2)) as mrp"),
+                'p.company_id',
                 DB::raw("CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as gst"),
                 DB::raw("CAST(COALESCE(t.sgst,0) AS DECIMAL(6,2)) as sgst"),
                 DB::raw("CAST(COALESCE(t.cgst,0) AS DECIMAL(6,2)) as cgst"),
             ]);
+            $rate = $product ? RateList::forDealer($dealerId, (int) $product->company_id)->row($id) : null;
+            $row = $rate ? [
+                'product_id' => $product->product_id,
+                'mrp'        => number_format((float) $rate->{$mrpCol}, 2, '.', ''),
+                'gst'        => $product->gst,
+                'sgst'       => $product->sgst,
+                'cgst'       => $product->cgst,
+            ] : null;
         } else {
             $row = DB::table('catalog_product as p')
                 ->join('stock as s', 'p.id', '=', 's.product_id')
@@ -134,8 +128,6 @@ class DamageLookupController extends Controller
         $u = $request->user();
         $dealerId     = (int) $u->dealer_id;
         $companyIdCus = (int) $u->company_id;
-        $stateId      = (string) ($u->state_id ?? 0);
-        $templateId   = (int) ($u->template_id ?? 0);
         $qtyType      = (string) ($u->quantity_type ?? '1');
         $role         = strtoupper((string) ($u->rolename ?? ''));
 
@@ -154,23 +146,13 @@ class DamageLookupController extends Controller
             $rateCol = $qtyType === '0' ? 'ss_pcs_rate' : 'ss_case_rate';
         }
 
-        $rate = DB::table('catalog_product as p')
+        $product = DB::table('catalog_product as p')
             ->leftJoin('_gst as t', 'p.hsn_code', '=', 't.hsn_code')
             ->where('p.id', $id);
-        $rateTable = $companyIdCus === 213 && $templateId > 0 ? 'product_rate_list_template' : 'product_rate_list';
-        $rate->leftJoin("$rateTable as prl", function ($j) use ($rateTable, $templateId, $stateId, $companyIdCus) {
-            $j->on('prl.product_id', '=', 'p.id');
-            if ($rateTable === 'product_rate_list_template') {
-                $j->where('prl.template_type', (string) $templateId);
-            } elseif ($companyIdCus === 213) {
-                $j->where('prl.state_id', $stateId);
-            }
-        });
-        $this->ownProduct($rate, $companyIdCus, $dealerId);
-        $row = $rate->first([
-            DB::raw("CAST(COALESCE(prl.{$rateCol},0) AS DECIMAL(16,2)) as raw_rate"),
-            DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst'),
-        ]);
+        $this->ownProduct($product, $companyIdCus, $dealerId);
+        $product = $product->first(['p.company_id', DB::raw('CAST(COALESCE(t.igst,0) AS DECIMAL(6,2)) as igst')]);
+        $rateRow = $product ? RateList::forDealer($dealerId, (int) $product->company_id)->row($id) : null;
+        $row = $product ? (object) ['raw_rate' => (float) ($rateRow->{$rateCol} ?? 0), 'igst' => $product->igst] : null;
         if (!$row) {
             return response()->json(['data' => null]);
         }

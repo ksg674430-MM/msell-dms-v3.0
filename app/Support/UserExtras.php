@@ -26,18 +26,6 @@ class UserExtras
 
     protected static function roleName(int $roleId): string
     {
-        foreach (['role', 'role_master', 'roles'] as $tbl) {
-            try {
-                $n = DB::table($tbl)->where('id', $roleId)->value('name');
-                if ($n) return (string) $n;
-            } catch (\Throwable $e) {}
-        }
-        // fallback map — update from your real role table
-        return match ($roleId) {
-            1  => 'ADMIN',
-            2  => 'DISTRIBUTOR',
-            3  => 'DEPO',
-            default => '',
-        };
+        return trim((string) DB::table('_role')->where('role_id', $roleId)->value('rolename'));
     }
 }

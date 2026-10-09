@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\StockService;
@@ -56,29 +57,25 @@ class BalanceStockController extends Controller
                 c2.name                         AS cat,
 
                 oc.cp_name                      AS company_name,
-                oc.cp_short_name                AS cp_short_name,
-
-                prl.mrp                         AS product_mrp,
-                prl.dealer_rate                 AS default_dealer_rate
+                oc.cp_short_name                AS cp_short_name
                FROM catalog_product c
                LEFT  JOIN catalog_2 c2 ON c2.id = c.catalog_id
                INNER JOIN stock    s  ON s.product_id = c.id AND s.dealer_id = ?
                LEFT  JOIN other_company oc ON oc.id = c.company_id
-               LEFT  JOIN (
-                    SELECT product_id,
-                           MAX(mrp)          AS mrp,
-                           MAX(dealer_rate)  AS dealer_rate
-                      FROM product_rate_list
-                     WHERE state_id = ?
-                     GROUP BY product_id
-               ) prl ON prl.product_id = c.id
                {$catalogJoinSql}
               WHERE 1=1 {$catalogWhereSql}
               ORDER BY c.name ASC",
-            array_merge([$dealerId, $stateId], $catalogBindings)
+            array_merge([$dealerId], $catalogBindings)
         );
 
         $productIds = array_values(array_unique(array_map(fn ($r) => (int) $r->pid, $rows)));
+        $rateRows   = DB::table('catalog_product')->whereIn('id', $productIds)->get(['id', 'company_id'])
+            ->groupBy('company_id')
+            ->reduce(fn ($all, $products, $companyId) => $all->union(RateList::forDealer($dealerId, (int) $companyId)->rows($products->pluck('id')->all())), collect());
+        foreach ($rows as $r) {
+            $r->product_mrp         = $rateRows->get((int) $r->pid)?->mrp;
+            $r->default_dealer_rate = $rateRows->get((int) $r->pid)?->dealer_rate;
+        }
         $intransit  = $this->intransitMap($dealerId, $productIds);
         $threshold  = $this->thresholdMap($dealerId, $productIds);
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,26 +18,15 @@ class CatalogProductController extends Controller
 {
     $user            = $request->user();
     $companyId       = (int) ($user->company_id ?? 0);
-    $stateId         = (string) ($user->state_id ?? 0);
     $ownershipTypeId = (int) ($user->ownership_type_id ?? 0);
 
     // Per-piece rate column depends on login type
     // DB/SS (ownership_type_id = 245) → ss_pcs_rate, else dealer_pcs_rate
     $rateCol = ($ownershipTypeId === 245) ? 'ss_pcs_rate' : 'dealer_pcs_rate';
 
-    // Company 213 only counts active rate rows
-    $statusFilter = ($companyId === 213) ? " AND prl.status = 1" : "";
-
-    // Bindings order: subquery1 state, subquery2 state, company WHERE, EXISTS state
-    $bindings = [$stateId, $stateId, $companyId];
+    $bindings = [$companyId];
 
     $where = ["cp.company_id = ?"];
-
-    // Legacy: only products that have a rate row for user's state
-    $where[]    = "EXISTS (SELECT 1 FROM product_rate_list prl
-                            WHERE prl.product_id = cp.id
-                              AND prl.state_id = ?{$statusFilter})";
-    $bindings[] = $stateId;
 
     if ($itemName = $request->input('item_name')) {
         $where[]    = "cv.product_name LIKE ?";
@@ -74,13 +64,7 @@ class CatalogProductController extends Controller
                 cv.product_name,
                 cv.c0_id, cv.c0_name,
                 cv.c1_id, cv.c1_name,
-                cv.c2_id, cv.c2_name,
-                (SELECT prl.mrp_pcs FROM product_rate_list prl
-                    WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
-                    LIMIT 1) AS mrp,
-                (SELECT prl.{$rateCol} FROM product_rate_list prl
-                    WHERE prl.product_id = cp.id AND prl.state_id = ?{$statusFilter}
-                    LIMIT 1) AS dealer_rate
+                cv.c2_id, cv.c2_name
             FROM catalog_product cp
             LEFT JOIN catalog_view cv ON cv.product_id = cp.id
             WHERE {$whereSql}
@@ -89,11 +73,19 @@ class CatalogProductController extends Controller
                      COALESCE(cv.c2_name,'') ASC,
                      cp.name ASC";
 
-    $rows = DB::select($sql, $bindings);
+    $rows  = DB::select($sql, $bindings);
+    $rates = RateList::forDealer((int) $user->dealer_id, $companyId)->rows(array_map(fn ($r) => (int) $r->id, $rows));
 
-    foreach ($rows as $row) {
-        $row->image_url = legacy_public_url($row->image_name);
-    }
+    $rows = array_values(array_filter($rows, function ($row) use ($rates, $rateCol, $companyId) {
+        $rate = $rates->get($row->id);
+        if (!$rate || ($companyId === 213 && (int) $rate->status !== 1)) {
+            return false;
+        }
+        $row->mrp         = $rate->mrp_pcs;
+        $row->dealer_rate = $rate->{$rateCol};
+        $row->image_url   = legacy_public_url($row->image_name);
+        return true;
+    }));
 
     return response()->json([
         'status' => true,

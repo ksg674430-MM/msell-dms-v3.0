@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 // use App\Support\FilterBuilder;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -345,7 +346,6 @@ class OpeningStockController extends Controller
 {
     $user      = $request->user();
     $companyId = (int) ($user->company_id ?? 0);
-    $stateId   = (string) ($user->state_id ?? '');
 
     $useSsRate = $user->rolename === 'DEPO'
         || ($user->rolename === 'DISTRIBUTOR' && (int) $user->ownership_type_id === 245 && $companyId === 213);
@@ -358,18 +358,21 @@ class OpeningStockController extends Controller
 
     $rows = DB::select(
         "SELECT cp.id,
-                {$label} AS name,
-                CAST(MAX(prl.{$mrpCol}) AS DECIMAL(10,2)) AS mrp,
-                MAX(prl.{$rateCol}) AS dealer_rate
+                {$label} AS name
            FROM catalog_product cp
            INNER JOIN catalog_2 c2 ON c2.id = cp.catalog_id
-           LEFT JOIN product_rate_list prl ON prl.product_id = cp.id AND prl.state_id = ?
           WHERE cp.company_id = ?
             AND cp.status = 1
           GROUP BY cp.id, cp.name, cp.itemcode, cp.quantity_per_case, c2.name
           ORDER BY cp.name ASC",
-        [$stateId, $companyId]
+        [$companyId]
     );
+    $rates = RateList::forDealer((int) $user->dealer_id, $companyId)->rows(array_map(fn ($r) => (int) $r->id, $rows));
+    foreach ($rows as $row) {
+        $rate             = $rates->get($row->id);
+        $row->mrp         = $rate ? number_format((float) $rate->{$mrpCol}, 2, '.', '') : null;
+        $row->dealer_rate = $rate?->{$rateCol};
+    }
 
     return response()->json([
         'status'   => true,

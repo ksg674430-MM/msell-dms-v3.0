@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
@@ -95,22 +96,7 @@ class QuickOrderController extends Controller
     private function dealerRate(array $ctx, $itemCode, $mode = 0)
     {
         $company_id = $ctx['company_id'];
-        $state_id = $ctx['dealer']->state_id ?? 0;
-
-        if (empty($state_id)) {
-            $csa_data = DB::table('csa')->where('c_id', $ctx['dealer']->csa_id ?? 0)->first();
-            $state_id = $csa_data->state_id ?? 0;
-        }
-
-        $rate = DB::table('product_rate_list')
-            ->where('product_id', $itemCode)
-            ->where('state_id', $state_id)
-            ->where('company_id', $company_id)
-            ->first()
-            ?: DB::table('product_rate_list')
-                ->where('product_id', $itemCode)
-                ->where('company_id', $company_id)
-                ->first();
+        $rate = RateList::forDealer((int) $ctx['dealer_id'], (int) $company_id)->row((int) $itemCode);
 
         if (!$rate) {
             return null;
@@ -686,7 +672,7 @@ class QuickOrderController extends Controller
                     DB::rollBack();
                     return response()->json([
                         'status' => false,
-                        'message' => "Rate not found for product {$value}.",
+                        'message' => $base ? "Dealer rate is 0 for product {$value} in the rate list." : "Rate not found for product {$value}.",
                     ], 422);
                 }
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\ScopesClaimDealers;
 use App\Http\Controllers\Controller;
+use App\Support\RateList;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Crypt;
@@ -433,20 +434,8 @@ class DmsClaimOrderApiController extends Controller
 
         $dealerData    = $this->dealerLoginRow($ctx->dealer_id);
         abort_if(!$dealerData, 422, "dealer_person_login missing");
-        $dealerDetails = DB::table('dealer')->where('id', $ctx->dealer_id)->first();
 
-        $returnRate = DB::table('product_rate_list')
-            ->where('product_id', $itemCode)
-            ->where('state_id', $dealerData->state_id)
-            ->where('company_id', $ctx->company_id)
-            ->first();
-
-        if (empty($returnRate)) {
-            $returnRate = DB::table('product_rate_list')
-                ->where('product_id', $itemCode)
-                ->where('company_id', $ctx->company_id)
-                ->first();
-        }
+        $returnRate = RateList::forDealer((int) $ctx->dealer_id, (int) $ctx->company_id)->row((int) $itemCode);
 
         // item dropdown
         if ($forSelfForDb == 1) {
@@ -513,21 +502,7 @@ class DmsClaimOrderApiController extends Controller
                 );
         }
 
-        // get_rate_list_details
-        if (!empty($dealerDetails->template_id)) {
-            $getRateListDetails = DB::table('product_rate_list_template')
-                ->where('template_type', $dealerDetails->template_id)
-                ->where('product_id', $itemCode)
-                ->where('company_id', $ctx->company_id)
-                ->first();
-        } else {
-            $getRateListDetails = DB::table('product_rate_list')
-                ->where('template_type', $dealerDetails->template_id)
-                ->where('product_id', $itemCode)
-                ->where('state_id', $dealerData->state_id)
-                ->where('company_id', $ctx->company_id)
-                ->first();
-        }
+        $getRateListDetails = $returnRate;
 
         $itemMastName = DB::table('catalog_product')
             ->where('company_id', $ctx->company_id)
