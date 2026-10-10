@@ -158,8 +158,13 @@ class InvoiceController extends Controller
         }
 
         // st: 1 if retailer state == dealer state (IGST vs CGST/SGST)
-        $retailerState = (int) ($header->retailer_state_id ?? 0);
-        $dealerState   = (int) ($header->dealer_state_id   ?? 0);
+        $states = DB::selectOne(
+            "SELECT (SELECT lv.l3_id FROM retailer r JOIN location_view lv ON lv.l7_id = r.location_id WHERE r.id = ? LIMIT 1) AS retailer_state,
+                    (SELECT lv.l3_id FROM dealer_location_rate_list dl JOIN location_view lv ON lv.l7_id = dl.location_id WHERE dl.dealer_id = ? LIMIT 1) AS dealer_state",
+            [$header->ch_retailer_id, $header->ch_dealer_id]
+        );
+        $retailerState = (int) ($states->retailer_state ?? 0);
+        $dealerState   = (int) ($states->dealer_state ?? 0);
         $st = ($retailerState > 0 && $retailerState === $dealerState) ? 1 : 0;
 
         // ITEMS — catalog_product se naam/hsn/gst lo (catalog_view me sirf 21 rows thi)
