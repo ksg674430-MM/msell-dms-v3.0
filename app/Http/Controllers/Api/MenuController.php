@@ -116,7 +116,9 @@ class MenuController extends Controller
 
         $levels = [[$modules, 'm'], [$subs, 's'], [$subSubs, 'ss']];
         $roleRules = $this->routeRoles($config);
-        $build = function (int $depth, $parentId) use (&$build, $levels, $roleRules, $roleName) {
+        $routeSlugs = $this->routeSlugs($config);
+        $usedSlugs = [];
+        $build = function (int $depth, $parentId) use (&$build, &$usedSlugs, $levels, $roleRules, $routeSlugs, $roleName) {
             [$rows, $prefix] = $levels[$depth];
             $nodes = [];
             foreach ($depth ? $rows->where('parent', $parentId) : $rows as $row) {
@@ -133,6 +135,10 @@ class MenuController extends Controller
                 }
                 $allowed = $roleRules[$route] ?? null;
                 if (!$allowed || in_array($roleName, $allowed, true)) {
+                    $slug = $routeSlugs[$route] ?? null;
+                    if ($slug !== null && !isset($usedSlugs[$slug])) {
+                        $node['slug'] = $usedSlugs[$slug] = $slug;
+                    }
                     $nodes[] = $node + ['icon' => 'fa-caret-right', 'route' => $route];
                 }
             }
@@ -140,6 +146,18 @@ class MenuController extends Controller
         };
 
         return $build(0, null);
+    }
+
+    private function routeSlugs(array $nodes): array
+    {
+        $slugs = [];
+        foreach ($nodes as $node) {
+            if (!empty($node['route']) && !empty($node['slug'])) {
+                $slugs[$node['route']] ??= $node['slug'];
+            }
+            $slugs += $this->routeSlugs($node['children'] ?? []);
+        }
+        return $slugs;
     }
 
     private function routeRoles(array $nodes, array $inherited = []): array
