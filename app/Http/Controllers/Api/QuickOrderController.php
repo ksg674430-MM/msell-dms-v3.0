@@ -130,12 +130,18 @@ class QuickOrderController extends Controller
             ];
         }
 
-        app()->terminating(function () use ($url, $payload, $asForm, $companyId, $log) {
+        app()->terminating(function () use ($url, $payload, $asForm, $companyId, $log, $orderId) {
             try {
                 $http = Http::timeout(15)->acceptJson();
                 $res = $asForm ? $http->asForm()->post($url, $payload) : $http->post($url, $payload);
                 $json = $res->json() ?? [];
-                $ok = $companyId === 379 ? (int) ($json['status'] ?? 0) === 200 : !empty($json['VRNO']);
+                $vrno = trim((string) ($json['VRNO'] ?? $json['vrno'] ?? ''));
+                $vrno = strtoupper($vrno) === 'NFDC' ? '' : $vrno;
+                $ok = $companyId === 379 ? (int) ($json['status'] ?? 0) === 200 : $vrno !== '';
+                if ($ok && $vrno !== '') {
+                    DB::table('purchase_order')->where('order_id', $orderId)->update(['against_order_remarks' => $vrno]);
+                    DB::table('demand_order')->where('order_id', $orderId)->update(['erp_order_no' => $vrno]);
+                }
                 Log::info('[SendToERP] ' . ($ok ? 'sent' : 'ERP did not accept the order'), $log + [
                     'url' => $url,
                     'http_status' => $res->status(),
