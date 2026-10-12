@@ -27,11 +27,13 @@ class StoreDamageInvoiceRequest extends FormRequest
             'items.*.qty'            => 'required|numeric|gt:0',
             'items.*.product_rate'   => 'required|numeric',
             'items.*.mrp'            => 'required|numeric',
-            'items.*.taxable_amt'    => 'required|numeric',
-            'items.*.vat_amt'        => 'required|numeric',
             'items.*.free_qty'       => 'nullable|numeric',
             'items.*.batch_no'       => 'required|string',
             'items.*.mfg_date'       => 'required|string',
+            'items.*.spl_disc_type'  => 'nullable|in:1,2',
+            'items.*.spl_disc_val'   => 'nullable|numeric|min:0',
+            'items.*.cd_type'        => 'nullable|in:1,2',
+            'items.*.cd'             => 'nullable|numeric|min:0',
             'items.*.order_id'       => 'nullable',
         ];
     }
