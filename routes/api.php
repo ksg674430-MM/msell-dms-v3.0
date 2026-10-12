@@ -68,14 +68,21 @@ use App\Http\Controllers\Api\MainReportApiController;
 use App\Http\Controllers\Api\TallyViewController;
 
 use App\Http\Controllers\Api\DmsReportController;
+use App\Http\Controllers\Api\DbExportController;
 use App\Http\Controllers\Api\Sfa\ClaimController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
 // MENU: Login screen
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+Route::get('/dev/db-export/download/{id}', [DbExportController::class, 'download'])->middleware('signed:relative')->name('db-export.download');
 
 Route::middleware('auth:sanctum')->group(function () {
+
+Route::get('/dev/db-export', [DbExportController::class, 'access']);
+Route::get('/dev/db-export/tables', [DbExportController::class, 'tables']);
+Route::post('/dev/db-export', [DbExportController::class, 'prepare'])->middleware('throttle:20,60');
+Route::get('/dev/db-export/progress/{id}', [DbExportController::class, 'progress']);
 
 Route::prefix('tally-view')->group(function () {
     // Route::get('stock',    [TallyViewController::class, 'tallyStockView']);
