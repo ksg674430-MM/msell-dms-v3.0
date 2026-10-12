@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class InvoiceService
 {
@@ -169,6 +170,144 @@ class InvoiceService
 
             $this->refreshOrderStatus($orderId, $dealerId);
         }
+    }
+
+    public function syncFulfillment(array $orderIds, ?string $invoiceId = null): void
+    {
+        foreach (array_unique(array_filter(array_map('strval', $orderIds))) as $orderId) {
+            try {
+                DB::transaction(fn () => $this->syncOrderFulfillment($orderId, $invoiceId));
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+    }
+
+    protected function syncOrderFulfillment(string $orderId, ?string $invoiceId): void
+    {
+        $order = DB::selectOne(
+            "SELECT o.company_id, o.user_id, o.dealer_id, o.retailer_id, o.order_status, r.name AS retailer_name
+               FROM user_sales_order o
+               LEFT JOIN retailer r ON r.id = o.retailer_id
+              WHERE o.order_id = ? LIMIT 1",
+            [$orderId]
+        );
+        if (!$order || (int) $order->company_id !== 213) return;
+
+        $key  = ['order_id' => $orderId, 'company_id' => 213];
+        $now  = now();
+        $head = [
+            'user_id'              => (int) $order->user_id,
+            'dealer_id'            => (int) $order->dealer_id,
+            'retailer_id'          => (string) $order->retailer_id,
+            'retailer_name'        => mb_substr((string) $order->retailer_name, 0, 50),
+            'date'                 => $now->toDateString(),
+            'time'                 => $now->toTimeString(),
+            'server_date'          => $now,
+            'created_by'           => (string) $order->user_id,
+            'created_by_dealer_id' => (int) $order->dealer_id,
+        ];
+
+        $invoiced = collect(DB::select(
+            "SELECT d.product_id, SUM(d.qty) AS qty, SUM(d.free_qty) AS free_qty, SUM(d.taxable_amt) AS value,
+                    MAX(d.product_rate) AS rate, MAX(d.mfg_date) AS mfg_date
+               FROM challan_order_details d
+               JOIN challan_order c ON c.id = d.ch_id
+              WHERE d.order_id = ? AND c.dispatch_status <> 3
+              GROUP BY d.product_id",
+            [$orderId]
+        ))->keyBy(fn ($r) => (string) $r->product_id);
+        $ordered = collect(DB::select(
+            "SELECT d.product_id, SUM(d.quantity) AS quantity, MAX(p.name) AS name
+               FROM user_sales_order_details d
+               LEFT JOIN catalog_product p ON p.id = d.product_id
+              WHERE d.order_id = ?
+              GROUP BY d.product_id",
+            [$orderId]
+        ))->keyBy(fn ($r) => (string) $r->product_id);
+        $existing = DB::table('fullfillment_order_details')->where($key)->pluck('id', 'product_id');
+
+        $latest = DB::selectOne(
+            "SELECT c.ch_no, DATE(c.ch_date) AS ch_date
+               FROM challan_order_details d
+               JOIN challan_order c ON c.id = d.ch_id
+              WHERE d.order_id = ? AND c.dispatch_status <> 3
+              ORDER BY c.date_added DESC, c.id DESC LIMIT 1",
+            [$orderId]
+        );
+        if ($latest) {
+            DB::table('fullfillment_order')->updateOrInsert($key, $this->existingColumns('fullfillment_order', $head + [
+                'order_date'       => $latest->ch_date,
+                'invoice_number'   => (string) $latest->ch_no,
+                'invoice_date'     => $latest->ch_date,
+                'date_of_supply'   => $latest->ch_date,
+                'fullfilment_type' => 1,
+            ]));
+        }
+
+        foreach ($invoiced->keys()->merge($existing->keys())->unique() as $productId) {
+            $line   = $invoiced->get($productId);
+            $values = [
+                'product_fullfiment_qty'        => (int) round((float) ($line->qty ?? 0)),
+                'product_fullfiment_scheme_qty' => (string) (int) round((float) ($line->free_qty ?? 0)),
+                'product_value'                 => number_format((float) ($line->value ?? 0), 2, '.', ''),
+                'updated_at'                    => $now,
+            ];
+            if ($existing->has($productId)) {
+                DB::table('fullfillment_order_details')->where('id', $existing[$productId])->update($this->existingColumns('fullfillment_order_details', $values));
+                continue;
+            }
+            DB::table('fullfillment_order_details')->insert($this->existingColumns('fullfillment_order_details', $key + $values + [
+                'product_id'                      => $productId,
+                'product_name'                    => mb_substr((string) ($ordered[$productId]->name ?? ''), 0, 60),
+                'product_qty'                     => (int) round((float) ($ordered[$productId]->quantity ?? 0)),
+                'product_rate'                    => (string) $line->rate,
+                'mfg_date'                        => $line->mfg_date ?: null,
+                'batch_no'                        => '',
+                'product_fullfiment_scheme_cases' => '0',
+                'created_at'                      => $now,
+            ]));
+        }
+
+        DB::update(
+            "UPDATE user_sales_order SET flag_fullfillment = ?, updated_at = NOW() WHERE order_id = ? AND company_id = 213",
+            [(string) $order->order_status === '1' ? 2 : 1, $orderId]
+        );
+
+        if ($invoiceId === null) return;
+        $lines = DB::select(
+            "SELECT d.product_id, d.qty, d.taxable_amt, d.product_rate, d.batch_no, d.mfg_date, c.ch_no, DATE(c.ch_date) AS ch_date
+               FROM challan_order_details d
+               JOIN challan_order c ON c.id = d.ch_id
+              WHERE d.ch_id = ? AND d.order_id = ?",
+            [$invoiceId, $orderId]
+        );
+        if (!$lines || !$this->existingColumns('partial_fullfillment_order_logs', $key) || !$this->existingColumns('partial_fullfillment_order_details_logs', $key)) return;
+        DB::table('partial_fullfillment_order_logs')->insert($this->existingColumns('partial_fullfillment_order_logs', $key + $head + [
+            'order_date'     => $lines[0]->ch_date,
+            'invoice_number' => (string) $lines[0]->ch_no,
+            'invoice_date'   => $lines[0]->ch_date,
+            'date_of_supply' => $lines[0]->ch_date,
+            'image_name'     => '',
+        ]));
+        DB::table('partial_fullfillment_order_details_logs')->insert(array_map(fn ($l) => $this->existingColumns('partial_fullfillment_order_details_logs', $key + [
+            'product_id'             => (string) $l->product_id,
+            'product_name'           => mb_substr((string) ($ordered[(string) $l->product_id]->name ?? ''), 0, 60),
+            'product_qty'            => (int) round((float) ($ordered[(string) $l->product_id]->quantity ?? 0)),
+            'product_rate'           => (string) $l->product_rate,
+            'product_value'          => (string) $l->taxable_amt,
+            'product_fullfiment_qty' => (int) round((float) $l->qty),
+            'mfg_date'               => $l->mfg_date ?: null,
+            'batch_no'               => (string) $l->batch_no,
+            'created_at'             => $now,
+        ]), $lines));
+    }
+
+    protected function existingColumns(string $table, array $row): array
+    {
+        static $columns = [];
+        $columns[$table] ??= array_flip(Schema::getColumnListing($table));
+        return array_intersect_key($row, $columns[$table]);
     }
 
     protected function refreshOrderStatus(string $orderId, int $dealerId): void

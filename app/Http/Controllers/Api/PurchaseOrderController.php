@@ -43,9 +43,15 @@ class PurchaseOrderController extends Controller
 //         'meta'   => $result['meta'],
 //     ]);
 // }
+    private const BILLED = "COALESCE(po.challan_no, '') NOT IN ('', '0') OR COALESCE(po.invoice_no_p, '') NOT IN ('', '0')";
+
     private const AWAITING_BILLING = "(po.receive_date IS NULL OR po.receive_date LIKE '0000%')
-        AND COALESCE(po.challan_no, '') IN ('', '0')
-        AND EXISTS (SELECT 1 FROM demand_order d WHERE d.order_id = po.order_id)";
+        AND NOT (" . self::BILLED . ")
+        AND (COALESCE(po.order_no_erp, '') NOT IN ('', '0') OR EXISTS (SELECT 1 FROM demand_order d WHERE d.order_id = po.order_id))";
+
+    private const ERP_BILL = "COALESCE(po.invoice_no_p, '') NOT IN ('', '0')";
+
+    private const BILLED_LINE = "(COALESCE(pod.item_code, '') NOT IN ('', '0') OR CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) > 0)";
 
     public function index(Request $request)
     {
@@ -59,22 +65,29 @@ class PurchaseOrderController extends Controller
             $where[] = "po.order_id = ?";
             $bind[]  = $request->input('order_no');
         }
-        if ($request->filled('from_date')) {
-            $where[] = "DATE_FORMAT(po.order_date, '%Y-%m-%d') >= ?";
-            $bind[]  = $this->parseDate($request->input('from_date'));
-        }
-        if ($request->filled('to_date')) {
-            $where[] = "DATE_FORMAT(po.order_date, '%Y-%m-%d') <= ?";
-            $bind[]  = $this->parseDate($request->input('to_date'));
+        $from = $request->filled('from_date') ? $this->parseDate($request->input('from_date')) : null;
+        $to   = $request->filled('to_date') ? $this->parseDate($request->input('to_date')) : null;
+        if ($from || $to) {
+            $range = [];
+            foreach (['po.order_date', 'po.sale_date', 'po.invoice_date'] as $col) {
+                $range[] = '(' . implode(' AND ', array_filter([$from ? "$col >= ?" : null, $to ? "$col < ?" : null])) . ')';
+                if ($from) $bind[] = $from;
+                if ($to)   $bind[] = date('Y-m-d', strtotime($to . ' +1 day'));
+            }
+            $where[] = '(' . implode(' OR ', $range) . ')';
         }
 
         $sql = "SELECT po.auto, po.id, po.order_id, po.order_no_erp,
-                       po.order_date, po.receive_date, po.sale_date,
+                       COALESCE(po.order_date, po.sale_date) AS order_date, po.receive_date, po.sale_date,
                        po.ch_date, po.challan_no, po.firm_name,
                        po.dealer_id, po.company_id, po.created_date,
+                       COALESCE(NULLIF(NULLIF(po.invoice_no_p, ''), '0'), NULLIF(po.challan_no, '0')) AS bill_no,
+                       COALESCE(po.invoice_date, po.ch_date, DATE(po.dispatch_date)) AS bill_date,
                        c.csa_name,
                        COALESCE(c.csa_name, po.firm_name) AS csa_name_display,
-                       (SELECT SUM(CAST(pod.total_amount AS DECIMAL(12,2)))
+                       (SELECT CASE WHEN " . self::ERP_BILL . "
+                                    THEN SUM(CASE WHEN " . self::BILLED_LINE . " THEN CAST(COALESCE(NULLIF(pod.inv_busy_amt, ''), 0) AS DECIMAL(12,2)) ELSE 0 END)
+                                    ELSE SUM(CAST(pod.total_amount AS DECIMAL(12,2))) END
                           FROM purchase_order_details pod
                          WHERE pod.order_id = po.id) AS total_purchase_amount
                   FROM purchase_order po
@@ -102,7 +115,10 @@ class PurchaseOrderController extends Controller
         $dealerId = $user->dealer_id;
 
         $header = DB::selectOne(
-            "SELECT po.*, c.csa_name
+            "SELECT po.*, c.csa_name,
+                    (" . self::ERP_BILL . ") AS is_billed,
+                    COALESCE(NULLIF(NULLIF(po.invoice_no_p, ''), '0'), NULLIF(po.challan_no, '0')) AS bill_no,
+                    COALESCE(po.invoice_date, po.ch_date, DATE(po.dispatch_date)) AS bill_date
                FROM purchase_order po
                LEFT JOIN csa c ON c.c_id = po.csa_id
               WHERE (po.auto = ? OR po.id = ?) AND po.dealer_id = ?
@@ -115,6 +131,10 @@ class PurchaseOrderController extends Controller
         }
         $items = DB::select(
     "SELECT pod.*,
+            " . self::BILLED_LINE . " AS billed,
+            CASE WHEN COALESCE(pod.item_code, '') NOT IN ('', '0') THEN pod.quantity
+                 ELSE CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) END AS bill_qty,
+            CASE WHEN CAST(COALESCE(NULLIF(pod.inv_busy_rate, ''), 0) AS DECIMAL(12,3)) > 0 THEN pod.inv_busy_rate ELSE pod.rate END AS bill_rate,
             cp.name              AS product_name,
             cp.itemcode          AS itemcode,
             cp.hsn_code          AS hsn_code,
@@ -384,13 +404,17 @@ class PurchaseOrderController extends Controller
         ]);
 
         $details = collect(DB::select(
-            "SELECT * FROM purchase_order_details WHERE order_id = ?",
+            "SELECT pod.*, " . self::BILLED_LINE . " AS billed FROM purchase_order_details pod WHERE pod.order_id = ?",
             [(string) $po->id]
         ))->keyBy('auto');
+        $erpBilled = (bool) DB::selectOne("SELECT 1 FROM purchase_order po WHERE po.auto = ? AND " . self::ERP_BILL, [(int) $po->auto]);
 
         foreach ($validated['items'] as $row) {
             if (!$details->has($row['detail_auto'])) {
                 return response()->json(['status' => false, 'message' => 'Order line not found.'], 422);
+            }
+            if ($erpBilled && !(int) $details[$row['detail_auto']]->billed && (float) $row['qty'] + (float) ($row['free_qty'] ?? 0) > 0) {
+                return response()->json(['status' => false, 'message' => 'A product that was not billed on this invoice cannot be received.'], 422);
             }
         }
 

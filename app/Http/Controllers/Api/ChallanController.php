@@ -474,6 +474,7 @@ class ChallanController extends Controller
             foreach ($invoicedByOrder as $sfaOrderId => $invoiced) {
                 app(InvoiceService::class)->fulfilSalesOrder($dealerId, (string) $sfaOrderId, $invoiced);
             }
+            app(InvoiceService::class)->syncFulfillment(array_keys($invoicedByOrder), (string) $chId);
 
             DB::commit();
 

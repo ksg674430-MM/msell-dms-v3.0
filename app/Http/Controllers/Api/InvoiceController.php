@@ -427,6 +427,7 @@ class InvoiceController extends Controller
 
             DB::table('challan_order_details')->where('ch_id', $id)->delete();
             DB::table('challan_order_details')->insert($lines);
+            $invoiceService->syncFulfillment(array_merge(array_column($oldItems, 'order_id'), array_column($lines, 'order_id')));
 
             $subTotal    = round($totalTaxable + $totalVat, 2);
             $discountPer = (float) ($validated['discount_per'] ?? $invoice->discount_per ?? 0);
@@ -492,10 +493,8 @@ class InvoiceController extends Controller
         try {
         DB::transaction(function () use ($id, $invoice, $user, $reason, $dealerId) {
 
-            app(InvoiceService::class)->reopenSalesOrders(
-                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]),
-                $dealerId
-            );
+            $sfaLines = DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]);
+            app(InvoiceService::class)->reopenSalesOrders($sfaLines, $dealerId);
             app(StockService::class)->sync(
                 $dealerId,
                 DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp FROM challan_order_details WHERE ch_id = ?", [$id]),
@@ -509,6 +508,7 @@ class InvoiceController extends Controller
                 DB::table('challan_order_details_cancel')->insert($data);
             }
             DB::table('challan_order_details')->where('ch_id', $id)->delete();
+            app(InvoiceService::class)->syncFulfillment(array_column($sfaLines, 'order_id'));
 
             $headerRow = DB::selectOne(
                 "SELECT * FROM challan_order WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
@@ -574,10 +574,8 @@ class InvoiceController extends Controller
         try {
         DB::transaction(function () use ($id, $invoice, $user, $dealerId) {
 
-            app(InvoiceService::class)->reopenSalesOrders(
-                DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]),
-                $dealerId
-            );
+            $sfaLines = DB::select("SELECT order_id, product_id, qty FROM challan_order_details WHERE ch_id = ?", [$id]);
+            app(InvoiceService::class)->reopenSalesOrders($sfaLines, $dealerId);
             app(StockService::class)->sync(
                 $dealerId,
                 DB::select("SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp FROM challan_order_details WHERE ch_id = ?", [$id]),
@@ -591,6 +589,7 @@ class InvoiceController extends Controller
                 DB::table('challan_order_details_cancel')->insert($data);
             }
             DB::table('challan_order_details')->where('ch_id', $id)->delete();
+            app(InvoiceService::class)->syncFulfillment(array_column($sfaLines, 'order_id'));
 
             $headerRow = DB::selectOne(
                 "SELECT * FROM challan_order WHERE id = ? AND ch_dealer_id = ? LIMIT 1",
