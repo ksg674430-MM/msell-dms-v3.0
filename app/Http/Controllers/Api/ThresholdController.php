@@ -266,7 +266,7 @@ class ThresholdController extends Controller
             "SELECT cp.id, cp.name, MAX(COALESCE(g.igst, 0)) AS gst
                FROM catalog_product cp
                LEFT JOIN _gst g ON g.hsn_code = cp.hsn_code
-              WHERE cp.company_id = ?
+              WHERE cp.company_id = ? AND cp.status = 1
               GROUP BY cp.id, cp.name
               ORDER BY cp.id",
             [$companyId]

@@ -325,6 +325,21 @@ class StockService
         );
     }
 
+    public function latestBatch(int $dealerId, int $productId, ?float $mrp = null): array
+    {
+        $sql = "SELECT batch_no, IF(mfg < '1971-01-01', NULL, DATE_FORMAT(mfg, '%Y-%m-%d')) AS mfg
+                  FROM stock
+                 WHERE dealer_id = ? AND product_id = ? AND batch_no IS NOT NULL AND batch_no NOT IN ('', '0')";
+        $bindings = [$dealerId, $productId];
+        if ($mrp !== null) {
+            $sql .= " AND ABS(mrp - ?) < 0.001";
+            $bindings[] = $mrp;
+        }
+        $row = DB::selectOne($sql . " ORDER BY qty > 0 DESC, mfg DESC, id DESC LIMIT 1", $bindings);
+
+        return ['batch_no' => (string) ($row->batch_no ?? ''), 'mfg_date' => (string) ($row->mfg ?? '')];
+    }
+
     public function totalsByProduct(int $dealerId): array
     {
         return DB::table('stock')

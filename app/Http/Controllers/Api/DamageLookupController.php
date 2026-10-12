@@ -172,11 +172,15 @@ class DamageLookupController extends Controller
         $beforeGst = round($row->raw_rate - ($row->raw_rate * (100 / (100 + (float) $row->igst))), 3);
         $netRate   = round($row->raw_rate - $beforeGst, 2);
 
+        $batch = app(StockService::class)->latestBatch($dealerId, $id, $mrp !== null && $mrp !== '' ? (float) $mrp : null);
+
         return response()->json(['data' => [
             'product_id' => $id,
             'qty'        => $qty,
             'igst'       => $row->igst,
             'rate'       => $netRate,
+            'batch_no'   => $batch['batch_no'],
+            'mfg_date'   => $batch['mfg_date'],
         ]]);
     }
 

@@ -345,10 +345,17 @@ class QuickOrderController extends Controller
         }
 
         $order_no = $request->order_no;
+        $extra = [
+            'dl.name as distributor_name',
+            DB::raw('SUM(demand_order_details.quantity) as total_qty'),
+            DB::raw('ROUND(SUM(demand_order_details.total_rs * COALESCE(cp.gst_percent, 0) / 100), 2) as tax_value'),
+        ];
         $div_code = $this->resolveDivCode($dealer_id, $dealer_code);
 
         $baseQ = DB::table('demand_order')
             ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+            ->leftJoin('catalog_product as cp', 'cp.id', '=', 'demand_order_details.product_id')
+            ->leftJoin('dealer as dl', 'dl.id', '=', 'demand_order.dealer_id')
             ->where('demand_order.company_id', $company_id)
             ->whereDate('demand_order.order_date', '>=', $from_date)
             ->whereDate('demand_order.order_date', '<=', $to_date)
@@ -370,6 +377,7 @@ class QuickOrderController extends Controller
                         'demand_order.order_id as porder_id',
                         DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
                     )
+                    ->addSelect($extra)
                     ->where('demand_order.dealer_id', $dealer_id)
                     ->orderBy('demand_order.order_date', 'DESC')
                     ->get()->toArray();
@@ -382,6 +390,7 @@ class QuickOrderController extends Controller
                         'dealer.*',
                         DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
                     )
+                    ->addSelect($extra)
                     ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
                     ->where('sale_div_code', $div_code)
                     ->orderBy('demand_order.order_date', 'DESC')
@@ -395,6 +404,7 @@ class QuickOrderController extends Controller
                     'demand_order.order_id as porder_id',
                     DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
                 )
+                ->addSelect($extra)
                 ->where(fn ($q) => $q->where('demand_order.dealer_id', $dealer_id)->orWhere('demand_order.created_person_id', $dealer_id))
                 ->orderBy('demand_order.order_date', 'DESC')
                 ->get()->toArray();
@@ -403,6 +413,8 @@ class QuickOrderController extends Controller
         if ($dealer_id != 1170 && $role_id == 37) {
             $depoQ = DB::table('demand_order')
                 ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+                ->leftJoin('catalog_product as cp', 'cp.id', '=', 'demand_order_details.product_id')
+                ->leftJoin('dealer as dl', 'dl.id', '=', 'demand_order.dealer_id')
                 ->where('demand_order.company_id', $company_id)
                 ->whereDate('demand_order.order_date', '>=', $from_date)
                 ->whereDate('demand_order.order_date', '<=', $to_date)
@@ -423,6 +435,7 @@ class QuickOrderController extends Controller
                     'dealer.*',
                     DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
                 )
+                ->addSelect($extra)
                 ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
                 ->where('dealer_id', $dealer_id)
                 ->orderBy('demand_order.order_date', 'DESC')
@@ -442,6 +455,8 @@ class QuickOrderController extends Controller
         if ($role_id == 1) {
             $adminQ = DB::table('demand_order')
                 ->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')
+                ->leftJoin('catalog_product as cp', 'cp.id', '=', 'demand_order_details.product_id')
+                ->leftJoin('dealer as dl', 'dl.id', '=', 'demand_order.dealer_id')
                 ->whereDate('demand_order.order_date', '>=', $from_date)
                 ->whereDate('demand_order.order_date', '<=', $to_date)
                 ->groupBy('demand_order.id');
@@ -453,6 +468,7 @@ class QuickOrderController extends Controller
                 'dealer.*',
                 DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value")
             )
+                ->addSelect($extra)
                 ->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')
                 ->where('demand_order.company_id', $company_id);
 
