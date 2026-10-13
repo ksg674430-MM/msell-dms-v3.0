@@ -70,6 +70,131 @@ class DbExportService
         });
     }
 
+    public function objects(): array
+    {
+        $database = $this->database();
+
+        return Cache::remember('db-export:objects:' . $database, max(0, (int) config('db-export.list_cache_seconds', 300)), function () use ($database) {
+            $known = [];
+            foreach ($this->tables() as $table) {
+                $known[strtolower($table['name'])] = $table['name'];
+            }
+            $viewRows = DB::select(
+                'SELECT TABLE_NAME AS name, IS_UPDATABLE AS updatable, VIEW_DEFINITION AS body FROM information_schema.VIEWS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME',
+                [$database]
+            );
+            foreach ($viewRows as $row) {
+                $known[strtolower((string) $row->name)] = (string) $row->name;
+            }
+            $views = [];
+            foreach ($viewRows as $row) {
+                preg_match_all('/`([^`]+)`/', (string) $row->body, $m);
+                $uses = [];
+                foreach (array_unique(array_map('strtolower', $m[1])) as $ref) {
+                    if (isset($known[$ref]) && $ref !== strtolower((string) $row->name)) {
+                        $uses[] = $known[$ref];
+                    }
+                }
+                sort($uses);
+                $views[] = ['name' => (string) $row->name, 'updatable' => $row->updatable === 'YES', 'uses' => $uses];
+            }
+
+            $triggers = array_map(function ($row) {
+                return [
+                    'name' => (string) $row->name,
+                    'table' => (string) $row->tbl,
+                    'timing' => (string) $row->timing,
+                    'event' => (string) $row->event,
+                    'created' => $row->created_at ? substr((string) $row->created_at, 0, 19) : '',
+                ];
+            }, DB::select(
+                'SELECT TRIGGER_NAME AS name, EVENT_OBJECT_TABLE AS tbl, ACTION_TIMING AS timing, EVENT_MANIPULATION AS event, CREATED AS created_at
+                   FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER',
+                [$database]
+            ));
+
+            $params = [];
+            foreach (DB::select(
+                'SELECT ROUTINE_TYPE AS type, SPECIFIC_NAME AS name, PARAMETER_MODE AS param_mode, PARAMETER_NAME AS param, DTD_IDENTIFIER AS dtd
+                   FROM information_schema.PARAMETERS WHERE SPECIFIC_SCHEMA = ? AND ORDINAL_POSITION > 0 ORDER BY SPECIFIC_NAME, ORDINAL_POSITION',
+                [$database]
+            ) as $row) {
+                $params[$row->type . ':' . $row->name][] = trim(($row->type === 'PROCEDURE' ? $row->param_mode . ' ' : '') . $row->param . ' ' . $row->dtd);
+            }
+            $routines = array_map(function ($row) use ($params) {
+                $key = $row->type . ':' . $row->name;
+                return [
+                    'key' => $key,
+                    'name' => (string) $row->name,
+                    'type' => (string) $row->type,
+                    'params' => implode(', ', $params[$key] ?? []),
+                    'returns' => (string) $row->return_type,
+                    'deterministic' => $row->is_deterministic === 'YES',
+                    'access' => str_replace('_', ' ', (string) $row->data_access),
+                    'created' => substr((string) $row->created_at, 0, 19),
+                    'modified' => substr((string) $row->altered_at, 0, 19),
+                    'comment' => (string) $row->note,
+                ];
+            }, DB::select(
+                "SELECT ROUTINE_TYPE AS type, ROUTINE_NAME AS name, COALESCE(DTD_IDENTIFIER, '') AS return_type, IS_DETERMINISTIC AS is_deterministic, SQL_DATA_ACCESS AS data_access,
+                        CREATED AS created_at, LAST_ALTERED AS altered_at, ROUTINE_COMMENT AS note
+                   FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_TYPE, ROUTINE_NAME",
+                [$database]
+            ));
+
+            return ['views' => $views, 'triggers' => $triggers, 'routines' => $routines];
+        });
+    }
+
+    public function resolveObjects(array $views, array $triggers, array $routines, array $tables): array
+    {
+        $objects = $this->objects();
+        $pick = function (array $list, array $wanted, string $key) {
+            $wanted = array_flip(array_map('strval', $wanted));
+            return array_values(array_filter($list, function ($item) use ($wanted, $key) {
+                return isset($wanted[$item[$key]]);
+            }));
+        };
+        $resolved = [
+            'views' => array_column($pick($objects['views'], $views, 'name'), 'name'),
+            'triggers' => $pick($objects['triggers'], $triggers, 'name'),
+            'routines' => array_map(function ($r) {
+                return ['type' => $r['type'], 'name' => $r['name']];
+            }, $pick($objects['routines'], $routines, 'key')),
+        ];
+        $tableSet = array_flip($tables);
+        $missing = [];
+        foreach ($resolved['triggers'] as $trigger) {
+            if (!isset($tableSet[$trigger['table']])) {
+                $missing[$trigger['table']] = true;
+            }
+        }
+        if ($missing) {
+            throw new RuntimeException('Triggers can only be created on their tables. Also select: ' . implode(', ', array_keys($missing)) . '.');
+        }
+        $resolved['triggers'] = array_column($resolved['triggers'], 'name');
+
+        return $resolved;
+    }
+
+    public function definition(string $type, string $name): ?string
+    {
+        $objects = $this->objects();
+        if ($type === 'TRIGGER') {
+            $found = in_array($name, array_column($objects['triggers'], 'name'), true);
+        } elseif (in_array($type, ['PROCEDURE', 'FUNCTION'], true)) {
+            $found = in_array($type . ':' . $name, array_column($objects['routines'], 'key'), true);
+        } else {
+            $found = false;
+        }
+        if (!$found) {
+            return null;
+        }
+        $row = (array) DB::selectOne('SHOW CREATE ' . $type . ' ' . self::quote($name));
+
+        return (string) ($row[$type === 'TRIGGER' ? 'SQL Original Statement' : 'Create ' . ucfirst(strtolower($type))] ?? '');
+    }
+
     public function limits(): array
     {
         return [
@@ -87,9 +212,6 @@ class DbExportService
             if (isset($wanted[$table['name']])) {
                 $tables[] = $table['name'];
             }
-        }
-        if ($tables === []) {
-            throw new RuntimeException('Select at least one table.');
         }
 
         return $tables;
@@ -113,7 +235,7 @@ class DbExportService
         return ['bytes' => $bytes, 'rows' => $rows];
     }
 
-    public function stream(array $tables, bool $withData, callable $write, ?callable $progress = null): void
+    public function stream(array $tables, bool $withData, callable $write, ?callable $progress = null, array $objects = []): void
     {
         $capped = [];
         foreach ($this->tables() as $table) {
@@ -135,6 +257,15 @@ class DbExportService
                 $progress($table, 0, true);
             }
             $write("\n");
+        }
+        foreach ($objects['routines'] ?? [] as $routine) {
+            $this->writeObject($routine['type'], $routine['name'], $write, $progress);
+        }
+        foreach ($objects['triggers'] ?? [] as $trigger) {
+            $this->writeObject('TRIGGER', $trigger, $write, $progress);
+        }
+        foreach ($this->viewOrder($objects['views'] ?? []) as $view) {
+            $this->writeObject('VIEW', $view, $write, $progress);
         }
         $write("SET SQL_MODE = @OLD_SQL_MODE;\nSET FOREIGN_KEY_CHECKS = @OLD_FOREIGN_KEY_CHECKS;\n");
     }
@@ -215,6 +346,58 @@ class DbExportService
             }
         } finally {
             $pdo->setAttribute($buffered, true);
+        }
+    }
+
+    private function viewOrder(array $views): array
+    {
+        $uses = [];
+        foreach ($this->objects()['views'] as $view) {
+            $uses[$view['name']] = $view['uses'];
+        }
+        $wanted = array_flip($views);
+        $ordered = [];
+        $visit = function (string $name, array $path) use (&$visit, &$ordered, $uses, $wanted) {
+            if (isset($ordered[$name]) || isset($path[$name])) {
+                return;
+            }
+            foreach ($uses[$name] ?? [] as $dep) {
+                if (isset($wanted[$dep])) {
+                    $visit($dep, $path + [$name => true]);
+                }
+            }
+            $ordered[$name] = true;
+        };
+        foreach ($views as $view) {
+            $visit($view, []);
+        }
+
+        return array_keys($ordered);
+    }
+
+    private function writeObject(string $type, string $name, callable $write, ?callable $progress): void
+    {
+        $row = (array) DB::selectOne('SHOW CREATE ' . $type . ' ' . self::quote($name));
+        $column = $type === 'TRIGGER' ? 'SQL Original Statement' : 'Create ' . ucfirst(strtolower($type));
+        $sql = trim((string) ($row[$column] ?? ''));
+        $label = strtolower($type) . ' ' . self::quote($name);
+        if ($sql === '') {
+            $write('-- Skipped ' . $label . ": the database user cannot read its definition.\n\n");
+        } else {
+            $sql = preg_replace('/\sDEFINER\s*=\s*(`[^`]*`|\'[^\']*\'|[^\s@]+)@(`[^`]*`|\'[^\']*\'|\S+)/i', '', $sql, 1);
+            $out = 'DROP ' . $type . ' IF EXISTS ' . self::quote($name) . ";\n";
+            if ($type === 'VIEW') {
+                $out .= $sql . ";\n\n";
+            } else {
+                $mode = implode(',', array_filter(explode(',', (string) ($row['sql_mode'] ?? '')), function ($m) {
+                    return !in_array($m, ['NO_AUTO_CREATE_USER', ''], true);
+                }));
+                $out .= "SET SESSION SQL_MODE = '" . $mode . "';\nDELIMITER ;;\n" . $sql . ";;\nDELIMITER ;\n\n";
+            }
+            $write($out);
+        }
+        if ($progress !== null) {
+            $progress($label, 0, true);
         }
     }
 

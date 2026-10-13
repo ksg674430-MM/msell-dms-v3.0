@@ -81,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::get('/dev/db-export', [DbExportController::class, 'access']);
 Route::get('/dev/db-export/tables', [DbExportController::class, 'tables']);
+Route::get('/dev/db-export/definition', [DbExportController::class, 'definition']);
 Route::post('/dev/db-export', [DbExportController::class, 'prepare'])->middleware('throttle:20,60');
 Route::get('/dev/db-export/progress/{id}', [DbExportController::class, 'progress']);
 

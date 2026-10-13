@@ -28,7 +28,25 @@ class DbExportController extends Controller
     {
         abort_unless(DbExportService::allowed($request->user()), 404);
 
-        return response()->json(['status' => true, 'database' => $export->database(), 'tables' => $export->tables()] + $export->limits());
+        return response()->json(['status' => true, 'database' => $export->database(), 'tables' => $export->tables(), 'objects' => $export->objects()] + $export->limits());
+    }
+
+    public function definition(Request $request, DbExportService $export): JsonResponse
+    {
+        abort_unless(DbExportService::allowed($request->user()), 404);
+        $validated = $request->validate([
+            'type' => ['required', 'in:TRIGGER,PROCEDURE,FUNCTION'],
+            'name' => ['required', 'string', 'max:64'],
+        ]);
+        $sql = $export->definition($validated['type'], $validated['name']);
+        if ($sql === null) {
+            return response()->json(['status' => false, 'message' => 'Not found.'], 404);
+        }
+        if ($sql === '') {
+            return response()->json(['status' => false, 'message' => 'The database user of this app is not allowed to read this definition.'], 422);
+        }
+
+        return response()->json(['status' => true, 'sql' => $sql]);
     }
 
     public function prepare(Request $request, DbExportService $export): JsonResponse
@@ -36,14 +54,25 @@ class DbExportController extends Controller
         $user = $request->user();
         abort_unless(DbExportService::allowed($user), 404);
         $validated = $request->validate([
-            'tables' => ['required', 'array', 'min:1'],
+            'tables' => ['nullable', 'array'],
             'tables.*' => ['string', 'max:64'],
+            'views' => ['nullable', 'array'],
+            'views.*' => ['string', 'max:64'],
+            'triggers' => ['nullable', 'array'],
+            'triggers.*' => ['string', 'max:64'],
+            'routines' => ['nullable', 'array'],
+            'routines.*' => ['string', 'max:80'],
             'mode' => ['required', 'in:data,schema'],
         ]);
+        $tables = $export->resolve($validated['tables'] ?? []);
         try {
-            $tables = $export->resolve($validated['tables']);
+            $objects = $export->resolveObjects($validated['views'] ?? [], $validated['triggers'] ?? [], $validated['routines'] ?? [], $tables);
         } catch (RuntimeException $e) {
             return response()->json(['status' => false, 'message' => $e->getMessage()], 422);
+        }
+        $objectCount = count($objects['views']) + count($objects['triggers']) + count($objects['routines']);
+        if ($tables === [] && $objectCount === 0) {
+            return response()->json(['status' => false, 'message' => 'Select at least one table, view, trigger or routine.'], 422);
         }
         $withData = $validated['mode'] === 'data';
         $estimate = $export->estimate($tables, $withData);
@@ -56,9 +85,9 @@ class DbExportController extends Controller
         }
 
         $id = Str::random(40);
-        Cache::put('db-export:' . $id, ['user' => $user->getKey(), 'tables' => $tables, 'data' => $withData, 'rows' => $estimate['rows']], now()->addMinutes(2));
+        Cache::put('db-export:' . $id, ['user' => $user->getKey(), 'tables' => $tables, 'objects' => $objects, 'data' => $withData, 'rows' => $estimate['rows']], now()->addMinutes(2));
         Cache::put('db-export-progress:' . $id, ['user' => $user->getKey(), 'percent' => 0, 'table' => null, 'done' => false, 'error' => null], now()->addHours(2));
-        Log::info('db-export prepared', ['user' => $user->uname ?? $user->getKey(), 'database' => $export->database(), 'tables' => count($tables), 'mode' => $validated['mode'], 'ip' => $request->ip()]);
+        Log::info('db-export prepared', ['user' => $user->uname ?? $user->getKey(), 'database' => $export->database(), 'tables' => count($tables), 'objects' => $objectCount, 'mode' => $validated['mode'], 'ip' => $request->ip()]);
 
         return response()->json([
             'status' => true,
@@ -94,7 +123,8 @@ class DbExportController extends Controller
             $key = 'db-export-progress:' . $id;
             $limit = (int) config('db-export.max_bytes');
             $totalRows = max(0, (int) $job['rows']);
-            $totalTables = max(1, count($job['tables']));
+            $objects = $job['objects'] ?? [];
+            $totalTables = max(1, count($job['tables']) + count($objects['views'] ?? []) + count($objects['triggers'] ?? []) + count($objects['routines'] ?? []));
             $state = ['rows' => 0, 'tables' => 0, 'bytes' => 0, 'saved' => 0.0];
             $save = function (array $values) use ($key, $job): void {
                 Cache::put($key, ['user' => $job['user']] + $values, now()->addHours(2));
@@ -123,7 +153,7 @@ class DbExportController extends Controller
                 flush();
             };
             try {
-                $export->stream($job['tables'], (bool) $job['data'], $write, $progress);
+                $export->stream($job['tables'], (bool) $job['data'], $write, $progress, $objects);
             } catch (Throwable $e) {
                 report($e);
                 $save(['percent' => 0, 'table' => null, 'done' => true, 'error' => $e instanceof RuntimeException ? $e->getMessage() : 'The download failed. Try again with fewer tables.']);
