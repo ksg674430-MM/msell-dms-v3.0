@@ -39,9 +39,12 @@ class Gstr1Controller extends Controller
         $data = $this->gstr1->generate($dealer, $from, $to);
         if ($data['seller']['state'] === '') return $this->fail('Distributor GSTIN and state are missing, so place of supply cannot be determined.');
 
+        $template = storage_path('app/template/gstr1_template.xlsx');
+        if (!is_file($template)) return $this->fail('GSTR-1 template file is missing on the server.');
+
         ini_set('memory_limit', '512M');
         set_time_limit(120);
-        $book = IOFactory::load(resource_path('templates/gstr1_template.xlsx'));
+        $book = IOFactory::load($template);
         $date = fn ($dmy) => \DateTime::createFromFormat('d-m-Y', $dmy)->format('d-M-Y');
         $sheets = [
             'b2b,sez,de' => array_map(fn ($r) => [$r['gstin'], $r['name'], $r['invoice_no'], $date($r['date']), $r['value'], $r['pos'], 'N', '', 'Regular B2B', '', $r['rate'], $r['taxable'], 0], $data['b2b']),
