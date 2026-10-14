@@ -39,7 +39,7 @@ class Gstr1Controller extends Controller
         $data = $this->gstr1->generate($dealer, $from, $to);
         if ($data['seller']['state'] === '') return $this->fail('Distributor GSTIN and state are missing, so place of supply cannot be determined.');
 
-        $template = storage_path('app/template/gstr1_template.xlsx');
+        $template = storage_path('app/templates/gstr1_template.xlsx');
         if (!is_file($template)) return $this->fail('GSTR-1 template file is missing on the server.');
 
         ini_set('memory_limit', '512M');
