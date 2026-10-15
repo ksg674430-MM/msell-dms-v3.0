@@ -214,6 +214,13 @@ class StockService
         ]);
     }
 
+    public function unreceive(int $dealerId, int $productId, string $batchNo, string $mfg, float $mrp, float $qty, float $nonsalableDamage = 0): void
+    {
+        $row = $this->locate($dealerId, $productId, $batchNo, $mfg, $mrp);
+        $this->decrement($row, 'qty', $qty, $this->shortage($productId, '', $batchNo, $mrp, $qty, (float) ($row->qty ?? 0)));
+        $this->decrement($row, 'nonsalable_damage', $nonsalableDamage, $this->shortage($productId, '', $batchNo, $mrp, $nonsalableDamage, (float) ($row->nonsalable_damage ?? 0), 'Non-salable stock'));
+    }
+
     public function takeFifo(int $dealerId, int $productId, float $qty, string $productName = ''): void
     {
         if ($qty <= 0) return;

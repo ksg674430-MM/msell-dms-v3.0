@@ -338,6 +338,26 @@ class OpeningStockController extends Controller
         // ]);
     // }
 
+    public function delete(Request $request, int $id): JsonResponse
+    {
+        $dealerId = (int) $request->user()->dealer_id;
+
+        return DB::transaction(function () use ($id, $dealerId) {
+            $row = DB::selectOne("SELECT * FROM opening_stocks WHERE id = ? AND dealer_id = ? LIMIT 1 FOR UPDATE", [$id, $dealerId]);
+            if (!$row) {
+                return response()->json(['status' => false, 'message' => 'Opening stock record not found.'], 404);
+            }
+
+            app(StockService::class)->unreceive(
+                $dealerId, (int) $row->product_id, (string) $row->batch_no, (string) $row->mfg,
+                (float) $row->mrp, (float) $row->qty, (float) $row->nonsalable_damage
+            );
+            DB::delete("DELETE FROM opening_stocks WHERE id = ? AND dealer_id = ?", [$id, $dealerId]);
+
+            return response()->json(['status' => true, 'message' => 'Opening stock deleted.']);
+        });
+    }
+
     /**
      * GET /api/opening-stocks/products
      * Dropdown source for the "New" form.

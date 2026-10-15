@@ -218,6 +218,7 @@ Route::prefix('dms-reports')->group(function () {
     Route::get   ('/opening-stocks',          [OpeningStockController::class, 'index']);    // opening stock list
     // Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);     // detail
     Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);    // add opening stock
+    Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'delete'])->whereNumber('id');
     // Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);   // edit
     // Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
     // Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
