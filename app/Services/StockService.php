@@ -310,7 +310,12 @@ class StockService
 
     public function deleteRow(int $dealerId, int $id): void
     {
-        DB::delete("DELETE FROM stock WHERE id = ? AND dealer_id = ?", [$id, $dealerId]);
+        $this->deleteRows($dealerId, [$id]);
+    }
+
+    public function deleteRows(int $dealerId, array $ids): int
+    {
+        return DB::table('stock')->where('dealer_id', $dealerId)->whereIn('id', $ids)->delete();
     }
 
     public function locate(int $dealerId, int $productId, string $batchNo, ?string $mfg, float $mrp): ?object

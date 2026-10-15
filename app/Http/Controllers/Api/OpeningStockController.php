@@ -340,21 +340,37 @@ class OpeningStockController extends Controller
 
     public function delete(Request $request, int $id): JsonResponse
     {
-        $dealerId = (int) $request->user()->dealer_id;
+        return $this->deleteRows((int) $request->user()->dealer_id, [$id]);
+    }
 
-        return DB::transaction(function () use ($id, $dealerId) {
-            $row = DB::selectOne("SELECT * FROM opening_stocks WHERE id = ? AND dealer_id = ? LIMIT 1 FOR UPDATE", [$id, $dealerId]);
-            if (!$row) {
+    public function deleteMany(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids'   => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer'],
+        ]);
+
+        return $this->deleteRows((int) $request->user()->dealer_id, $data['ids']);
+    }
+
+    private function deleteRows(int $dealerId, array $ids): JsonResponse
+    {
+        return DB::transaction(function () use ($ids, $dealerId) {
+            $rows = DB::table('opening_stocks')->where('dealer_id', $dealerId)->whereIn('id', $ids)->lockForUpdate()->get();
+            if ($rows->isEmpty()) {
                 return response()->json(['status' => false, 'message' => 'Opening stock record not found.'], 404);
             }
 
-            app(StockService::class)->unreceive(
-                $dealerId, (int) $row->product_id, (string) $row->batch_no, (string) $row->mfg,
-                (float) $row->mrp, (float) $row->qty, (float) $row->nonsalable_damage
-            );
-            DB::delete("DELETE FROM opening_stocks WHERE id = ? AND dealer_id = ?", [$id, $dealerId]);
+            foreach ($rows as $row) {
+                app(StockService::class)->unreceive(
+                    $dealerId, (int) $row->product_id, (string) $row->batch_no, (string) $row->mfg,
+                    (float) $row->mrp, (float) $row->qty, (float) $row->nonsalable_damage
+                );
+            }
+            DB::table('opening_stocks')->where('dealer_id', $dealerId)->whereIn('id', $rows->pluck('id'))->delete();
 
-            return response()->json(['status' => true, 'message' => 'Opening stock deleted.']);
+            $count = $rows->count();
+            return response()->json(['status' => true, 'message' => $count === 1 ? 'Opening stock deleted.' : "{$count} opening stock entries deleted."]);
         });
     }
 

@@ -387,6 +387,30 @@ class BalanceStockController extends Controller
     ]);
 }
 
+    public function destroyMany(Request $request): JsonResponse
+{
+    $user = $request->user();
+
+    if ((int) ($user->company_id ?? 0) === 44) {
+        return response()->json(['status' => false, 'message' => 'Delete not allowed.'], 403);
+    }
+
+    $data = $request->validate([
+        'ids'   => ['required', 'array', 'min:1'],
+        'ids.*' => ['integer'],
+    ]);
+
+    $count = DB::transaction(fn () => app(StockService::class)->deleteRows((int) $user->dealer_id, $data['ids']));
+    if (!$count) {
+        return response()->json(['status' => false, 'message' => 'Stock row not found.'], 404);
+    }
+
+    return response()->json([
+        'status'  => true,
+        'message' => "{$count} stock rows deleted.",
+    ]);
+}
+
    public function bulkUpdate(Request $request): JsonResponse
 {
     $user      = $request->user();
