@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Support\GstState;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class DamageInvoiceService
@@ -313,11 +314,7 @@ class DamageInvoiceService
         if (self::companyId($user) === 213 || $forSelfRetailer === 0) {
             return 1;
         }
-        $retailerState = DB::table('retailer')
-            ->join('location_view', 'location_view.l7_id', '=', 'retailer.location_id')
-            ->where('retailer.id', (string) $retailerId)
-            ->value('location_view.l3_id');
-        return (string) $retailerState === (string) $user->state_id ? 1 : 0;
+        return GstState::same(self::companyId($user), (int) $user->state_id, (int) $retailerId) ? 1 : 0;
     }
 
     public function compute(array $items, $discountPer, int $checkGst, int $companyIdCus): array

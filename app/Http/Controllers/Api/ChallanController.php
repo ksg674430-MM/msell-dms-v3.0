@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use App\Exceptions\InsufficientStockException;
 use App\Services\InvoiceService;
 use App\Services\StockService;
+use App\Support\GstState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -334,6 +335,7 @@ class ChallanController extends Controller
             // ── Recompute line totals server-side
             $normalizedItems = [];
             $subTotal = 0.0;
+            $sameState = GstState::same($companyId, (int) $user->state_id, $retailerId);
             foreach ($items as $it) {
                 $productId = (int)   $it['product_id'];
 
@@ -344,7 +346,6 @@ class ChallanController extends Controller
                 $rate      = (float) $it['rate'];
                 $mrp       = (float) ($it['mrp']         ?? 0);
                 $freeQty   = (float) ($it['free_qty']    ?? 0);
-                $tax       = (float) ($it['vat']         ?? 18);
                 $cd        = (float) ($it['cd']          ?? 0);
                 $cdType    = (int)   ($it['cd_type']     ?? 1);
                 // FIX: previously `cd_amt` was ignored and 0.0 was hardcoded
@@ -364,16 +365,14 @@ class ChallanController extends Controller
                 $taxable  = isset($it['taxable_amt']) && $it['taxable_amt'] !== null
                     ? (float) $it['taxable_amt']
                     : round($gross - $cdAmt - $disAmt - $splDiscAmt - $cashAmt, 2);
-                $vatAmt   = isset($it['vat_amt']) && $it['vat_amt'] !== null
-                    ? (float) $it['vat_amt']
-                    : round($taxable * $tax / 100, 2);
-                $amount   = round($taxable + $vatAmt, 2);
 
-                // Product name + HSN lookup (single query)
                 $cp = DB::selectOne(
-                    "SELECT name, hsn_code FROM catalog_product WHERE id = ? LIMIT 1",
+                    "SELECT name, hsn_code, gst_percent FROM catalog_product WHERE id = ? LIMIT 1",
                     [$productId]
                 );
+                $tax      = (float) ($cp->gst_percent ?? 0);
+                $vatAmt   = GstState::tax($taxable, $tax, $sameState);
+                $amount   = round($taxable + $vatAmt, 2);
                 $productName = (string) ($cp->name ?? ('Product #' . $productId));
 
                 $hsn = (string) ($it['hsn_code'] ?? '');

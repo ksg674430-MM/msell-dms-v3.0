@@ -27,7 +27,7 @@ class Gstr1Service
             ->where('ch_dealer_id', $dealerId)
             ->where(fn ($q) => $q->where('ch_date', '<', $from)->orWhere('ch_date', '>=', date('Y-m-d', strtotime($to . ' +1 day'))))
             ->pluck('ch_no')->all();
-        return ['seller' => $seller, 'period' => ['from' => $from, 'to' => $to]] + $this->build($this->lines($dealerId, $from, $to), $seller['state'], $outside);
+        return ['seller' => $seller, 'period' => ['from' => $from, 'to' => $to]] + $this->build($this->lines($dealerId, $from, $to), $seller['state'], $outside, $seller['company_id'] === 213 ? 0 : $seller['state_id']);
     }
 
     public function seller(int $dealerId): array
@@ -35,13 +35,13 @@ class Gstr1Service
         $dealer = DB::table('dealer')
             ->leftJoin('location_3 as l3', 'l3.id', '=', 'dealer.state_id')
             ->where('dealer.id', $dealerId)
-            ->first(['dealer.name', 'dealer.tin_no', 'l3.state_code']);
+            ->first(['dealer.name', 'dealer.tin_no', 'l3.state_code', 'dealer.state_id', 'dealer.company_id']);
 
         $gstin = self::normaliseGstin($dealer->tin_no ?? '');
         $valid = self::isValidGstin($gstin);
         $state = $valid ? substr($gstin, 0, 2) : self::stateCode($dealer->state_code ?? '');
 
-        return ['name' => $dealer->name ?? '', 'gstin' => $valid ? $gstin : '', 'gstin_raw' => $gstin, 'state' => $state];
+        return ['name' => $dealer->name ?? '', 'gstin' => $valid ? $gstin : '', 'gstin_raw' => $gstin, 'state' => $state, 'state_id' => (int) ($dealer->state_id ?? 0), 'company_id' => (int) ($dealer->company_id ?? 0)];
     }
 
     public function lines(int $dealerId, string $from, string $to): array
@@ -60,7 +60,7 @@ class Gstr1Service
             ->get([
                 'co.id as invoice_id', 'co.ch_no', DB::raw('DATE(co.ch_date) as ch_date'), 'co.amount', 'co.amount_round',
                 'co.discount_amt', 'co.dispatch_status', 'r.id as retailer_id', 'r.name as retailer_name', 'r.tin_no',
-                DB::raw('COALESCE(l3.state_code, l3r.state_code) as retailer_state'),
+                DB::raw('COALESCE(l3.state_code, l3r.state_code) as retailer_state'), 'lv.l3_id as retailer_state_id',
                 'cod.id as line_id', 'cp.name as product_name',
                 DB::raw("COALESCE(NULLIF(TRIM(cod.hsn_code), ''), TRIM(cp.hsn_code)) as hsn"),
                 'cod.tax as rate', 'cod.qty', 'cod.free_qty', 'cod.taxable_amt as line_total', 'cod.vat_amt',
@@ -69,7 +69,7 @@ class Gstr1Service
             ->all();
     }
 
-    public function build(array $lines, string $sellerState, array $outside = []): array
+    public function build(array $lines, string $sellerState, array $outside = [], int $billingStateId = 0): array
     {
         $invoices = [];
         foreach ($lines as $l) {
@@ -112,6 +112,13 @@ class Gstr1Service
                 $issue('POS defaulted', 'Retailer state not found; place of supply defaulted to the distributor state.');
             }
             $inter = $pos !== $sellerState;
+            $billedState = (int) ($h['retailer_state_id'] ?? 0);
+            if ($billingStateId > 0 && $billedState > 0 && ($billedState !== $billingStateId) !== $inter) {
+                $issue('GST type mismatch', sprintf(
+                    'Invoice was billed with %s (from the retailer\'s beat state), but place of supply %s makes it %s in GSTR-1. Correct the retailer\'s %s, then fix this invoice.',
+                    $inter ? 'CGST + SGST' : 'IGST', self::posLabel($pos), $inter ? 'IGST' : 'CGST + SGST', $registered ? 'GSTIN or beat' : 'beat'
+                ));
+            }
             $posLabel = self::posLabel($pos);
             $value = self::invoiceValue($h);
             $date = self::dmy($h['ch_date']);

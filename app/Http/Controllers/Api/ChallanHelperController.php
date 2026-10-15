@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Support\GstState;
 use App\Support\RateList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -109,22 +110,7 @@ class ChallanHelperController extends Controller
     $retailerId = $request->input('retailer_id');
 
     // ---- Same-state flag (GST split ke liye) ----
-    $st = 0;
-    if ($retailerId) {
-        $rt = DB::selectOne(
-            "SELECT DISTINCT l3_id AS r_state
-               FROM retailer
-               INNER JOIN location_view ON l7_id = location_id
-              WHERE retailer.id = ? LIMIT 1",
-            [$retailerId]
-        );
-        if ($rt && (int) $rt->r_state === $stateId) {
-            $st = 1;
-        }
-    } elseif ($companyId === 213) {
-        // company 213 ke liye always same-state maana jaata hai
-        $st = 1;
-    }
+    $st = GstState::same($companyId, $stateId, (int) $retailerId) ? 1 : 0;
 
     // ---- Product metadata ----
     $product = DB::selectOne(
@@ -138,16 +124,9 @@ class ChallanHelperController extends Controller
         return response()->json(['status' => false, 'message' => 'Product not found.'], 404);
     }
 
-    // ---- GST from _gst ----
-    $gstRow = DB::selectOne(
-        "SELECT igst, cgst, sgst FROM _gst WHERE hsn_code = ? LIMIT 1",
-        [$product->hsn_code]
-    );
-
-    $gstPercent = (float) ($product->gst_percent ?? 0);
-    $igst = $gstRow ? (float) $gstRow->igst : $gstPercent;
-    $cgst = $gstRow ? (float) $gstRow->cgst : $gstPercent / 2;
-    $sgst = $gstRow ? (float) $gstRow->sgst : $gstPercent / 2;
+    $igst = (float) ($product->gst_percent ?? 0);
+    $cgst = $igst / 2;
+    $sgst = $igst / 2;
 
     // ---- Rate column decide karo (role + qty type) ----
     $rateColumn = $this->pickRateColumn($roleName, $qtyType, $companyId);

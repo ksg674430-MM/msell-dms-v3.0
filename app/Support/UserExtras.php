@@ -11,13 +11,10 @@ class UserExtras
     {
         $dealer = DB::table('dealer')->where('id', $login->dealer_id)->first();
 
-        $dealerStateId = $dealer->state_id ?? null;
-        if (empty($dealerStateId) && !empty($dealer?->csa_id)) {
-            $dealerStateId = DB::table('csa')->where('c_id', $dealer->csa_id)->value('state_id');
-        }
+        $dealerStateId = (int) ($dealer->state_id ?? 0);
 
         return [
-            'dealerStateId'   => (int) ($dealerStateId ?? $login->state_id),
+            'dealerStateId'   => $dealerStateId ?: (int) $login->getAttributes()['state_id'],
             'templateId'      => (int) ($dealer->template_id ?? 0),
             'ownershipTypeId' => (int) ($dealer->ownership_type_id ?? 0),
             'rolename'        => self::roleName((int) $login->role_id),

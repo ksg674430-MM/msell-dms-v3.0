@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Services\InvoiceService;
 use App\Services\StockService;
+use App\Support\GstState;
 use Illuminate\Support\Facades\DB;
 
 class InvoiceController extends Controller
@@ -157,15 +158,7 @@ class InvoiceController extends Controller
             return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
 
-        // st: 1 if retailer state == dealer state (IGST vs CGST/SGST)
-        $states = DB::selectOne(
-            "SELECT (SELECT lv.l3_id FROM retailer r JOIN location_view lv ON lv.l7_id = r.location_id WHERE r.id = ? LIMIT 1) AS retailer_state,
-                    (SELECT lv.l3_id FROM dealer_location_rate_list dl JOIN location_view lv ON lv.l7_id = dl.location_id WHERE dl.dealer_id = ? LIMIT 1) AS dealer_state",
-            [$header->ch_retailer_id, $header->ch_dealer_id]
-        );
-        $retailerState = (int) ($states->retailer_state ?? 0);
-        $dealerState   = (int) ($states->dealer_state ?? 0);
-        $st = ($retailerState > 0 && $retailerState === $dealerState) ? 1 : 0;
+        $st = GstState::same($companyId, (int) $user->state_id, (int) $header->ch_retailer_id) ? 1 : 0;
 
         // ITEMS — catalog_product se naam/hsn/gst lo (catalog_view me sirf 21 rows thi)
         $items = DB::select(
@@ -293,7 +286,8 @@ class InvoiceController extends Controller
 
         try {
         $companyId = (int) $user->company_id;
-        DB::transaction(function () use ($id, $invoice, $validated, $dealerId, $companyId) {
+        $sameState = GstState::same($companyId, (int) $user->state_id, (int) ($validated['retailer_id'] ?? $invoice->ch_retailer_id));
+        DB::transaction(function () use ($id, $invoice, $validated, $dealerId, $companyId, $sameState) {
 
             $oldItems = DB::select(
                 "SELECT product_id, qty, free_qty, batch_no, mfg_date, mrp, tax, old_rate, order_id
@@ -365,7 +359,7 @@ class InvoiceController extends Controller
                 $cdAmt  = $cdType === 1 ? round($afterTrade * $cdVal / 100, 2) : round($cdVal, 2);
 
                 $taxable = round($afterTrade - $cdAmt, 2);
-                $vatAmt  = round($taxable * $taxPercent / 100, 2);
+                $vatAmt  = GstState::tax($taxable, $taxPercent, $sameState);
 
                 // FIX #1: legacy stores GST-inclusive line total
                 $lineTotal = round($taxable + $vatAmt, 2);

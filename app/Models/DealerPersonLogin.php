@@ -34,6 +34,11 @@ class DealerPersonLogin extends Authenticatable
         return Attribute::get(fn () => $this->extras()['rolename']);
     }
 
+    protected function stateId(): Attribute
+    {
+        return Attribute::get(fn () => $this->extras()['dealerStateId']);
+    }
+
     protected function templateId(): Attribute
     {
         return Attribute::get(fn () => $this->extras()['templateId']);
