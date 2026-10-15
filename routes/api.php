@@ -203,6 +203,7 @@ Route::prefix('dms-reports')->group(function () {
     Route::get('/filters/skus',                          [BalanceStockController::class, 'skus']);            // filter: SKU
     Route::delete('/reports/balance-stock/{id}', [BalanceStockController::class, 'destroy']);// delete stock
     Route::post('/reports/balance-stock/edit', [BalanceStockController::class, 'bulkUpdate']);//  edit stock
+    Route::post('/reports/balance-stock/delete', [BalanceStockController::class, 'destroyMany']);
 
     // --------------------------------------------------------
     // IMPORT  → MENU: Stock → Import (Bulk upload)
@@ -219,6 +220,7 @@ Route::prefix('dms-reports')->group(function () {
     // Route::get   ('/opening-stocks/{id}',     [OpeningStockController::class, 'show']);     // detail
     Route::post  ('/opening-stocks',          [OpeningStockController::class, 'store']);    // add opening stock
     Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'delete'])->whereNumber('id');
+    Route::post  ('/opening-stocks/delete',   [OpeningStockController::class, 'deleteMany']);
     // Route::put   ('/opening-stocks/{id}',     [OpeningStockController::class, 'update']);   // edit
     // Route::delete('/opening-stocks/{id}',     [OpeningStockController::class, 'destroy']);  // delete
     // Route::post  ('/opening-stocks/query',    [OpeningStockController::class, 'query']);    // filtered search
