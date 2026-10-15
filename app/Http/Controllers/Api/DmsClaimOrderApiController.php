@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\ScopesClaimDealers;
 use App\Http\Controllers\Controller;
+use App\Services\StockService;
 use App\Support\RateList;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -1472,13 +1473,25 @@ public function multipleBatchClaim(Request $request)
             }
 
             $saleableNonSaleable = 0;
+            $damageHead = null;
             $returnChNo = $request->input('return_ch_no');
             if (!empty($returnChNo) && !empty($request->input('request_retailer'))) {
-                $DamageHead = DB::table('damage_order')
+                $damageHead = DB::table('damage_order')
                     ->where('id', $returnChNo)
                     ->where('ch_dealer_id', $dealerId)
+                    ->where('ch_retailer_id', $retailerId)
+                    ->where('replace_return_id', 1)
+                    ->lockForUpdate()
                     ->first();
-                $saleableNonSaleable = $DamageHead->damage_order_type_id ?? 2;
+                if (!$damageHead) {
+                    DB::rollBack();
+                    return response()->json(['code' => 422, 'message' => 'Replacement invoice not found.'], 422);
+                }
+                if (DB::table('dms_retailer_claim')->where('dealer_id', $dealerId)->where('return_ch_no', $returnChNo)->exists()) {
+                    DB::rollBack();
+                    return response()->json(['code' => 422, 'message' => 'Replacement is already done for this invoice.'], 422);
+                }
+                $saleableNonSaleable = (int) $damageHead->damage_order_type_id ?: 2;
             }
 
             DB::table('dms_retailer_claim')->insert([
@@ -1493,45 +1506,29 @@ public function multipleBatchClaim(Request $request)
                 'return_ch_no'          => $returnChNo,
                 'saleable_non_saleable' => $saleableNonSaleable,
             ]);
-$replaceReturnId = (int) $request->input('replace_return_id', 0);
 
-foreach ($lines as $line) {
-    DB::table('dms_retailer_claim_details')->insert([
-        'order_id'   => $orderId,
-        'company_id' => $companyId,
-        'product_id' => $line['product_id'],
-        'quantity'   => $line['quantity'],
-        'mfg_date'   => $line['mfg_date'],
-        'batch_no'   => $line['batch_no'],
-        'rate'       => $line['rate'],
-        'mrp'        => $line['mrp'],
-        'reason'     => $line['reason'],
-    ]);
+            foreach ($lines as $line) {
+                DB::table('dms_retailer_claim_details')->insert([
+                    'order_id'   => $orderId,
+                    'company_id' => $companyId,
+                    'product_id' => $line['product_id'],
+                    'quantity'   => $line['quantity'],
+                    'mfg_date'   => $line['mfg_date'],
+                    'batch_no'   => $line['batch_no'],
+                    'rate'       => $line['rate'],
+                    'mrp'        => $line['mrp'],
+                    'reason'     => $line['reason'],
+                ]);
+            }
 
-    // ---- legacy replacement step: return damaged qty to stock ----
-    if ($replaceReturnId === 1) {
-        $stockRow = DB::table('stock')
-            ->where('product_id', $line['product_id'])
-            ->where('dealer_id', $dealerId)
-            ->where('batch_no', $line['batch_no'])
-            ->where('mrp', $line['mrp'])
-            ->where('mfg', $line['mfg_date'])
-            ->lockForUpdate()
-            ->first();
-
-        if (!$stockRow) {
-            throw new \RuntimeException(
-                "Stock not found for replacement return: product {$line['product_id']} batch {$line['batch_no']} mfg {$line['mfg_date']} mrp {$line['mrp']}"
-            );
-        }
-
-        // saleable_non_saleable == 1 → saleable bucket; else non-saleable.
-        // ADAPT the saleable column name to your schema ('qty' / 'saleable' / ...).
-        $column = ($saleableNonSaleable == 1) ? 'qty' : 'nonsalable_damage';
-
-        $this->moveStock((int) $dealerId, (int) $stockRow->id, $column, (float) $line['quantity']);
-    }
-}
+            if ($damageHead) {
+                $damageItems = DB::table('damage_order_details')
+                    ->where('ch_id', $damageHead->id)
+                    ->get(['product_id', 'mrp', 'batch_no', 'mfg_date', 'product_rate', 'qty', 'free_qty'])
+                    ->map(fn ($r) => (array) $r)
+                    ->all();
+                app(StockService::class)->apply($damageItems, (int) $dealerId, $saleableNonSaleable, 1);
+            }
         } else {
             DB::table('dms_dealer_claim')->insert([
                 'order_id'         => $orderId,
