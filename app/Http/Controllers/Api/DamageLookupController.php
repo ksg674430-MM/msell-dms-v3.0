@@ -47,6 +47,7 @@ class DamageLookupController extends Controller
         if ((int) $u->company_id === 213) {
             $rows = DB::table('catalog_product as cp')
                 ->where('cp.company_id', $u->company_id)
+                ->where('cp.status', 1)
                 ->groupBy('cp.id')
                 ->orderBy('cp.id')
                 ->get([
@@ -58,6 +59,7 @@ class DamageLookupController extends Controller
                 ->join('stock as s', 'cp.id', '=', 's.product_id')
                 ->leftJoin('other_company as oc', 'cp.company_id', '=', 'oc.id')
                 ->where('s.dealer_id', $u->dealer_id)
+                ->where('cp.status', 1)
                 ->groupBy('s.product_id')
                 ->orderBy('cp.id')
                 ->get([

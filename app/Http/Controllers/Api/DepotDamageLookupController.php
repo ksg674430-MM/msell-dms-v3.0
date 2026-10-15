@@ -39,6 +39,7 @@ class DepotDamageLookupController extends Controller
             // All products of the company — matches depot form 213 branch
             $rows = DB::table('catalog_product as cp')
                 ->where('cp.company_id', $companyIdCus)
+                ->where('cp.status', 1)
                 ->groupBy('cp.id')
                 ->orderBy('cp.id')
                 ->get([
@@ -51,6 +52,7 @@ class DepotDamageLookupController extends Controller
                 ->leftJoin('other_company as oc', 'cp.company_id', '=', 'oc.id')
                 ->where('s.dealer_id', $u->dealer_id)
                 ->where('cp.company_id', $companyIdCus)
+                ->where('cp.status', 1)
                 ->groupBy('s.product_id')
                 ->orderBy('cp.id')
                 ->get([

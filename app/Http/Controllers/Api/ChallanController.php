@@ -195,7 +195,7 @@ class ChallanController extends Controller
                     SUM(s.qty) AS available_stock
                FROM catalog_product cp
                INNER JOIN stock s ON s.product_id = cp.id AND s.dealer_id = ? AND s.qty > 0
-              WHERE cp.company_id = ?
+              WHERE cp.company_id = ? AND cp.status = 1
               GROUP BY cp.id
               ORDER BY cp.id",
             [$dealerId, $companyId]

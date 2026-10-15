@@ -26,7 +26,7 @@ class CatalogProductController extends Controller
 
     $bindings = [$companyId];
 
-    $where = ["cp.company_id = ?"];
+    $where = ["cp.company_id = ?", "cp.status = 1"];
 
     if ($itemName = $request->input('item_name')) {
         $where[]    = "cv.product_name LIKE ?";
