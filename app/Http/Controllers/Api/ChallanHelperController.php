@@ -211,6 +211,10 @@ private function pickRateColumn(string $roleName, string $qtyType, int $companyI
         return 'ss_pcs_rate';
     }
 
+    if (!in_array($companyId, [206, 243, 213], true)) {
+        return 'retailer_pcs_rate';
+    }
+
     if ($roleName === 'DISTRIBUTOR') {
         return $pcs ? 'retailer_pcs_rate' : 'retailer_rate';
     }
