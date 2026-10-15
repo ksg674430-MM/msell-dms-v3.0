@@ -113,7 +113,11 @@ class VanController extends Controller
         $vanId     = null;
         $attempts  = 0;
         do {
-            $vanId = (int) ($dealerId . now()->format('YmdHis'));
+            $candidate = $dealerId . now()->format('YmdHis');
+            if ((string) (int) $candidate !== $candidate) {
+                $candidate = $dealerId . now()->format('ymdHis');
+            }
+            $vanId = (int) $candidate;
             if (!DB::selectOne("SELECT id FROM van WHERE vanId = ? LIMIT 1", [$vanId])) {
                 break;
             }

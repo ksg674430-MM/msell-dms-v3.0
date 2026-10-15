@@ -217,8 +217,16 @@ class StockService
     public function unreceive(int $dealerId, int $productId, string $batchNo, string $mfg, float $mrp, float $qty, float $nonsalableDamage = 0): void
     {
         $row = $this->locate($dealerId, $productId, $batchNo, $mfg, $mrp);
-        $this->decrement($row, 'qty', $qty, $this->shortage($productId, '', $batchNo, $mrp, $qty, (float) ($row->qty ?? 0)));
-        $this->decrement($row, 'nonsalable_damage', $nonsalableDamage, $this->shortage($productId, '', $batchNo, $mrp, $nonsalableDamage, (float) ($row->nonsalable_damage ?? 0), 'Non-salable stock'));
+        if (!$row) return;
+
+        DB::update(
+            "UPDATE stock
+                SET qty = qty - LEAST(qty, ?),
+                    nonsalable_damage = nonsalable_damage - LEAST(nonsalable_damage, ?),
+                    update_date_time = NOW()
+              WHERE id = ?",
+            [max($qty, 0), max($nonsalableDamage, 0), $row->id]
+        );
     }
 
     public function takeFifo(int $dealerId, int $productId, float $qty, string $productName = ''): void
