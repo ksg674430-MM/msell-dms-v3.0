@@ -73,7 +73,7 @@ class CatalogProductController extends Controller
                      COALESCE(cv.c2_name,'') ASC,
                      cp.name ASC";
 
-    $rows  = DB::select($sql, $bindings);
+    $rows  = collect(DB::select($sql, $bindings))->unique('id')->values()->all();
     $rates = RateList::forDealer((int) $user->dealer_id, $companyId)->rows(array_map(fn ($r) => (int) $r->id, $rows));
 
     $rows = array_values(array_filter($rows, function ($row) use ($rates, $rateCol, $companyId) {

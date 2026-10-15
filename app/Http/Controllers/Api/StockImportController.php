@@ -108,10 +108,9 @@ class StockImportController extends Controller
         // ✅ csa_id from dealer
         $csaId = (int) (DB::table('dealer')->where('id', $dealerId)->value('csa_id') ?? 0);
 
-        $itemCodeMap = DB::table('catalog_product')
-            ->where('company_id', $companyId)
-            ->pluck('id', 'itemcode')
-            ->toArray();
+        $products    = DB::table('catalog_product')->where('company_id', $companyId)->get(['id', 'itemcode']);
+        $productIds  = $products->pluck('id', 'id')->all();
+        $itemCodeMap = $products->groupBy('itemcode')->map(fn ($g) => $g->pluck('id')->all())->all();
 
         $fh = fopen($request->file('excelFile')->getRealPath(), 'r');
         if ($fh === false) {
@@ -130,7 +129,7 @@ class StockImportController extends Controller
             while (($row = fgetcsv($fh, 0, ',')) !== false) {
                 $rowNum++;
 
-                $row = array_pad(array_map(fn ($v) => trim((string) $v), $row), 8, '');
+                $row = array_pad(array_map(fn ($v) => trim((string) $v), $row), 9, '');
                 $num = fn ($v) => str_replace(',', '', $v);
 
                 $itemCode = $row[1];
@@ -140,15 +139,25 @@ class StockImportController extends Controller
                 $batchNo  = $row[6];
                 $mfgRaw   = $row[7];
 
-                if ($itemCode === '' || $qty === '' || (is_numeric($qty) && (float) $qty == 0)) {
+                if (($itemCode === '' && $row[8] === '') || $qty === '' || (is_numeric($qty) && (float) $qty == 0)) {
                     continue;
                 }
 
-                if (!isset($itemCodeMap[$itemCode])) {
+                if ($row[8] !== '') {
+                    if (!isset($productIds[$row[8]])) {
+                        $errors[] = ['row' => $rowNum, 'reason' => "Product Id ({$row[8]}) not found."];
+                        continue;
+                    }
+                    $productId = (int) $row[8];
+                } elseif (!isset($itemCodeMap[$itemCode])) {
                     $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) not found."];
                     continue;
+                } elseif (count($itemCodeMap[$itemCode]) > 1) {
+                    $errors[] = ['row' => $rowNum, 'reason' => "Item Code ({$itemCode}) is used by " . count($itemCodeMap[$itemCode]) . ' products. Download the format again and fill the Product Id column.'];
+                    continue;
+                } else {
+                    $productId = (int) $itemCodeMap[$itemCode][0];
                 }
-                $productId = (int) $itemCodeMap[$itemCode];
 
                 if (!is_numeric($qty) || (float) $qty < 0) {
                     $errors[] = ['row' => $rowNum, 'reason' => "Invalid quantity: {$qty}"];
@@ -174,7 +183,7 @@ class StockImportController extends Controller
                 }
 
                 DB::insert(
-                    "INSERT IGNORE INTO opening_stocks
+                    "INSERT INTO opening_stocks
                         (product_id, batch_no, rate, dealer_rate, mrp,
                          person_id, csa_id, dealer_id, qty,
                          salable_damage, nonsalable_damage, remaining,
@@ -185,7 +194,8 @@ class StockImportController extends Controller
                          ?, ?, ?, ?,
                          0, 0, ?,
                          ?, ?, NOW(), ?, ?,
-                         1, 1, NOW())",
+                         1, 1, NOW())
+                     ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty), remaining = remaining + VALUES(remaining), update_date_time = NOW()",
                     [
                         $productId, $batchNo, (float) $rate, (float) $rate, (float) $mrp,
                         $userId, $csaId, $dealerId, (float) $qty,
