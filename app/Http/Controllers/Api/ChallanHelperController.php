@@ -150,9 +150,9 @@ class ChallanHelperController extends Controller
     foreach ($rows as $s) {
         $mrp = (float) $s->mrp;
 
-        // Rate ko GST-inclusive se GST-exclusive me convert (agar company 213/40/215)
+        // Rate ko GST-inclusive se GST-exclusive me convert (agar company 213/215)
         $rate = $listRate;
-        if (in_array($companyId, [40, 213, 215], true) && $igst > 0) {
+        if (in_array($companyId, [213, 215], true) && $igst > 0) {
             $beforeGst = round($rate - ($rate * (100 / (100 + $igst))), 3);
             $rate = round($rate - $beforeGst, 2);
         }

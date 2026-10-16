@@ -59,7 +59,7 @@ class Gstr1Service
             ->orderBy('co.ch_date')->orderBy('co.ch_no')->orderBy('cod.id')
             ->get([
                 'co.id as invoice_id', 'co.ch_no', DB::raw('DATE(co.ch_date) as ch_date'), 'co.amount', 'co.amount_round',
-                'co.discount_amt', 'co.dispatch_status', 'r.id as retailer_id', 'r.name as retailer_name', 'r.tin_no',
+                'co.discount_amt', 'co.dispatch_status', 'co.crdr_status', 'r.id as retailer_id', 'r.name as retailer_name', 'r.tin_no',
                 DB::raw('COALESCE(l3.state_code, l3r.state_code) as retailer_state'), 'lv.l3_id as retailer_state_id',
                 'cod.id as line_id', 'cp.name as product_name',
                 DB::raw("COALESCE(NULLIF(TRIM(cod.hsn_code), ''), TRIM(cp.hsn_code)) as hsn"),
@@ -78,6 +78,8 @@ class Gstr1Service
         }
 
         $b2b = $b2cl = $b2cs = $hsn = $b2csDetail = $exempDetail = $hsnDetail = $issues = [];
+        $cdnr = $cdnur = $uninvolved = [];
+        $noteHsn = ['b2b' => [], 'b2c' => []];
         $exemp = [];
         foreach (['INTRB2B' => 'Inter-State supplies to registered persons', 'INTRAB2B' => 'Intra-State supplies to registered persons', 'INTRB2C' => 'Inter-State supplies to unregistered persons', 'INTRAB2C' => 'Intra-State supplies to unregistered persons'] as $type => $label) {
             $exemp[$type] = ['sply_ty' => $type, 'description' => $label, 'nil_rated' => 0.0, 'exempt' => 0.0, 'non_gst' => 0.0];
@@ -123,9 +125,17 @@ class Gstr1Service
             $value = self::invoiceValue($h);
             $date = self::dmy($h['ch_date']);
             $limit = $h['ch_date'] >= self::B2CL_LIMIT_FROM ? 100000 : 250000;
-            $section = $registered ? 'b2b' : ($inter && $value > $limit ? 'b2cl' : 'b2cs');
+            $large = $inter && $value > $limit;
+            $note = [1 => 'C', 2 => 'D'][(int) ($h['crdr_status'] ?? 0)] ?? null;
+            $sign = $note === 'C' ? -1 : 1;
+            $kind = $registered ? 'b2b' : 'b2c';
+            $docType = $note === null ? 'Invoice' : ($note === 'C' ? 'Credit Note' : 'Debit Note');
+            $section = $note === null
+                ? ($registered ? 'b2b' : ($large ? 'b2cl' : 'b2cs'))
+                : ($registered ? 'cdnr' : ($large ? 'cdnur' : 'b2cs_note'));
 
             $byRate = [];
+            $rateHsn = [];
             $lineSum = 0.0;
             foreach ($rows as $l) {
                 $rate = round((float) $l['rate'], 2);
@@ -139,21 +149,31 @@ class Gstr1Service
                 $split = self::split($tax, $inter);
                 if ($taxable < 0) $issue('Negative value', "{$l['product_name']} has a negative taxable value.");
 
-                $key = ($registered ? 'b2b' : 'b2c') . "|{$code}|{$rate}";
-                $hsn[$key] ??= ['kind' => $registered ? 'b2b' : 'b2c', 'hsn' => $code, 'rate' => $rate, 'qty' => 0.0, 'value' => 0.0, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0, 'invoices' => 0];
-                $hsn[$key]['qty'] += (float) $l['qty'] + (float) $l['free_qty'];
-                $hsn[$key]['value'] += $total;
-                $hsn[$key]['taxable'] += $taxable;
-                foreach ($split as $k => $v) $hsn[$key][$k] += $v;
+                $qty = ((float) $l['qty'] + (float) $l['free_qty']) * $sign;
+                $key = "{$kind}|{$code}|{$rate}";
+                $hsn[$key] ??= ['kind' => $kind, 'hsn' => $code, 'rate' => $rate, 'qty' => 0.0, 'value' => 0.0, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0, 'note_value' => 0.0, 'note_taxable' => 0.0];
+                $hsn[$key]['qty'] += $qty;
+                $hsn[$key]['value'] += $total * $sign;
+                $hsn[$key]['taxable'] += $taxable * $sign;
+                foreach ($split as $k => $v) $hsn[$key][$k] += $v * $sign;
 
                 $dk = "{$h['invoice_id']}|{$key}";
-                $hsnDetail[$dk] ??= ['kind' => $registered ? 'b2b' : 'b2c', 'invoice_no' => $h['ch_no'], 'date' => $date, 'party' => $h['retailer_name'] ?? '', 'gstin' => $registered ? $gstin : '', 'hsn' => $code, 'rate' => $rate, 'qty' => 0.0, 'value' => 0.0, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0];
-                $hsnDetail[$dk]['qty'] += (float) $l['qty'] + (float) $l['free_qty'];
-                $hsnDetail[$dk]['value'] += $total;
-                $hsnDetail[$dk]['taxable'] += $taxable;
-                foreach ($split as $k => $v) $hsnDetail[$dk][$k] += $v;
+                $hsnDetail[$dk] ??= ['kind' => $kind, 'doc_type' => $docType, 'invoice_no' => $h['ch_no'], 'date' => $date, 'party' => $h['retailer_name'] ?? '', 'gstin' => $registered ? $gstin : '', 'hsn' => $code, 'rate' => $rate, 'qty' => 0.0, 'value' => 0.0, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0];
+                $hsnDetail[$dk]['qty'] += $qty;
+                $hsnDetail[$dk]['value'] += $total * $sign;
+                $hsnDetail[$dk]['taxable'] += $taxable * $sign;
+                foreach ($split as $k => $v) $hsnDetail[$dk][$k] += $v * $sign;
 
-                if ($rate == 0) {
+                if ($note !== null) {
+                    $hsn[$key]['note_value'] -= $total * $sign;
+                    $hsn[$key]['note_taxable'] -= $taxable * $sign;
+                    $nk = "{$code}|{$rate}";
+                    $noteHsn[$kind][$nk] ??= ['hsn' => $code, 'rate' => $rate, 'value' => 0.0, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0];
+                    $noteHsn[$kind][$nk]['value'] -= $total * $sign;
+                    $noteHsn[$kind][$nk]['taxable'] -= $taxable * $sign;
+                    foreach ($split as $k => $v) $noteHsn[$kind][$nk][$k] -= $v * $sign;
+                    if ($rate == 0 && $section === 'b2cs_note') $exemp[($inter ? 'INTR' : 'INTRA') . 'B2C']['exempt'] += $taxable * $sign;
+                } elseif ($rate == 0) {
                     $type = ($inter ? 'INTR' : 'INTRA') . ($registered ? 'B2B' : 'B2C');
                     $exemp[$type]['exempt'] += $taxable;
                     $exempDetail[] = ['invoice_no' => $h['ch_no'], 'date' => $date, 'party' => $h['retailer_name'] ?? '', 'gstin' => $registered ? $gstin : '', 'pos' => $posLabel, 'hsn' => $code, 'category' => $exemp[$type]['description'], 'taxable' => round($taxable, 2), 'value' => round($total, 2)];
@@ -162,6 +182,7 @@ class Gstr1Service
                 $byRate[(string) $rate] ??= ['taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0];
                 $byRate[(string) $rate]['taxable'] += $taxable;
                 foreach ($split as $k => $v) $byRate[(string) $rate][$k] += $v;
+                $rateHsn[(string) $rate][$code] = true;
             }
 
             if (abs($lineSum - (float) $h['discount_amt'] - (float) $h['amount']) > 1) {
@@ -170,6 +191,22 @@ class Gstr1Service
 
             foreach ($byRate as $rate => $t) {
                 $row = ['invoice_no' => $h['ch_no'], 'date' => $date, 'value' => $value, 'pos' => $posLabel, 'inter' => $inter, 'rate' => (float) $rate] + self::finish($t);
+                if ($note !== null) {
+                    $row = ['note_type' => $note, 'name' => $h['retailer_name'] ?? ''] + $row + ['tax_amount' => round($row['igst'] + $row['cgst'] + $row['sgst'], 2)];
+                    if ($section === 'cdnr') {
+                        $cdnr[] = ['gstin' => $gstin, 'hsn' => implode(', ', array_keys($rateHsn[$rate]))] + $row;
+                    } elseif ($section === 'cdnur') {
+                        $cdnur[] = ['ur_type' => 'B2CL'] + $row;
+                    } else {
+                        $uninvolved[] = ['gstin' => '', 'source' => (float) $rate == 0 ? 'Exempt adjustment' : 'B2CS adjustment'] + $row;
+                        if ((float) $rate != 0) {
+                            $bk = "{$pos}|{$rate}";
+                            $b2cs[$bk] ??= ['type' => 'OE', 'pos' => $posLabel, 'sply_ty' => $inter ? 'INTER' : 'INTRA', 'rate' => (float) $rate, 'taxable' => 0.0, 'igst' => 0.0, 'intra' => 0.0, 'invoices' => 0];
+                            foreach ($t as $k => $v) $b2cs[$bk][$k] += $v * $sign;
+                        }
+                    }
+                    continue;
+                }
                 if ($section === 'b2b') {
                     $b2b[] = ['gstin' => $gstin, 'name' => $h['retailer_name'] ?? ''] + $row;
                 } elseif ($section === 'b2cl') {
@@ -186,6 +223,10 @@ class Gstr1Service
 
         $b2cs = array_map(fn ($r) => self::finish($r), array_values($b2cs));
         usort($b2cs, fn ($a, $b) => [$a['pos'], $a['rate']] <=> [$b['pos'], $b['rate']]);
+        foreach ($b2cs as $r) {
+            if ($r['taxable'] < 0) $issues[] = ['type' => 'Negative B2CS', 'invoice_no' => '', 'date' => '', 'party' => '', 'message' => sprintf('Credit notes for %s at %s%% exceed this period\'s sales (net taxable %.2f). The portal may reject a negative B2CS value.', $r['pos'], $r['rate'], $r['taxable'])];
+        }
+        $noteHsn = array_map(fn ($rows) => array_map(fn ($r) => self::finish($r), array_values($rows)), $noteHsn);
         $hsn = array_map(fn ($r) => self::finish($r), array_values($hsn));
         usort($hsn, fn ($a, $b) => [$a['kind'], $a['hsn'], $a['rate']] <=> [$b['kind'], $b['hsn'], $b['rate']]);
         $exemp = array_map(fn ($r) => self::round2($r), array_values($exemp));
@@ -196,13 +237,13 @@ class Gstr1Service
         }
 
         return [
-            'b2b' => $b2b, 'b2cl' => $b2cl, 'b2cs' => $b2cs, 'exemp' => $exemp,
+            'b2b' => $b2b, 'b2cl' => $b2cl, 'b2cs' => $b2cs, 'exemp' => $exemp, 'cdnr' => $cdnr, 'cdnur' => $cdnur,
             'hsn_b2b' => array_values(array_filter($hsn, fn ($r) => $r['kind'] === 'b2b')),
             'hsn_b2c' => array_values(array_filter($hsn, fn ($r) => $r['kind'] === 'b2c')),
             'docs' => $docs,
-            'details' => ['b2cs' => $b2csDetail, 'exemp' => $exempDetail, 'hsn' => $hsnDetail],
+            'details' => ['b2cs' => $b2csDetail, 'exemp' => $exempDetail, 'hsn' => $hsnDetail, 'uninvolved' => $uninvolved, 'hsn_cdnr' => $noteHsn['b2b'], 'hsn_cdnur' => $noteHsn['b2c']],
             'issues' => $issues,
-            'summary' => self::summary($b2b, $b2cl, $b2cs, $exemp, $hsn, $docs, $b2csDetail, $exempDetail),
+            'summary' => self::summary($b2b, $b2cl, $b2cs, $exemp, $cdnr, $cdnur, $hsn, $docs, $b2csDetail, $exempDetail),
         ];
     }
 
@@ -257,7 +298,7 @@ class Gstr1Service
         return $out;
     }
 
-    private static function summary(array $b2b, array $b2cl, array $b2cs, array $exemp, array $hsn, array $docs, array $b2csDetail, array $exempDetail): array
+    private static function summary(array $b2b, array $b2cl, array $b2cs, array $exemp, array $cdnr, array $cdnur, array $hsn, array $docs, array $b2csDetail, array $exempDetail): array
     {
         $sum = function (array $rows, array $keys) {
             $t = array_fill_keys($keys, 0.0);
@@ -265,23 +306,31 @@ class Gstr1Service
             return self::round2($t);
         };
         $tax = ['taxable', 'igst', 'cgst', 'sgst'];
+        $signed = fn (array $rows) => array_map(function ($r) use ($tax) {
+            if ($r['note_type'] === 'C') foreach ($tax as $k) $r[$k] = -$r[$k];
+            return $r;
+        }, $rows);
         $invoices = fn (array $rows) => array_unique(array_column($rows, 'invoice_no'));
         $invoiceCount = fn (array $rows) => count($invoices($rows));
         $sections = [
             'b2b' => ['label' => 'B2B Invoices', 'count' => $invoiceCount($b2b)] + $sum($b2b, $tax),
             'b2cl' => ['label' => 'B2C Large Invoices', 'count' => $invoiceCount($b2cl)] + $sum($b2cl, $tax),
             'b2cs' => ['label' => 'B2C Small', 'count' => $invoiceCount($b2csDetail)] + $sum($b2cs, $tax),
+            'cdnr' => ['label' => 'Registered Credit/Debit Notes', 'count' => $invoiceCount($cdnr)] + $sum($signed($cdnr), $tax),
+            'cdnur' => ['label' => 'Unregistered Credit/Debit Notes', 'count' => $invoiceCount($cdnur)] + $sum($signed($cdnur), $tax),
             'exemp' => ['label' => 'Nil Rated / Exempt / Non-GST', 'count' => $invoiceCount($exempDetail), 'taxable' => round(array_sum(array_map(fn ($r) => $r['exempt'] + $r['nil_rated'] + $r['non_gst'], $exemp)), 2), 'igst' => 0.0, 'cgst' => 0.0, 'sgst' => 0.0],
         ];
         $supplies = ['count' => count(array_unique(array_merge($invoices($b2b), $invoices($b2cl), $invoices($b2csDetail), $invoices($exempDetail))))] + $sum(array_values($sections), $tax);
+        $supplies['value'] = round($supplies['taxable'] + $supplies['igst'] + $supplies['cgst'] + $supplies['sgst'], 2);
         $hsnTotal = $sum($hsn, array_merge($tax, ['value']));
         $diff = [];
-        foreach ($tax as $k) $diff[$k] = round($supplies[$k] - $hsnTotal[$k], 2);
+        foreach (array_merge($tax, ['value']) as $k) $diff[$k] = round($supplies[$k] - $hsnTotal[$k], 2);
 
         return [
             'sections' => $sections,
             'supplies' => $supplies,
             'hsn' => $hsnTotal,
+            'hsn_notes' => ['value' => $sum($hsn, ['note_value'])['note_value'], 'taxable' => $sum($hsn, ['note_taxable'])['note_taxable']],
             'difference' => $diff,
             'matched' => max(array_map('abs', $diff)) <= 1,
             'documents' => ['total' => array_sum(array_column($docs, 'total')), 'cancelled' => array_sum(array_column($docs, 'cancelled')), 'issued' => array_sum(array_column($docs, 'issued'))],
@@ -325,6 +374,25 @@ class Gstr1Service
             return $e;
         }, $data['b2cs']);
 
+        $notes = function (array $rows, callable $head) use ($item) {
+            $out = [];
+            foreach ($rows as $r) {
+                $nt = &$out[$r['invoice_no']];
+                $nt ??= $head($r) + ['itms' => []];
+                $nt['itms'][] = $item($r, count($nt['itms']) + 1);
+                unset($nt);
+            }
+            return array_values($out);
+        };
+        $cdnr = [];
+        foreach ($notes($data['cdnr'] ?? [], fn ($r) => ['ntty' => $r['note_type'], 'nt_num' => $r['invoice_no'], 'nt_dt' => $r['date'], 'val' => $r['value'], 'pos' => self::code($r['pos']), 'rchrg' => 'N', 'inv_typ' => 'R', 'gstin' => $r['gstin']]) as $nt) {
+            $ctin = $nt['gstin'];
+            unset($nt['gstin']);
+            $cdnr[$ctin]['nt'][] = $nt;
+        }
+        $cdnr = array_map(fn ($ctin, $c) => ['ctin' => $ctin, 'nt' => $c['nt']], array_keys($cdnr), $cdnr);
+        $cdnur = $notes($data['cdnur'] ?? [], fn ($r) => ['typ' => $r['ur_type'], 'ntty' => $r['note_type'], 'nt_num' => $r['invoice_no'], 'nt_dt' => $r['date'], 'val' => $r['value'], 'pos' => self::code($r['pos'])]);
+
         $nil = array_values(array_map(fn ($r) => ['sply_ty' => $r['sply_ty'], 'expt_amt' => $r['exempt'], 'nil_amt' => $r['nil_rated'], 'ngsup_amt' => $r['non_gst']], array_filter($data['exemp'], fn ($r) => $r['exempt'] + $r['nil_rated'] + $r['non_gst'] != 0)));
 
         $hsn = fn (array $rows) => array_map(fn ($r, $i) => [
@@ -336,6 +404,8 @@ class Gstr1Service
         if ($b2b) $json['b2b'] = $b2b;
         if ($b2cl) $json['b2cl'] = $b2cl;
         if ($b2cs) $json['b2cs'] = $b2cs;
+        if ($cdnr) $json['cdnr'] = $cdnr;
+        if ($cdnur) $json['cdnur'] = $cdnur;
         if ($nil) $json['nil'] = ['inv' => $nil];
         $json['hsn'] = ['hsn_b2b' => $hsn($data['hsn_b2b']), 'hsn_b2c' => $hsn($data['hsn_b2c'])];
         if ($data['docs']) {

@@ -50,6 +50,8 @@ class Gstr1Controller extends Controller
             'b2b,sez,de' => array_map(fn ($r) => [$r['gstin'], $r['name'], $r['invoice_no'], $date($r['date']), $r['value'], $r['pos'], 'N', '', 'Regular B2B', '', $r['rate'], $r['taxable'], 0], $data['b2b']),
             'b2cl' => array_map(fn ($r) => [$r['invoice_no'], $date($r['date']), $r['value'], $r['pos'], '', $r['rate'], $r['taxable'], 0, ''], $data['b2cl']),
             'b2cs' => array_map(fn ($r) => [$r['type'], $r['pos'], '', $r['rate'], $r['taxable'], 0, ''], $data['b2cs']),
+            'cdnr' => array_map(fn ($r) => [$r['gstin'], $r['name'], $r['invoice_no'], $date($r['date']), $r['note_type'], $r['pos'], 'N', 'Regular B2B', $r['value'], '', $r['rate'], $r['taxable'], 0], $data['cdnr']),
+            'cdnur' => array_map(fn ($r) => [$r['ur_type'], $r['invoice_no'], $date($r['date']), $r['note_type'], $r['pos'], $r['value'], '', $r['rate'], $r['taxable'], 0], $data['cdnur']),
             'exemp' => array_map(fn ($r) => [$r['description'], $r['nil_rated'], $r['exempt'], $r['non_gst']], $data['exemp']),
             'hsn(b2b)' => array_map(fn ($r) => [$r['hsn'], '', 'NOS-NUMBERS', $r['qty'], $r['value'], $r['rate'], $r['taxable'], $r['igst'], $r['cgst'], $r['sgst'], 0], $data['hsn_b2b']),
             'hsn(b2c)' => array_map(fn ($r) => [$r['hsn'], '', 'NOS-NUMBERS', $r['qty'], $r['value'], $r['rate'], $r['taxable'], $r['igst'], $r['cgst'], $r['sgst'], 0], $data['hsn_b2c']),
