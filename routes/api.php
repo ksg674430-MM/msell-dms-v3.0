@@ -61,6 +61,7 @@ use App\Http\Controllers\Api\Reports\GstReportController;
 use App\Http\Controllers\Api\Reports\Gstr1Controller;         
 use App\Http\Controllers\Api\Reports\LedgerReportController;
 use App\Http\Controllers\Api\Reports\VanReportController;
+use App\Http\Controllers\Api\Reports\ClaimReportController;
 
 use App\Http\Controllers\Api\SsVanSalesReportController;
 use App\Http\Controllers\Api\MainReportApiController;
@@ -461,6 +462,7 @@ Route::prefix('reports')->group(function () {
     Route::get('/van/retailer-wise-sales',       [VanReportController::class, 'retailerWiseSales']);
     Route::put('/van/retailer-wise-sales/{orderId}', [VanReportController::class, 'updateRetailerWiseSale']);
     Route::get('/van/retailer-wise',             [VanReportController::class, 'retailerWise']);
+    Route::get('/claim/display',                 [ClaimReportController::class, 'display']);
 
      });
     // Dispatch Order

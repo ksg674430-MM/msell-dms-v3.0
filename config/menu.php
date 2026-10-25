@@ -195,7 +195,7 @@ return [
             ['slug' => 'db_sales_report',        'label' => 'DB Sales Report',             'icon' => 'fa-caret-right', 'route' => '/reports/db-sales'],
             ['slug' => 'db_van_summary',         'label' => 'DB Van Summary Report',       'icon' => 'fa-caret-right', 'route' => '/reports/db-van-summary'],
             ['slug' => 'retailer_wise_report',   'label' => 'Retailer Wise Report',        'icon' => 'fa-caret-right', 'route' => '/reports/retailer-wise'],
-            // ['slug' => 'display_claim_report',   'label' => 'Display Claim Report',        'icon' => 'fa-caret-right', 'external' => '/report-section?report_name=DisplayClaimReport'],
+            ['slug' => 'display_claim_report',   'label' => 'Claim Report',                'icon' => 'fa-caret-right', 'route' => '/reports/claim', 'companies' => [213, 215]],
         ],
     ],
 
