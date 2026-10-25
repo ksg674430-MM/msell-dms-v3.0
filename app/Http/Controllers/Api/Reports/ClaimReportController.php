@@ -44,7 +44,8 @@ class ClaimReportController extends Controller
             $images = [];
             foreach (range(1, 17) as $i) {
                 foreach (explode(',', (string) $row->{"doc_$i"}) as $url) {
-                    if (($url = trim($url)) !== '') $images[] = $url;
+                    if (($url = trim($url)) === '') continue;
+                    $images[] = str_contains($url, '/') ? $url : url('myupload/claim/' . $url);
                 }
                 unset($row->{"doc_$i"});
             }
