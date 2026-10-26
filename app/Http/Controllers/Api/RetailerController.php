@@ -720,4 +720,55 @@ class RetailerController extends Controller
         // 'meta'   => $result['meta'],
     // ]);
 // }
+/* =========================================================
+ |  CLAIM RETAILERS
+ |  GET /api/retailers/claim-retailers
+ | ========================================================= */
+public function claimRetailers(Request $request): JsonResponse
+{
+    $user      = $request->user();
+    $dealerId  = (int) ($user->dealer_id ?? 0);
+    $companyId = (int) ($user->company_id ?? 0);
+
+    if ($dealerId <= 0) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Dealer context missing from token.',
+        ], 403);
+    }
+
+    $rows = DB::table('retailer AS r')
+        ->leftJoin('challan_order AS co',
+            'co.ch_retailer_id', '=', 'r.id')
+        ->leftJoin('challan_order_details AS cod',
+            'cod.ch_id', '=', 'co.id')
+        ->where('r.dealer_id', $dealerId)
+        ->when($companyId > 0, fn ($q) => $q->where('r.company_id', $companyId))
+        ->groupBy('r.id', 'r.name')
+        ->select([
+            'r.id',
+            'r.name',
+            DB::raw('COALESCE(SUM(cod.taxable_amt), 0) AS achieved_amount'),
+            DB::raw('MAX(co.ch_dealer_id) AS ch_dealer_id'),
+        ])
+        ->orderBy('r.name')
+        ->get();
+
+    $data = $rows->map(fn ($r) => [
+        'retailer_id'     => (string) $r->id,
+        'retailer_name'   => $r->name,
+        'scheme_date'     => null,
+        'scheme'          => null,
+        'achieved_amount' => (float) $r->achieved_amount,
+        'claim_gift'      => null,
+        'ch_dealer_id'    => $r->ch_dealer_id,
+    ])->values();
+
+    return response()->json([
+        'status' => true,
+        'data'   => $data,
+    ]);
+}
+
+
 }

@@ -1506,59 +1506,133 @@ class QuickOrderController extends Controller
         ]);
     }
 
+    // Old currently working in production
+
+    // public function invoiceDetails(Request $request)
+    // {
+    //     $ctx = $this->context($request);
+
+    //     $from_date = $request->filled('from_date')
+    //         ? date('Y-m-d', strtotime($request->from_date))
+    //         : date('Y-m-d');
+
+    //     $to_date = $request->filled('to_date')
+    //         ? date('Y-m-d', strtotime($request->to_date))
+    //         : date('Y-m-d');
+
+    //     if ($from_date < '2021-04-01') {
+    //         $from_date = '2021-04-01';
+    //     }
+
+    //     $q = DB::table('purchase_order')
+    //         ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.order_id')
+    //         ->select(
+    //             'purchase_order.invoice_no_p',
+    //             DB::raw('MAX(purchase_order.sale_date) as sale_date'),
+    //             DB::raw("GROUP_CONCAT(DISTINCT purchase_order_details.order_id ORDER BY purchase_order_details.order_id SEPARATOR ', ') as order_ids"),
+    //             DB::raw("MAX(NULLIF(purchase_order.remarks, '')) as remarks"),
+    //             DB::raw("MAX(NULLIF(NULLIF(purchase_order.pdf_name2, ''), '0')) as pdf"),
+    //             DB::raw('SUM(purchase_order_details.inv_busy_amt) as amount')
+    //         )
+    //         ->where('purchase_order.dealer_id', $ctx['dealer_id'])
+    //         ->whereNotIn('purchase_order.invoice_no_p', ['0', ''])
+    //         ->whereDate('purchase_order.sale_date', '>=', $from_date)
+    //         ->whereDate('purchase_order.sale_date', '<=', $to_date);
+
+    //     if ($request->filled('ref_no')) {
+    //         $ref = '%' . trim((string) $request->ref_no) . '%';
+    //         $q->where(function ($w) use ($ref) {
+    //             $w->where('purchase_order.invoice_no_p', 'LIKE', $ref)
+    //                 ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
+    //         });
+    //     }
+
+    //     $rows = $q->groupBy('purchase_order.invoice_no_p')
+    //         ->orderBy('sale_date', 'DESC')
+    //         ->orderBy('purchase_order.invoice_no_p', 'ASC')
+    //         ->get();
+
+    //     return response()->json([
+    //         'status' => true,
+    //         'data' => [
+    //             'from_date' => $from_date,
+    //             'to_date' => $to_date,
+    //             'rows' => $rows,
+    //         ],
+    //     ]);
+    // }
+
+    // new because old one does not follow 
     public function invoiceDetails(Request $request)
-    {
-        $ctx = $this->context($request);
+{
+    $ctx = $this->context($request);
 
-        $from_date = $request->filled('from_date')
-            ? date('Y-m-d', strtotime($request->from_date))
-            : date('Y-m-d');
-
-        $to_date = $request->filled('to_date')
-            ? date('Y-m-d', strtotime($request->to_date))
-            : date('Y-m-d');
-
-        if ($from_date < '2021-04-01') {
-            $from_date = '2021-04-01';
+    // ── Range mode (legacy: ?range=40&from_date=YYYY-MM-DD) ───────────
+    if (empty($request->date_range_picker)) {
+        if (!empty($request->range)) {
+            $anchor    = $request->filled('from_date') ? $request->from_date : date('Y-m-d');
+            $from_date = date('Y-m-d', strtotime('-' . (int) $request->range . ' day', strtotime($anchor)));
+            $to_date   = date('Y-m-d');
+            $status    = '1';
+        } else {
+            $from_date = date('Y-m-d');
+            $to_date   = date('Y-m-d');
+            $status    = 0;
         }
-
-        $q = DB::table('purchase_order')
-            ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.order_id')
-            ->select(
-                'purchase_order.invoice_no_p',
-                DB::raw('MAX(purchase_order.sale_date) as sale_date'),
-                DB::raw("GROUP_CONCAT(DISTINCT purchase_order_details.order_id ORDER BY purchase_order_details.order_id SEPARATOR ', ') as order_ids"),
-                DB::raw("MAX(NULLIF(purchase_order.remarks, '')) as remarks"),
-                DB::raw("MAX(NULLIF(NULLIF(purchase_order.pdf_name2, ''), '0')) as pdf"),
-                DB::raw('SUM(purchase_order_details.inv_busy_amt) as amount')
-            )
-            ->where('purchase_order.dealer_id', $ctx['dealer_id'])
-            ->whereNotIn('purchase_order.invoice_no_p', ['0', ''])
-            ->whereDate('purchase_order.sale_date', '>=', $from_date)
-            ->whereDate('purchase_order.sale_date', '<=', $to_date);
-
-        if ($request->filled('ref_no')) {
-            $ref = '%' . trim((string) $request->ref_no) . '%';
-            $q->where(function ($w) use ($ref) {
-                $w->where('purchase_order.invoice_no_p', 'LIKE', $ref)
-                    ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
-            });
-        }
-
-        $rows = $q->groupBy('purchase_order.invoice_no_p')
-            ->orderBy('sale_date', 'DESC')
-            ->orderBy('purchase_order.invoice_no_p', 'ASC')
-            ->get();
-
-        return response()->json([
-            'status' => true,
-            'data' => [
-                'from_date' => $from_date,
-                'to_date' => $to_date,
-                'rows' => $rows,
-            ],
-        ]);
+    } else {
+        $parts     = explode(' -', $request->date_range_picker);
+        $from_date = date('Y-m-d', strtotime(trim($parts[0])));
+        $to_date   = date('Y-m-d', strtotime(trim($parts[1])));
+        $status    = 0;
     }
+
+    // if ($from_date < '2021-04-01') {
+    //     $from_date = '2021-04-01';
+    // }
+
+    // ── Legacy query — verbatim shape, safe binding ───────────────────
+    $q = DB::table('purchase_order')
+        ->join('purchase_order_details',
+            'purchase_order_details.order_id', '=', 'purchase_order.order_id')
+        ->select(
+            'purchase_order_details.*',
+            DB::raw('SUM(inv_busy_amt) as dramt'),
+            'sale_date',
+            'remarks',
+            'invoice_no_p',
+            'pdf_name2'
+        )
+        ->whereRaw(
+            "date_format(purchase_order.sale_date, '%Y-%m-%d') >= ? AND date_format(purchase_order.sale_date, '%Y-%m-%d') <= ?",
+            [$from_date, $to_date]
+        )
+        ->where('dealer_id', $ctx['dealer_id'])
+        ->where('purchase_order.invoice_no_p', '!=', 0);
+
+    if ($request->filled('ref_no')) {
+        $ref = '%' . trim((string) $request->ref_no) . '%';
+        $q->where(function ($w) use ($ref) {
+            $w->where('purchase_order.invoice_no_p', 'LIKE', $ref)
+                ->orWhere('purchase_order_details.order_id', 'LIKE', $ref);
+        });
+    }
+
+    $rows = $q
+        ->groupBy('purchase_order.invoice_no_p')
+        ->orderBy('sale_date', 'DESC')
+        ->orderBy('invoice_no_p', 'ASC')
+        ->get();
+
+    return response()->json([
+        'status'    => true,
+        'data' => [
+            'from_date' => $from_date,
+            'to_date'   => $to_date,
+            'range_mode'=> $status === '1',
+            'rows'      => $rows,
+        ],
+    ]);
+}
 
     /* ============================================================
      |  10) PRODUCT RATE LOOKUP
@@ -1777,95 +1851,183 @@ class QuickOrderController extends Controller
     // /**
     //  * Common market/category-wise target vs achievement data builder.
     //  */
-    // private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
-    // {
-    //     $from_target_date = "01-APR-" . date('y');
-    //     $to_target_date = "31-MAR-" . (date('y') + 1);
-    //     $from_sale_date = date('Y') . "-04-01";
-    //     $to_sale_date = (date('Y') + 1) . "-03-31";
-    //     $month_from = date('Y-m') . '-01';
-    //     $month_to = date('Y-m-t');
+    /* ============================================================
+ |  MARKET / CATEGORY-WISE TARGET vs ACHIEVEMENT REPORT
+ * ============================================================ */
 
-    //     $quarter = DB::table('_quater_master')->where('details_month', date('Y-m'))->first();
-    //     $q_from = $quarter->quater_from_date ?? $month_from;
-    //     $q_to = $quarter->quater_to_date ?? $month_to;
+public function marketReport(Request $request, string $type)
+{
+    $type = strtoupper($type);
 
-    //     $prod_catg_mast_array = DB::table('prod_catg_mast')
-    //         ->where('MKTG_CATG', $mktg_catg)
-    //         ->orderBy('USER_SEQ', 'ASC')
-    //         ->get();
+    $allowed = [
+        'OTC' => 'OTC',
+        'OT2' => 'OT2',
+        'ETH' => 'JPS',
+        'FMC' => 'FMC',
+        'JPS' => 'JPS',
+        'JP2' => 'JP2',
+    ];
 
-    //     $um_array = DB::table('prod_catg_mast')
-    //         ->join('item_mast', 'item_mast.PROD_CATG', '=', 'prod_catg_mast.PROD_CATG')
-    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-    //         ->pluck('item_aum_mast.AUM', 'prod_catg_mast.PROD_CATG');
+    if (!isset($allowed[$type])) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Unknown report type. Allowed: ' . implode(', ', array_keys($allowed)),
+        ], 422);
+    }
 
-    //     $targets = DB::table('dealer_target_mast')
-    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'dealer_target_mast.PROD_CATG')
-    //         ->where('dealer_target_mast.FROM_DATE', $from_target_date)
-    //         ->where('dealer_target_mast.TO_DATE', $to_target_date)
-    //         ->whereIn('dealer_target_mast.ACC_CODE', $dealer_code)
-    //         ->groupBy('dealer_target_mast.PROD_CATG')
-    //         ->pluck(DB::raw('SUM(dealer_target_mast.TARGET_QTY) as TARGET_QTY'), 'dealer_target_mast.PROD_CATG');
+    $ctx = $this->context($request);
+    [$dealer_code, $div_code] = $this->resolveReportScope($request, $ctx);
 
-    //     $salesQtyYtd = DB::table('itemtran_body')
-    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
-    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-    //         ->groupBy('prod_catg_mast.PROD_CATG')
-    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    return response()->json([
+        'status'  => true,
+        'message' => $type . ' report',
+        'data'    => $this->buildMarketReport($allowed[$type], (array) $dealer_code, (array) $div_code),
+    ]);
+}
 
-    //     $salesValYtd = DB::table('itemtran_body')
-    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$from_sale_date' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$to_sale_date'")
-    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-    //         ->groupBy('prod_catg_mast.PROD_CATG')
-    //         ->pluck(DB::raw('SUM(itemtran_body.VALISSUED) as VALISSUED'), 'prod_catg_mast.PROD_CATG');
+private function buildMarketReport(string $mktg_catg, array $dealer_code, array $div_code): array
+{
+    // FY boundaries (April → March). Legacy used date('y') which is
+    // wrong between Jan–Mar — fixed here.
+    $nowYear  = (int) date('Y');
+    $nowMonth = (int) date('n');
+    $fyStart  = $nowMonth >= 4 ? $nowYear : $nowYear - 1;
+    $fyEnd    = $fyStart + 1;
 
-    //     $salesQtyMonth = DB::table('itemtran_body')
-    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$month_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$month_to'")
-    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-    //         ->groupBy('prod_catg_mast.PROD_CATG')
-    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    $fromTargetDate = '01-APR-' . substr((string) $fyStart, -2);
+    $toTargetDate   = '31-MAR-' . substr((string) $fyEnd, -2);
+    $fromSaleDate   = $fyStart . '-04-01';
+    $toSaleDate     = $fyEnd   . '-03-31';
 
-    //     $salesQtyQuat = DB::table('itemtran_body')
-    //         ->join('itemtran_head', 'itemtran_head.VRNO', '=', 'itemtran_body.VRNO')
-    //         ->join('item_mast', 'item_mast.ITEM_CODE', '=', 'itemtran_body.ITEM_CODE')
-    //         ->join('item_aum_mast', 'item_aum_mast.ITEM_CODE', '=', 'item_mast.ITEM_CODE')
-    //         ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
-    //         ->whereRaw("date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')>='$q_from' and date_format(itemtran_body.VRDATE_FILTER,'%Y-%m-%d')<='$q_to'")
-    //         ->whereIn('itemtran_head.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_body.DIV_CODE', $div_code)
-    //         ->whereIn('itemtran_head.ACC_CODE', $dealer_code)
-    //         ->groupBy('prod_catg_mast.PROD_CATG')
-    //         ->pluck(DB::raw('SUM(itemtran_body.QTYISSUED/item_aum_mast.UMTOAUM) as QTYISSUED'), 'prod_catg_mast.PROD_CATG');
+    $monthFrom = date('Y-m') . '-01';
+    $monthTo   = date('Y-m-t');
 
-    //     return [
-    //         'prod_catg_mast_array' => $prod_catg_mast_array,
-    //         'um_array' => $um_array,
-    //         'prod_wise_target_mast' => $targets,
-    //         'prod_wise_sales_mast_data_qty' => $salesQtyYtd,
-    //         'prod_wise_sales_mast_data_val' => $salesValYtd,
-    //         'month_prod_wise_sales_mast_data_qty' => $salesQtyMonth,
-    //         'quad_prod_wise_sales_mast_data_qty' => $salesQtyQuat,
-    //     ];
-    // }
+    $categories = DB::table('prod_catg_mast')
+        ->where('MKTG_CATG', $mktg_catg)
+        ->orderBy('USER_SEQ', 'ASC')
+        ->get(['PROD_CATG', 'PROD_CATG_DESC']);
 
+    if ($categories->isEmpty()) {
+        return [
+            'report_type' => $mktg_catg,
+            'period'      => [
+                'fy_start'   => $fromSaleDate,
+                'fy_end'     => $toSaleDate,
+                'month_from' => $monthFrom,
+                'month_to'   => $monthTo,
+            ],
+            'rows'   => [],
+            'totals' => [],
+        ];
+    }
+
+    $catKeys = $categories->pluck('PROD_CATG')->all();
+
+    $targets = DB::table('dealer_target_mast')
+        ->where('FROM_DATE', $fromTargetDate)
+        ->where('TO_DATE',   $toTargetDate)
+        ->whereIn('ACC_CODE',  $dealer_code)
+        ->whereIn('PROD_CATG', $catKeys)
+        ->groupBy('PROD_CATG')
+        ->pluck(DB::raw('SUM(TARGET_QTY) as TARGET_QTY'), 'PROD_CATG');
+
+    $salesBetween = function (string $from, string $to) use ($dealer_code, $div_code, $catKeys) {
+        return DB::table('itemtran_body')
+            ->join('itemtran_head',  'itemtran_head.VRNO',       '=', 'itemtran_body.VRNO')
+            ->join('item_mast',      'item_mast.ITEM_CODE',      '=', 'itemtran_body.ITEM_CODE')
+            ->join('item_aum_mast',  'item_aum_mast.ITEM_CODE',  '=', 'item_mast.ITEM_CODE')
+            ->join('prod_catg_mast', 'prod_catg_mast.PROD_CATG', '=', 'item_mast.PROD_CATG')
+            ->whereBetween(DB::raw('DATE(itemtran_body.VRDATE_FILTER)'), [$from, $to])
+            ->whereIn('itemtran_head.DIV_CODE',   $div_code)
+            ->whereIn('itemtran_body.DIV_CODE',   $div_code)
+            ->whereIn('itemtran_head.ACC_CODE',   $dealer_code)
+            ->whereIn('prod_catg_mast.PROD_CATG', $catKeys)
+            ->groupBy('prod_catg_mast.PROD_CATG')
+            ->select(
+                'prod_catg_mast.PROD_CATG',
+                DB::raw('SUM(itemtran_body.QTYISSUED / NULLIF(item_aum_mast.UMTOAUM, 0)) as QTY'),
+                DB::raw('SUM(itemtran_body.VALISSUED) as VAL')
+            )
+            ->get()
+            ->keyBy('PROD_CATG');
+    };
+
+    $ytd   = $salesBetween($fromSaleDate, $toSaleDate);
+    $month = $salesBetween($monthFrom,   $monthTo);
+
+    $rows   = [];
+    $totals = [];
+    $srNo   = 1;
+
+    foreach ($categories as $cat) {
+        $code = $cat->PROD_CATG;
+        $name = $cat->PROD_CATG_DESC ?: $cat->PROD_CATG;
+
+        // Unit heuristic — adjust if prod_catg_mast has an explicit unit column
+        $unit = stripos($name, '(value)') !== false ? 'VALUE' : 'QTY';
+
+        $target = (float) ($targets[$code] ?? 0);
+
+        $ytdRow   = $ytd->get($code);
+        $monthRow = $month->get($code);
+
+        $achieved   = $unit === 'VALUE'
+            ? (float) ($ytdRow->VAL   ?? 0)
+            : (float) ($ytdRow->QTY   ?? 0);
+
+        $monthSales = $unit === 'VALUE'
+            ? (float) ($monthRow->VAL ?? 0)
+            : (float) ($monthRow->QTY ?? 0);
+
+        $pct = $target > 0 ? round(($achieved / $target) * 100, 2) : 0.0;
+
+        $rows[] = [
+            'sr_no'         => $srNo++,
+            'category'      => $name,
+            'category_code' => $code,
+            'unit'          => $unit,
+            'annual' => [
+                'target'           => round($target, 2),
+                'achieved'         => round($achieved, 2),
+                'achieved_percent' => $pct,
+            ],
+            'current_month' => [
+                'sales' => round($monthSales, 2),
+            ],
+        ];
+
+        $totals[$unit] ??= [
+            'annual_target'       => 0.0,
+            'annual_achieved'     => 0.0,
+            'current_month_sales' => 0.0,
+        ];
+        $totals[$unit]['annual_target']       += $target;
+        $totals[$unit]['annual_achieved']     += $achieved;
+        $totals[$unit]['current_month_sales'] += $monthSales;
+    }
+
+    foreach ($totals as &$t) {
+        $t['annual_target']           = round($t['annual_target'], 2);
+        $t['annual_achieved']         = round($t['annual_achieved'], 2);
+        $t['annual_achieved_percent'] = $t['annual_target'] > 0
+            ? round(($t['annual_achieved'] / $t['annual_target']) * 100, 2)
+            : 0.0;
+        $t['current_month_sales']     = round($t['current_month_sales'], 2);
+    }
+    unset($t);
+
+    return [
+        'report_type' => $mktg_catg,
+        'period'      => [
+            'fy_start'   => $fromSaleDate,
+            'fy_end'     => $toSaleDate,
+            'month_from' => $monthFrom,
+            'month_to'   => $monthTo,
+        ],
+        'rows'   => $rows,
+        'totals' => $totals,
+    ];
+}
     /* ---------- Sale Statement ---------- */
     // public function saleStatement(Request $request)
     // {
@@ -2128,4 +2290,153 @@ class QuickOrderController extends Controller
     //         echo "Date,Order Id,Retailer Id,Retailer Name,User Id,User Name,Product Id,Product Name,Quantity,Rate,Direct Invoice(1)/Through SFA(0)\n";
     //     }, 'DMSchallanFormat.csv', ['Content-Type' => 'text/csv']);
     // }
+
+    public function create(Request $request): JsonResponse
+{
+    $auth = $request->user();
+    abort_if(
+        ! $auth || empty($auth->company_id),
+        403,
+        'Company context missing from auth token.'
+    );
+
+    $companyId  = (int) $auth->company_id;
+    $dealerId   = (int) ($auth->dealer_id ?? 0);
+    $dealerCode = $auth->dealer_code ?? null;
+    $roleId     = (int) ($auth->role_id ?? 0);
+
+    // ── Banners ────────────────────────────────────────────────────────
+    $images = DB::table('image_mast')
+        ->where('img_locn', 'Order')
+        ->where('company_id', $companyId)
+        ->select(['img'])
+        ->get()
+        ->map(fn ($r) => ['url' => url('baidyanath_images/' . $r->img)])
+        ->values();
+
+    // ── Depo code master (role 37 only, but cheap to always return) ────
+    $divCodes = DB::table('_div_code_master')
+        ->where('status', '1')
+        ->select(['id', 'name'])
+        ->get();
+
+    // ── Single dealer_person_login lookup ──────────────────────────────
+    $dpl = DB::table('dealer_person_login')
+        ->where('dealer_id', $dealerId)
+        ->where('company_id', $companyId)
+        ->first();
+
+    // ── Products already in this dealer's cart ────────────────────────
+    $cartProductIds = DB::table('demand_order_cart')
+        ->join('demand_order_details_cart',
+            'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
+        ->join('WWW_WEB_ITEM_DISPLAY',
+            'WWW_WEB_ITEM_DISPLAY.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
+        ->where('demand_order_cart.dealer_id', $dealerId)
+        ->groupBy('demand_order_details_cart.product_id')
+        ->pluck('product_id')
+        ->toArray();
+
+    // ── Cart totals ────────────────────────────────────────────────────
+    $cart = DB::table('demand_order_details_cart')
+        ->join('demand_order_cart',
+            'demand_order_cart.order_id', '=', 'demand_order_details_cart.order_id')
+        ->where('demand_order_cart.dealer_id', $dealerId)
+        ->select([
+            DB::raw('COUNT(demand_order_details_cart.product_id) AS count'),
+            DB::raw('SUM(demand_order_details_cart.total_rs
+                        - demand_order_details_cart.t1_rate
+                        + demand_order_details_cart.atd_rate) AS sale_value'),
+        ])
+        ->first();
+
+    // ── Catalog ────────────────────────────────────────────────────────
+    $catalogQuery = DB::table('catalog_product')
+        ->where('status', '1')
+        ->where('company_id', $companyId)
+        ->select([
+            'itemcode',
+            DB::raw("CONCAT(name, ' (', itemcode, ')') AS ITEM_NAME"),
+        ])
+        ->orderBy('itemcode', 'ASC');
+
+    if (! empty($cartProductIds)) {
+        $catalogQuery->whereNotIn('itemcode', $cartProductIds);
+    }
+    $catalog = $catalogQuery->get();
+
+    // ── Peer dealers under the same CSA ────────────────────────────────
+    $dealerArray = [];
+    if (! empty($dpl) && ! empty($dpl->csa_id)) {
+        $dealerArray = DB::table('dealer')
+            ->where('company_id', $companyId)
+            ->where('csa_id', $dpl->csa_id)
+            ->where('dealer_status', 1)
+            ->orderBy('id', 'ASC')
+            ->select(['id', 'name'])
+            ->get()
+            ->toArray();
+    }
+
+    // ── Current dealer (depo flag + credit) ────────────────────────────
+    $selfDealer = DB::table('dealer')
+        ->where('id', $dealerId)
+        ->select(['id', 'name', 'is_depo', 'over_due_amount'])
+        ->first();
+
+    // ── Current month demand value ─────────────────────────────────────
+    $monthDemand = DB::table('demand_order')
+        ->join('demand_order_details',
+            'demand_order_details.order_id', '=', 'demand_order.order_id')
+        ->where('demand_order.dealer_id', $dealerId)
+        ->whereRaw(
+            "DATE_FORMAT(demand_order.order_date, '%Y-%m') = ?",
+            [date('Y-m')]
+        )
+        ->select(DB::raw(
+            'SUM(demand_order_details.rate * demand_order_details.quantity) AS demand_value'
+        ))
+        ->first();
+
+    $overDue     = (float) ($selfDealer->over_due_amount ?? 0);
+    $monthValue  = (float) ($monthDemand->demand_value ?? 0);
+    $outstanding = $overDue - $monthValue;
+
+    return response()->json([
+        'success' => true,
+        'data'    => [
+            'meta' => [
+                'company_id'             => $companyId,
+                'dealer_id'              => $dealerId,
+                'dealer_code'            => $dealerCode,
+                'role_id'                => $roleId,
+                'is_rasna'               => $companyId === 213,
+                'has_excel_upload'       => $companyId !== 2155,
+                'show_div_code_dropdown' => $roleId === 37,
+                'quantity_type'          => (int) ($dpl->order_quantity_type ?? 0),
+            ],
+
+            'images'        => $images,
+            'div_codes'     => $divCodes,
+            'catalog'       => $catalog,
+            'dealer_array'  => $dealerArray,
+
+            'cart' => [
+                'count'       => (int) ($cart->count ?? 0),
+                'sale_value'  => (float) ($cart->sale_value ?? 0),
+                'product_ids' => $cartProductIds,
+            ],
+
+            'dealer' => [
+                'id'                   => $selfDealer->id ?? null,
+                'name'                 => $selfDealer->name ?? null,
+                'is_depo'              => (int) ($selfDealer->is_depo ?? 0),
+                'over_due_amount'      => $overDue,
+                'current_month_demand' => $monthValue,
+                'outstanding_limit'    => $outstanding,
+            ],
+        ],
+    ]);
 }
+}
+

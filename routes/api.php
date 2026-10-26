@@ -71,6 +71,8 @@ use App\Http\Controllers\Api\TallyViewController;
 use App\Http\Controllers\Api\DmsReportController;
 use App\Http\Controllers\Api\DbExportController;
 use App\Http\Controllers\Api\Sfa\ClaimController;
+use App\Http\Controllers\Api\PersonController;
+use App\Http\Controllers\Api\LocationController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -79,6 +81,20 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:lo
 Route::get('/dev/db-export/download/{id}', [DbExportController::class, 'download'])->middleware('signed:relative')->name('db-export.download');
 
 Route::middleware('auth:sanctum')->group(function () {
+
+//Master
+Route::get('/persons', [PersonController::class, 'index']);
+ Route::get('/locations',                          [LocationController::class, 'index']);
+    Route::get('/location-categories',                [LocationController::class, 'categories']);
+    Route::put('/locations/{id}',                     [LocationController::class, 'update'])
+        ->whereNumber('id');
+    Route::put('/location-categories/{mtype}/{id}',   [LocationController::class, 'updateCategory'])
+        ->whereNumber('mtype')->whereNumber('id');
+
+    // Beats / dispatch
+    Route::get('/beats',                              [BeatController::class, 'beats']);
+    Route::get('/beats-l5',                           [BeatController::class, 'beatsL5']);
+    Route::get('/dispatch-beats',                     [BeatController::class, 'dispatchBeats']);
 
 Route::get('/dev/db-export', [DbExportController::class, 'access']);
 Route::get('/dev/db-export/tables', [DbExportController::class, 'tables']);
@@ -183,6 +199,7 @@ Route::prefix('dms-reports')->group(function () {
         // Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
         Route::get   ('/credit-limits', [RetailerController::class, 'creditLimits']);
         Route::put   ('/credit-limits', [RetailerController::class, 'saveCreditLimits']);
+        Route::get('/claim-retailers', [RetailerController::class, 'claimRetailers']);
         Route::post  ('/',           [RetailerController::class, 'store']);     // create retailer
         Route::get   ('/{id}',       [RetailerController::class, 'show']);      // retailer detail
         Route::put   ('/{id}',       [RetailerController::class, 'update']);    // edit
@@ -521,7 +538,10 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::post  ('/cart-data',       [QuickOrderController::class, 'cartDataForModal']); // cart modal
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
-    Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);             // perfoma / view order
+    Route::get   ('/{id}',            [QuickOrderController::class, 'edit']); 
+    Route::get   ('/create',            [QuickOrderController::class, 'create']);            // perfoma / view order
+    Route::get('report/{type}', [QuickOrderController::class, 'marketReport'])
+        ->whereIn('type', ['otc', 'ot2', 'eth', 'fmc', 'jps', 'jp2']);
     // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
 
     // ---------- HELPERS ----------
