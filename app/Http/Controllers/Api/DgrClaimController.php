@@ -1,14 +1,16 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-
+use App\Traits\UploadsToS3;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+
 class DgrClaimController extends Controller
 {
+    use UploadsToS3;
     /**
      * GET /api/dgr-claims
      * List of DGR image/amount claims for the dealer.
@@ -461,53 +463,56 @@ class DgrClaimController extends Controller
         // }
     // }
 
-    /* ================= helpers ================= */
+   /* ================= helpers ================= */
 
-    private function uploadDocs(Request $request, string $type, string $orderId): array
-    {
-        $doc = array_fill_keys(array_map(fn($i) => "doc_{$i}", range(1, 17)), '');
-        $dir = public_path('myupload/claim');// my path to save claims
-        //'/var/www/www-demo-msell-in/public_html/client/myuploads/dgr_claims/'; old path
-        if (!is_dir($dir)) mkdir($dir, 0775, true);
+private function uploadDocs(Request $request, string $type, string $orderId): array
+{
+    $doc    = array_fill_keys(array_map(fn($i) => "doc_{$i}", range(1, 17)), '');
+    $folder = 'dgr_claims';   // S3 folder (replaces public_path('myupload/claim'))
 
-        $put = function ($file, $prefix) use ($dir) {
-            $name = $prefix . '_' . date('Ymd_His') . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move($dir, $name);
-            return 'myuploads/dgr_claims/' . $name;
-        };
+    $put = function ($file, $prefix) use ($folder) {
+        $ext  = strtolower($file->getClientOriginalExtension());
+        $name = $prefix . '_' . date('Ymd_His') . '_' . uniqid() . '.' . $ext;
+        // returns S3 key like "dgr_claims/contract_20250101_120000_abc.jpg"
+        return $this->uploadToS3($file, $folder, $name) ?? '';
+    };
 
-        // Common
-        $doc['doc_1'] = $request->hasFile('contract_image')      ? $put($request->file('contract_image'), 'contract')       : '';
-        $doc['doc_2'] = $this->uploadMulti($request, 'shop_display_images', 'shop_display', $dir);
-        $doc['doc_3'] = $request->hasFile('other_image_1')       ? $put($request->file('other_image_1'), 'other1')          : '';
-        $doc['doc_4'] = $request->hasFile('other_image_2')       ? $put($request->file('other_image_2'), 'other2')          : '';
+    // Common
+    $doc['doc_1'] = $request->hasFile('contract_image')  ? $put($request->file('contract_image'), 'contract') : '';
+    $doc['doc_2'] = $this->uploadMulti($request, 'shop_display_images', 'shop_display', $folder);
+    $doc['doc_3'] = $request->hasFile('other_image_1')   ? $put($request->file('other_image_1'), 'other1')    : '';
+    $doc['doc_4'] = $request->hasFile('other_image_2')   ? $put($request->file('other_image_2'), 'other2')    : '';
 
-        if ($type === 'MT') {
-            $doc['doc_1'] = $request->hasFile('claim_letter_image_mt')  ? $put($request->file('claim_letter_image_mt'), 'claim_letter') : '';
-            $doc['doc_2'] = $this->uploadMulti($request, 'shop_display_images_mt', 'shop_display_mt', $dir);
-            $doc['doc_3'] = $request->hasFile('other_image_1_mt')        ? $put($request->file('other_image_1_mt'), 'other1_mt')          : '';
-            $doc['doc_4'] = $request->hasFile('other_image_2_mt')        ? $put($request->file('other_image_2_mt'), 'other2_mt')          : '';
-            $doc['doc_5'] = $this->uploadMulti($request, 'dn_from_chain_mt', 'dn_chain', $dir);
-            $doc['doc_6'] = $this->uploadMulti($request, 'dn_db_rasna_mt',  'dn_db_rasna', $dir);
-            $doc['doc_7'] = $request->hasFile('visibility_approval_mt')  ? $put($request->file('visibility_approval_mt'), 'vis_approval') : '';
-            $doc['doc_8'] = $request->hasFile('visibility_verification_mt') ? $put($request->file('visibility_verification_mt'), 'vis_verify') : '';
-        }
-
-        return $doc;
+    if ($type === 'MT') {
+        $doc['doc_1'] = $request->hasFile('claim_letter_image_mt')     ? $put($request->file('claim_letter_image_mt'), 'claim_letter') : '';
+        $doc['doc_2'] = $this->uploadMulti($request, 'shop_display_images_mt', 'shop_display_mt', $folder);
+        $doc['doc_3'] = $request->hasFile('other_image_1_mt')           ? $put($request->file('other_image_1_mt'), 'other1_mt')         : '';
+        $doc['doc_4'] = $request->hasFile('other_image_2_mt')           ? $put($request->file('other_image_2_mt'), 'other2_mt')         : '';
+        $doc['doc_5'] = $this->uploadMulti($request, 'dn_from_chain_mt', 'dn_chain', $folder);
+        $doc['doc_6'] = $this->uploadMulti($request, 'dn_db_rasna_mt',  'dn_db_rasna', $folder);
+        $doc['doc_7'] = $request->hasFile('visibility_approval_mt')    ? $put($request->file('visibility_approval_mt'), 'vis_approval') : '';
+        $doc['doc_8'] = $request->hasFile('visibility_verification_mt') ? $put($request->file('visibility_verification_mt'), 'vis_verify') : '';
     }
 
-    private function uploadMulti(Request $request, string $field, string $prefix, string $dir): string
-    {
-        if (!$request->hasFile($field)) return '';
-        $urls = [];
-        foreach ((array) $request->file($field) as $i => $file) {
-            $name = $prefix . '_' . $i . '_' . date('Ymd_His') . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move($dir, $name);
-            $urls[] = 'myuploads/dgr_claims/' . $name;
+    return $doc;
+}
+
+private function uploadMulti(Request $request, string $field, string $prefix, string $folder): string
+{
+    if (!$request->hasFile($field)) return '';
+
+    $keys = [];
+    foreach ((array) $request->file($field) as $i => $file) {
+        $ext  = strtolower($file->getClientOriginalExtension());
+        $name = $prefix . '_' . $i . '_' . date('Ymd_His') . '_' . uniqid() . '.' . $ext;
+        $key  = $this->uploadToS3($file, $folder, $name);
+        if ($key !== null) {
+            $keys[] = $key;
         }
-        return implode(',', $urls);
     }
 
+    return implode(',', $keys);
+}
     private function ownershipType(int $id): string
     {
         $gt = [244, 245, 256, 258, 266];

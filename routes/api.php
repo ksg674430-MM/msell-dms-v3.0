@@ -71,8 +71,7 @@ use App\Http\Controllers\Api\TallyViewController;
 use App\Http\Controllers\Api\DmsReportController;
 use App\Http\Controllers\Api\DbExportController;
 use App\Http\Controllers\Api\Sfa\ClaimController;
-use App\Http\Controllers\Api\PersonController;
-use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\SchemeController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -81,20 +80,6 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:lo
 Route::get('/dev/db-export/download/{id}', [DbExportController::class, 'download'])->middleware('signed:relative')->name('db-export.download');
 
 Route::middleware('auth:sanctum')->group(function () {
-
-//Master
-Route::get('/persons', [PersonController::class, 'index']);
- Route::get('/locations',                          [LocationController::class, 'index']);
-    Route::get('/location-categories',                [LocationController::class, 'categories']);
-    Route::put('/locations/{id}',                     [LocationController::class, 'update'])
-        ->whereNumber('id');
-    Route::put('/location-categories/{mtype}/{id}',   [LocationController::class, 'updateCategory'])
-        ->whereNumber('mtype')->whereNumber('id');
-
-    // Beats / dispatch
-    Route::get('/beats',                              [BeatController::class, 'beats']);
-    Route::get('/beats-l5',                           [BeatController::class, 'beatsL5']);
-    Route::get('/dispatch-beats',                     [BeatController::class, 'dispatchBeats']);
 
 Route::get('/dev/db-export', [DbExportController::class, 'access']);
 Route::get('/dev/db-export/tables', [DbExportController::class, 'tables']);
@@ -193,18 +178,28 @@ Route::prefix('dms-reports')->group(function () {
     // RETAILER  → MENU: Master → Retailers
     // --------------------------------------------------------
     Route::prefix('retailers')->group(function () {
-        Route::get   ('/',           [RetailerController::class, 'index']);     // retailer list
-        // Route::post  ('/query',      [RetailerController::class, 'query']);     // filtered search
-        Route::get   ('/form-data',  [RetailerController::class, 'formData']);  // dropdowns (beat, class, route…)
-        // Route::get   ('/locations',  [RetailerController::class, 'locations']); // beat/location list
-        Route::get   ('/credit-limits', [RetailerController::class, 'creditLimits']);
-        Route::put   ('/credit-limits', [RetailerController::class, 'saveCreditLimits']);
-        Route::get('/claim-retailers', [RetailerController::class, 'claimRetailers']);
-        Route::post  ('/',           [RetailerController::class, 'store']);     // create retailer
-        Route::get   ('/{id}',       [RetailerController::class, 'show']);      // retailer detail
-        Route::put   ('/{id}',       [RetailerController::class, 'update']);    // edit
-        Route::delete('/{id}',       [RetailerController::class, 'destroy']);   // delete
-    });
+
+    // ── List / lookups ──
+    Route::get   ('/',                 [RetailerController::class, 'index']);
+    Route::get   ('/form-data',        [RetailerController::class, 'formData']);
+    Route::get   ('/locations',        [RetailerController::class, 'locations']);        // ✅ enabled — method exists
+    Route::get   ('/claim-retailers',  [RetailerController::class, 'claimRetailers']);   // ✅ enabled — method added
+
+    // ── Credit limits ──
+    Route::get   ('/credit-limits',    [RetailerController::class, 'creditLimits']);
+    Route::put   ('/credit-limits',    [RetailerController::class, 'saveCreditLimits']);
+
+    // ── CRUD ──
+    Route::post  ('/',                 [RetailerController::class, 'store']);
+    Route::get   ('/{id}',             [RetailerController::class, 'show'])->whereNumber('id');
+    Route::put   ('/{id}',             [RetailerController::class, 'update'])->whereNumber('id');
+    Route::delete('/{id}',             [RetailerController::class, 'destroy'])->whereNumber('id');
+
+    // ── Query (dynamic filter) ──
+    // Requires a `filterRequest` trait/helper on the base Controller.
+    // Enable only after that helper is confirmed present.
+    // Route::post('/query', [RetailerController::class, 'query']);
+});
 
     // ========================================================
     // STOCK
@@ -538,10 +533,8 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::post  ('/cart-data',       [QuickOrderController::class, 'cartDataForModal']); // cart modal
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
-    Route::get   ('/{id}',            [QuickOrderController::class, 'edit']); 
-    Route::get   ('/create',            [QuickOrderController::class, 'create']);            // perfoma / view order
-    Route::get('report/{type}', [QuickOrderController::class, 'marketReport'])
-        ->whereIn('type', ['otc', 'ot2', 'eth', 'fmc', 'jps', 'jp2']);
+    Route::get('/current-status', [QuickOrderController::class, 'legacyCurrentStatus']);             // perfoma / view order
+    Route::post('/legacy/send-to-erp', [QuickOrderController::class, 'legacySendOrderToErp']);
     // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
 
     // ---------- HELPERS ----------
@@ -550,23 +543,36 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     // Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
 
     // ---------- REPORTS ----------
-    // Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
-    // Route::get('/reports/ot2',                    [QuickOrderController::class, 'ot2']);
-    // Route::get('/reports/ethical',                [QuickOrderController::class, 'ethical']);
-    // Route::get('/reports/fmcg',                   [QuickOrderController::class, 'fmcg']);
-    // Route::get('/reports/jps',                    [QuickOrderController::class, 'jps']);
-    // Route::get('/reports/jp2',                    [QuickOrderController::class, 'jp2']);
-    // Route::get('/reports/sale-statement',         [QuickOrderController::class, 'saleStatement']);
-    // Route::get('/reports/sale-statement-ethical', [QuickOrderController::class, 'saleStatementEthical']);
-    // Route::get('/reports/dms-to-tally',           [QuickOrderController::class, 'dmsToTally']);
-    // Route::get('/reports/invoice-summary',        [QuickOrderController::class, 'invoiceSummary']);
-    // Route::get('/reports/purchase',               [QuickOrderController::class, 'purchaseReport']);
+    Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
+    Route::get('/reports/ot2',                    [QuickOrderController::class, 'ot2']);
+    Route::get('/reports/ethical',                [QuickOrderController::class, 'ethical']);
+    Route::get('/reports/fmcg',                   [QuickOrderController::class, 'fmcg']);
+    Route::get('/reports/jps',                    [QuickOrderController::class, 'jps']);
+    Route::get('/reports/jp2',                    [QuickOrderController::class, 'jp2']);
+    Route::get('/reports/sale-statement',         [QuickOrderController::class, 'saleStatement']);
+    Route::get('/reports/sale-statement-ethical', [QuickOrderController::class, 'saleStatementEthical']);
+    Route::get('/reports/dms-to-tally',           [QuickOrderController::class, 'dmsToTally']);
+    Route::get('/reports/invoice-summary',        [QuickOrderController::class, 'invoiceSummary']);
+    Route::get('/reports/purchase',               [QuickOrderController::class, 'purchaseReport']);
     Route::get('/reports/dealer-dashboard',       [QuickOrderController::class, 'dealerDashboard']);
     // Route::post('/reports/common',                [QuickOrderController::class, 'commonReportSection']);
 
     // ---------- CSV FORMATS ----------
     Route::get('/formats/order',        [QuickOrderController::class, 'orderFormat']);
-    // Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
+    Route::get('/formats/dms-challan',  [QuickOrderController::class, 'dmsChallanFormat']);
+    Route::get   ('/{id}',            [QuickOrderController::class, 'edit']);
+});
+
+// ============================================================
+// SCHEME API  (new)
+// ============================================================
+Route::middleware('auth:sanctum')->prefix('scheme')->group(function () {
+
+    Route::get   ('/index',                [SchemeController::class, 'index']);
+    Route::get   ('/create-data',          [SchemeController::class, 'createData']);
+    Route::post  ('/store',                [SchemeController::class, 'store']);
+    Route::get   ('/admin-scheme-details', [SchemeController::class, 'adminSchemeDetails']);
+    Route::get   ('/dealer-scheme',        [SchemeController::class, 'dealerScheme']);
 });
 
 //------------ Claim Api's --------------
@@ -695,4 +701,92 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('approval/sampling', [DMSClaimReportController::class, 'newClaimApproval1']);
         Route::post('approval/challan',  [DMSClaimReportController::class, 'newClaimApproval2']);
     });
+});
+
+use App\Http\Controllers\Api\QuickOrder\QoOrderController;
+use App\Http\Controllers\Api\QuickOrder\QoCartController;
+use App\Http\Controllers\Api\QuickOrder\QoProductController;
+use App\Http\Controllers\Api\QuickOrder\QoSchemeController;
+use App\Http\Controllers\Api\QuickOrder\QoDashboardController;
+use App\Http\Controllers\Api\QuickOrder\QoReportController;
+
+Route::middleware('auth:sanctum')->prefix('quick-order')->group(function () {
+
+    // Orders
+    Route::get  ('/orders',                     [QoOrderController::class, 'index']);
+    Route::get  ('/orders/{orderNo}',           [QoOrderController::class, 'show']);
+    Route::post ('/orders/{orderNo}/email',     [QoOrderController::class, 'email']);
+    Route::post ('/orders/send-to-erp',         [QoOrderController::class, 'sendToErp']);
+
+    // Cart
+    Route::get  ('/cart',                       [QoCartController::class, 'show']);
+    Route::get  ('/cart/modal',                 [QoCartController::class, 'modal']);
+    Route::post ('/cart/items',                 [QoCartController::class, 'store']);
+    Route::patch('/cart/items/{id}',            [QoCartController::class, 'update']);
+    Route::delete('/cart/items/{id}',           [QoCartController::class, 'destroy']);
+    Route::post ('/cart/finalize',              [QoCartController::class, 'finalize']);
+
+    // Products
+    Route::get  ('/products',                   [QoProductController::class, 'index']);
+    Route::get  ('/products/{code}/rate',       [QoProductController::class, 'rate']);
+
+    // Scheme slabs
+    Route::post ('/products/{code}/slabs',      [QoSchemeController::class, 'calculate']);
+    Route::post ('/products/{code}/slabs/legacy',[QoSchemeController::class, 'legacyCheck']);
+
+    // Dashboards
+    Route::get  ('/dashboards/dealer',          [QoDashboardController::class, 'dealer']);
+    Route::get  ('/dashboards/{catg}',          [QoDashboardController::class, 'category']);
+
+    // Reports
+    Route::get  ('/reports/purchase-details',   [QoReportController::class, 'purchase']);
+    Route::get  ('/reports/sale-statement',     [QoReportController::class, 'saleStatement']);
+    Route::get  ('/reports/invoice-details',    [QoReportController::class, 'invoiceDetails']);
+});
+
+use App\Http\Controllers\Api\CreditDebitNoteController;
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get   ('/credit-debit-notes',       [CreditDebitNoteController::class, 'index']);
+    Route::delete('/credit-debit-notes/{id}',  [CreditDebitNoteController::class, 'destroy']);
+});
+use App\Http\Controllers\Api\PersonController;
+
+use App\Http\Controllers\Api\LocationController;
+
+Route::middleware('auth:sanctum')->group(function () {
+   Route::middleware('legacy.only')->group(function(){
+       
+Route::get('/locations',      [LocationController::class, 'index']);
+Route::get('/location-categories', [LocationController::class, 'categories']);
+Route::put('/locations/{id}', [LocationController::class, 'update'])->whereNumber('id');
+Route::put('/location-categories/{mtype}/{id}', [LocationController::class, 'updateCategory'])
+    ->whereNumber('mtype')->whereNumber('id');
+    Route::get   ('/persons',                    [PersonController::class, 'index']);
+Route::get   ('/persons/form-data',          [PersonController::class, 'formData']);
+   });
+// Route::post  ('/persons',                    [PersonController::class, 'store']);
+// Route::get   ('/persons/{id}',               [PersonController::class, 'show'])->whereNumber('id');
+// Route::put   ('/persons/{id}',               [PersonController::class, 'update'])->whereNumber('id');
+// Route::delete('/persons/{id}',               [PersonController::class, 'destroy'])->whereNumber('id');
+// Route::post  ('/persons/{id}/toggle-status', [PersonController::class, 'toggleStatus'])->whereNumber('id');
+
+});
+
+Route::fallback(function () {
+    return response()->json([
+        'status'  => false,
+        'message' => 'Not found',
+    ], 404);
+});
+
+use App\Http\Controllers\Api\DirectChallanController;
+Route::middleware(['auth:sanctum'])->prefix('direct-challans')->group(function () {
+    Route::get ('/form',                [DirectChallanController::class, 'formData']);
+    Route::get ('/next-number',         [DirectChallanController::class, 'nextNumber']);
+    Route::get ('/retailers/{id}/location', [DirectChallanController::class, 'retailerLocation'])->whereNumber('id');
+    Route::get ('/products/{id}/info',  [DirectChallanController::class, 'productInfo'])->whereNumber('id');
+    Route::get ('/{id}',                [DirectChallanController::class, 'show'])->whereNumber('id');
+    Route::post('/',                    [DirectChallanController::class, 'store']);
+    Route::put ('/{id}',                [DirectChallanController::class, 'update'])->whereNumber('id');
+    Route::post('/{id}/cancel',         [DirectChallanController::class, 'cancel'])->whereNumber('id');
 });

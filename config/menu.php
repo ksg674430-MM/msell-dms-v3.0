@@ -33,8 +33,9 @@ return [
             ['slug' => 'catalog_product', 'label' => 'Item List',       'icon' => 'fa-caret-right', 'route' => '/master/products'],
             ['slug' => 'retailer_add',    'label' => 'Retailer',        'icon' => 'fa-caret-right', 'route' => '/master/retailers'],
             ['slug' => 'credit_limit',    'label' => 'Credit Limit Master', 'icon' => 'fa-caret-right', 'route' => '/master/credit-limits'],
-            // ['slug' => 'add_user',        'label' => 'Field Staff',     'icon' => 'fa-caret-right', 'route' => '/master/users'],
-            // ['slug' => 'dispatch_beat',   'label' => 'Dispatch Route',  'icon' => 'fa-caret-right', 'route' => '/master/dispatch-route'],
+            ['slug' => 'add_user',        'label' => 'User',     'icon' => 'fa-caret-right', 'route' => '/master/users'],
+            ['slug' => 'dispatch_beat',   'label' => 'Beat',  'icon' => 'fa-caret-right', 'route' => '/master/dispatch-route'],
+            ['slug' => 'retailer_claim',   'label' => 'Retailer Claim',  'icon' => 'fa-caret-right', 'route' => '/master/retailer-claim'],
         ],
     ],
 
@@ -63,6 +64,7 @@ return [
         'slug' => 'billing', 'label' => 'Invoice/Billing', 'icon' => 'fa-list-alt',
         'children' => [
             ['slug' => 'direct_challan',        'label' => 'Generate Invoice',            'icon' => 'fa-caret-right', 'route' => '/challans/create',            'roles' => ['DISTRIBUTOR', 'DEPO', 'Super Admin']],
+            ['slug' => 'direct_challan_1',        'label' => 'Generate Retailer  Invoice',            'icon' => 'fa-caret-right', 'route' => '/challans/retail',            'roles' => ['DISTRIBUTOR', 'DEPO', 'Super Admin']],
             ['slug' => 'sale_order_details',    'label' => 'Invoice Through SFA',         'icon' => 'fa-caret-right', 'route' => '/sales-orders',               'roles' => ['DISTRIBUTOR']],
             // ['slug' => 'challan_against_order', 'label' => 'Billing Against Order',       'icon' => 'fa-caret-right', 'route' => '/challans/from-orders',       'roles' => ['DEPO']],
             // ['slug' => 'challan_against_super', 'label' => 'Billing Against Super Order', 'icon' => 'fa-caret-right', 'route' => '/challans/from-super-orders', 'roles' => ['Super Admin']],
@@ -228,9 +230,12 @@ return [
             // ['slug' => 'payment_history', 'label' => 'Payment History', 'icon' => 'fa-caret-right', 'route' => '/payments',        'exclude_companies' => [213]],
         ],
     ],
-    // [
-    //     'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
-    // ],
+    [
+        'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
+    ],
+     [
+        'slug' => 'credit_debit', 'label' => 'Credit Debit Notes', 'icon' => 'fa-server', 'route' => '/credit_debit_notes',
+    ],
 
     // ============================================================
     // Claim  (companies 213, 215 only)

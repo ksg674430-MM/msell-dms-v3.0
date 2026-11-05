@@ -81,7 +81,13 @@ class AuthController extends Controller
         }
 
         $stid        = $user->state_id != 0 ? $user->state_id : $user->dpr_state;
-        $sessionYear = DB::selectOne("SELECT * FROM session_year ORDER BY sesId DESC LIMIT 1");
+        $sessionYear = DB::selectOne(
+    "SELECT * FROM session_year
+      WHERE company_id = ?
+      ORDER BY sesId DESC
+      LIMIT 1",
+    [$user->company_id]
+);
         $constant    = DB::selectOne("SELECT * FROM _constant WHERE company_id = ? LIMIT 1", [$user->company_id]);
 
         $comp = DB::selectOne(
