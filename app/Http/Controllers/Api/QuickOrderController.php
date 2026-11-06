@@ -1144,7 +1144,7 @@ $matched = $buildBase()
 
         $dealerId = (int) $ctx['dealer_id'];
         $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
-        $banners = DB::table('image_mast')->where('img_locn', 'Dashboard')->where('company_id', $ctx['company_id'])->orderBy('id', 'DESC')->pluck('img')->map(fn($img) => ['url' => "https://{$domainUrl}/public/baidyanath_images/{$img}", 'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4']);
+        $banners = DB::table('image_mast')->where('img_locn', 'Dashboard')->where('company_id', $ctx['company_id'])->orderBy('id', 'DESC')->pluck('img')->map(fn($img) => ['url' => "https://baidyanathjhansi.msell.in/public/baidyanath_images/{$img}", 'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4']);
         $entries = DB::table('dealer_ledger_busy_details')->where('dealer_id', $dealerId)->orderBy('trans_date')->orderBy('id')->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
         $rows = $entries->whereNotNull('trans_date')->values()->map(fn($r) => ['date' => $r->trans_date, 'voucher_no' => $r->vocuher_number, 'vch_type' => $r->vocuher_type, 'account' => $r->narration, 'amount' => (float) $r->amount]);
@@ -1332,7 +1332,27 @@ $matched = $buildBase()
             $div_code_else = !empty($login->div_code_main) ? $login->div_code_main : '0'; $div_code = !empty($acc->DIV_CODE) ? $acc->DIV_CODE : $div_code_else;
         }
 
-        $image_dyn = DB::table('image_mast')->where('status', 1)->where('img_locn', 'Order')->where('company_id', $ctx['company_id'])->get();
+        $domainUrl = 'baidyanathjhansi.msell.in';
+
+$image_dyn = DB::table('image_mast')
+    ->where('status', 1)
+    ->where('img_locn', 'Order')
+    ->where('company_id', $ctx['company_id'])
+    ->orderBy('id', 'DESC')
+    ->get()
+    ->map(function ($img) {
+        $filename = ltrim($img->img, '/');
+        
+        // Space ko %20 se replace karne ka sahi tarika
+        $encoded  = str_replace(' ', '%20', $filename);
+        
+        return [
+            // Ab yahan local URL banega
+            'url' => url("/baidyanath_images/{$encoded}"),
+            'video' => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4',
+            'img'   => $filename,   // backward compat
+        ];
+    });
         $div_code_master = DB::table('_div_code_master')->where('status', '1')->pluck('name', 'id');
         $fetch_year = DB::table('financial_year')->orderBy('id', 'DESC')->first();
         $from_year_t = !empty($fetch_year->from_year) ? $fetch_year->from_year : date('Y'); $to_year_t = !empty($fetch_year->to_year) ? $fetch_year->to_year : (date('Y') + 1);
@@ -1915,7 +1935,9 @@ private function legacyStore(Request $request, array $ctx)
         ],
     ]);
 }
-       private function legacyDealerDashboard(Request $request, array $ctx)
+    
+
+    private function legacyDealerDashboard(Request $request, array $ctx)
     {
         $dealer_id = (int) $ctx['dealer_id'];
         $dealer_code = (string) $ctx['dealer_code'];
@@ -2040,12 +2062,23 @@ private function legacyStore(Request $request, array $ctx)
         }
 
         // 6. Ledger Details & Banners
-        $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
-        $image_dyn = DB::table('image_mast')->where('status',1)->where('img_locn','Dashboard')->get();
-        $banners = $image_dyn->map(fn($img) => [
-            'url' => "https://{$domainUrl}/public/baidyanath_images/{$img->img}", 
-            'video' => strtolower(pathinfo($img->img, PATHINFO_EXTENSION)) === 'mp4'
-        ]);
+        $image_dyn = DB::table('image_mast')
+            ->where('status', 1)
+            ->where('img_locn', 'Dashboard')
+            ->where('company_id', $ctx['company_id'])   
+            ->orderBy('id', 'DESC')
+            ->get();
+
+        // ✅ FIX: Yahan ab local URL generate hoga production URL ki jagah
+        $banners = $image_dyn->map(function ($img) {
+            $filename = ltrim($img->img, '/');
+            $encoded  = str_replace(' ', '%20', $filename);
+            
+            return [
+                'url'   => url("/baidyanath_images/{$encoded}"), 
+                'video' => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4',
+            ];
+        });
 
         $entries = DB::table('dealer_ledger_busy_details')->where('dealer_id', $dealer_id)->orderBy('trans_date')->orderBy('id')->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
@@ -2087,6 +2120,8 @@ private function legacyStore(Request $request, array $ctx)
             ]
         ]);
     }
+
+
    public function otc(Request $request, string $mktgCatg = 'OTC')
 {
     $ctx = $this->context($request);
