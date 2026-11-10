@@ -214,7 +214,7 @@ private function legacyDealerScheme(
     string $item_code,
     float  $qty,
     float  $rate,
-    string $dealer_code,
+    string $dealer_code, // Ab yeh filter mein use nahi ho raha
     $slab_id = null,
     int    $company_id = self::LEGACY_COMPANY_ID
 ): array {
@@ -237,56 +237,58 @@ private function legacyDealerScheme(
     $itemSize = $itemMast->ITEM_SIZE ?? null;
     $sizeUm   = $itemMast->SIZE_UM   ?? null;
 
-    /* ── Step 2: Dealer's eligible schemes ── */
+    /* ── Step 2: Eligible schemes (Dealer filter REMOVED) ── */
     $eligibleSchemes = DB::table('CIRCULAR_MAST as cm')
-    ->join('SCHEME_MAST as sm', 'sm.SCHEME_NO', '=', 'cm.SCHEME_NO')
-    ->join('SCHEME_SLAB as sl', 'sl.SCHEME_NO', '=', 'cm.SCHEME_NO')   // ✅ ADD
-    ->join('SCHEME_DOMAIN as sd', 'sd.SCHEME_NO', '=', 'cm.SCHEME_NO')
-    ->where('sd.ACC_CODE', $dealer_code)
-    ->where(function ($w) {
-        $w->whereNull('cm.CANCELLEDBY')
-          ->orWhere('cm.CANCELLEDBY', '')
-          ->orWhere('cm.CANCELLEDBY', ' ')
-          ->orWhere('cm.CANCELLEDBY', 'NULL');
-    })
-    ->when(!$include_expired, fn($q) => $q->whereRaw(
-        "DATE(cm.from_date_condition) <= ? AND DATE(cm.to_date_condition) >= ?",
-        [$today, $today]
-    ))
-    ->groupBy('sd.SCHEME_NO')
-    ->pluck('sd.SCHEME_NO')
-    ->toArray();
-    if (empty($eligibleSchemes)) return ['slabs' => [], 'selected' => null];
-
-    /* ── Step 3: 4-tier fallback match ── */
-    $buildBase = function () use ($eligibleSchemes, $include_expired, $today) {
-    $q = DB::table('CIRCULAR_MAST as cm')
         ->join('SCHEME_MAST as sm', 'sm.SCHEME_NO', '=', 'cm.SCHEME_NO')
-        ->join('SCHEME_SLAB as sl', 'sl.SCHEME_NO', '=', 'cm.SCHEME_NO')   // ✅ ADD
+        ->join('SCHEME_SLAB as sl', 'sl.SCHEME_NO', '=', 'cm.SCHEME_NO')
         ->join('SCHEME_DOMAIN as sd', 'sd.SCHEME_NO', '=', 'cm.SCHEME_NO')
-        ->whereIn('sd.SCHEME_NO', $eligibleSchemes)
+        // ❌ HATA DIYA: ->where('sd.ACC_CODE', $dealer_code)
         ->where(function ($w) {
             $w->whereNull('cm.CANCELLEDBY')
               ->orWhere('cm.CANCELLEDBY', '')
               ->orWhere('cm.CANCELLEDBY', ' ')
               ->orWhere('cm.CANCELLEDBY', 'NULL');
-        });
-    if (!$include_expired) {
-        $q->whereRaw(
+        })
+        ->when(!$include_expired, fn($q) => $q->whereRaw(
             "DATE(cm.from_date_condition) <= ? AND DATE(cm.to_date_condition) >= ?",
             [$today, $today]
-        );
-    }
-    return $q;
-};
+        ))
+        ->groupBy('sd.SCHEME_NO')
+        ->pluck('sd.SCHEME_NO')
+        ->toArray();
+
+    if (empty($eligibleSchemes)) return ['slabs' => [], 'selected' => null];
+
+    /* ── Step 3: 4-tier fallback match ── */
+    $buildBase = function () use ($eligibleSchemes, $include_expired, $today) {
+        $q = DB::table('CIRCULAR_MAST as cm')
+            ->join('SCHEME_MAST as sm', 'sm.SCHEME_NO', '=', 'cm.SCHEME_NO')
+            ->join('SCHEME_SLAB as sl', 'sl.SCHEME_NO', '=', 'cm.SCHEME_NO')
+            ->join('SCHEME_DOMAIN as sd', 'sd.SCHEME_NO', '=', 'cm.SCHEME_NO')
+            ->whereIn('sd.SCHEME_NO', $eligibleSchemes)
+            ->where(function ($w) {
+                $w->whereNull('cm.CANCELLEDBY')
+                  ->orWhere('cm.CANCELLEDBY', '')
+                  ->orWhere('cm.CANCELLEDBY', ' ')
+                  ->orWhere('cm.CANCELLEDBY', 'NULL');
+            });
+        if (!$include_expired) {
+            $q->whereRaw(
+                "DATE(cm.from_date_condition) <= ? AND DATE(cm.to_date_condition) >= ?",
+                [$today, $today]
+            );
+        }
+        return $q;
+    };
+
     $matched = null;
 
     // Tier 1
-$matched = $buildBase()
-    ->where('sd.ITEM_CODE', $item_code)
-    ->groupBy('sd.SCHEME_NO')          // ✅ ADD
-    ->orderByDesc('sd.id')
-    ->first(['sd.SCHEME_NO']);
+    $matched = $buildBase()
+        ->where('sd.ITEM_CODE', $item_code)
+        ->groupBy('sd.SCHEME_NO')
+        ->orderByDesc('sd.id')
+        ->first(['sd.SCHEME_NO']);
 
     // Tier 2: PROD_CODE
     if (!$matched && $prodCode && $prodCode !== '0' && $prodCode !== '') {
@@ -322,7 +324,6 @@ $matched = $buildBase()
         ->orderBy('BASE_FROM');
 
     if ($itemSize) {
-        // Prefer item-size-filtered slabs; fallback to all if none
         $sizeFiltered = DB::table('SCHEME_SLAB')
             ->where('SCHEME_NO', $matched->SCHEME_NO)
             ->where('ITEM_SIZE', $itemSize)
@@ -340,8 +341,7 @@ $matched = $buildBase()
 
     if ($slabs->isEmpty()) return ['slabs' => [], 'selected' => null];
 
-    /* ── Step 5: Build options ──
-       ERP slab me BASE_TO nahi hota — compute karo as base_from + free */
+    /* ── Step 5: Build options ── */
     $options = $slabs->map(function ($s) {
         $from = (float) $s->BASE_FROM;
         $free = (float) $s->FREE_ITEM1_QTY1;
@@ -389,7 +389,6 @@ $matched = $buildBase()
 
     return ['slabs' => $options, 'selected' => $selected];
 }
-
     private function dealerRate(array $ctx, $itemCode, $mode = 0)
     {
         $company_id = $ctx['company_id'];
@@ -958,18 +957,41 @@ $matched = $buildBase()
     }
 
     private function groupOrderLines($rows): array
-    {
-        $final_out = [];
-        foreach ($rows as $v) {
-            $catId = $v->cat2_id ?: 'uncategorized';
-            $catName = $v->cat2_name ?: 'Uncategorized';
-            if (!isset($final_out[$catId])) $final_out[$catId] = ['name' => $catName, 'rows' => []];
-            $final_out[$catId]['rows'][] = [
-                'total_rs' => $v->total_rs, 'pid' => $v->pid, 'order_id' => $v->cart_order_id, 'order_converstion_unit' => $v->order_converstion_unit, 'ITEM_CODE' => $v->cp_id ?? $v->product_id, 'ITEM_NAME' => $v->cp_name ?? ('Product #' . $v->product_id), 'rate' => $v->rate, 'order_unit' => $v->order_unit, 'quantity' => $v->quantity, 'quantity_per_case' => $v->cp_qty_per_case, 'gst_percent' => $v->cp_gst ?? '0', 'free_qty' => $v->free_qty, 'remarks' => $v->remarks, 't1_rate' => $v->t1_rate, 'atd_rate' => $v->atd_rate,
-            ];
-        }
-        return $final_out;
+{
+    $final_out = [];
+    foreach ($rows as $v) {
+        $catId   = $v->cat2_id   ?: 'uncategorized';
+        $catName = $v->cat2_name ?: 'Uncategorized';
+        if (!isset($final_out[$catId])) $final_out[$catId] = ['name' => $catName, 'rows' => []];
+
+        // Same convention as legacyBuildCartPayload:
+        // `quantity` = TOTAL, `billed_qty` = BILLED, `free_qty` = FREE.
+        $billed = (float) $v->quantity;
+        $free   = (float) $v->free_qty;
+
+        $final_out[$catId]['rows'][] = [
+            'total_rs'               => $v->total_rs,
+            'pid'                    => $v->pid,
+            'order_id'               => $v->cart_order_id,
+            'order_converstion_unit' => $v->order_converstion_unit,
+            'ITEM_CODE'              => $v->cp_id ?? $v->product_id,
+            'ITEM_NAME'              => $v->cp_name ?? ('Product #' . $v->product_id),
+            'rate'                   => $v->rate,
+            'order_unit'             => $v->order_unit,
+
+            'quantity'               => $billed + $free,   // TOTAL
+            'billed_qty'             => $billed,           // BILLED
+            'free_qty'               => $free,             // FREE
+
+            'quantity_per_case'      => $v->cp_qty_per_case,
+            'gst_percent'            => $v->cp_gst ?? '0',
+            'remarks'                => $v->remarks,
+            't1_rate'                => $v->t1_rate,
+            'atd_rate'               => $v->atd_rate,
+        ];
     }
+    return $final_out;
+}
 
     /* ============================================================
      |  6) DELETE CART ITEM
@@ -1144,7 +1166,7 @@ $matched = $buildBase()
 
         $dealerId = (int) $ctx['dealer_id'];
         $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
-        $banners = DB::table('image_mast')->where('img_locn', 'Dashboard')->where('company_id', $ctx['company_id'])->orderBy('id', 'DESC')->pluck('img')->map(fn($img) => ['url' => "https://{$domainUrl}/public/baidyanath_images/{$img}", 'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4']);
+        $banners = DB::table('image_mast')->where('img_locn', 'Dashboard')->where('company_id', $ctx['company_id'])->orderBy('id', 'DESC')->pluck('img')->map(fn($img) => ['url' => "https://baidyanathjhansi.msell.in/public/baidyanath_images/{$img}", 'video' => strtolower(pathinfo($img, PATHINFO_EXTENSION)) === 'mp4']);
         $entries = DB::table('dealer_ledger_busy_details')->where('dealer_id', $dealerId)->orderBy('trans_date')->orderBy('id')->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
         $rows = $entries->whereNotNull('trans_date')->values()->map(fn($r) => ['date' => $r->trans_date, 'voucher_no' => $r->vocuher_number, 'vch_type' => $r->vocuher_type, 'account' => $r->narration, 'amount' => (float) $r->amount]);
@@ -1221,31 +1243,53 @@ $matched = $buildBase()
         ];
     }
 
-    private function legacyBuildCartPayload(int $dealer_id, int $uid): array
-    {
-        $records = DB::table('demand_order_cart')
-            ->join('demand_order_details_cart', 'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
-            ->leftJoin('WWW_WEB_ITEM_DISPLAY', 'WWW_WEB_ITEM_DISPLAY.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
-            ->select('demand_order_cart.*', 'demand_order_details_cart.*', 'demand_order_details_cart.id as pid', 'WWW_WEB_ITEM_DISPLAY.ITEM_NAME', 'WWW_WEB_ITEM_DISPLAY.MKTG_CATG')
-            ->where('demand_order_cart.dealer_id', $dealer_id)->where('demand_order_cart.id', $uid)->groupBy('demand_order_details_cart.id')->get();
+  private function legacyBuildCartPayload(int $dealer_id, int $uid): array
+{
+    $records = DB::table('demand_order_cart')
+        ->join('demand_order_details_cart', 'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
+        ->leftJoin('WWW_WEB_ITEM_DISPLAY', 'WWW_WEB_ITEM_DISPLAY.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
+        ->select('demand_order_cart.*', 'demand_order_details_cart.*', 'demand_order_details_cart.id as pid', 'WWW_WEB_ITEM_DISPLAY.ITEM_NAME', 'WWW_WEB_ITEM_DISPLAY.MKTG_CATG')
+        ->where('demand_order_cart.dealer_id', $dealer_id)
+        ->where('demand_order_cart.id', $uid)
+        ->groupBy('demand_order_details_cart.id')
+        ->get();
 
-        $final_out_map = [];
-        foreach ($records as $v) {
-            $catKey = $v->MKTG_CATG ?? 'Uncategorized';
-            if (!isset($final_out_map[$catKey])) $final_out_map[$catKey] = [];
-            
-            $final_out_map[$catKey][] = [
-                'total_rs' => $v->total_rs, 'pid' => $v->pid, 'order_id' => $v->order_id, 'order_converstion_unit' => $v->order_converstion_unit, 'ITEM_CODE' => $v->product_id, 'ITEM_NAME' => $v->ITEM_NAME ?? ('Product #' . $v->product_id), 'rate' => $v->rate, 'order_unit' => $v->order_unit, 'quantity' => $v->quantity, 'free_qty' => $v->free_qty, 'remarks' => $v->remarks, 't1_rate' => $v->t1_rate, 'atd_rate' => $v->atd_rate,
-            ];
-        }
+    $final_out_map = [];
+    foreach ($records as $v) {
+        $catKey = $v->MKTG_CATG ?? 'Uncategorized';
+        if (!isset($final_out_map[$catKey])) $final_out_map[$catKey] = [];
 
-        $final_out = [];
-        foreach ($final_out_map as $catName => $rows) {
-            $final_out[] = [ $catName => $rows ];
-        }
-        return $final_out;
+        // DB stores billed qty in `quantity` and free qty in `free_qty`.
+        // OrderLinesTable / CartModal / Edit dialog expect `quantity` = TOTAL.
+        $billed = (float) $v->quantity;
+        $free   = (float) $v->free_qty;
+
+        $final_out_map[$catKey][] = [
+            'total_rs'               => $v->total_rs,
+            'pid'                    => $v->pid,
+            'order_id'               => $v->order_id,
+            'order_converstion_unit' => $v->order_converstion_unit,
+            'ITEM_CODE'              => $v->product_id,
+            'ITEM_NAME'              => $v->ITEM_NAME ?? ('Product #' . $v->product_id),
+            'rate'                   => $v->rate,
+            'order_unit'             => $v->order_unit,
+
+            'quantity'               => $billed + $free,   // TOTAL (8)
+            'billed_qty'             => $billed,           // BILLED (7)
+            'free_qty'               => $free,             // FREE  (1)
+
+            'remarks'                => $v->remarks,
+            't1_rate'                => $v->t1_rate,
+            'atd_rate'               => $v->atd_rate,
+        ];
     }
 
+    $final_out = [];
+    foreach ($final_out_map as $catName => $rows) {
+        $final_out[] = [$catName => $rows];
+    }
+    return $final_out;
+}
     private function legacyIndex(Request $request, array $ctx)
     {
         $dealer_id   = (int) $ctx['dealer_id'];
@@ -1332,7 +1376,27 @@ $matched = $buildBase()
             $div_code_else = !empty($login->div_code_main) ? $login->div_code_main : '0'; $div_code = !empty($acc->DIV_CODE) ? $acc->DIV_CODE : $div_code_else;
         }
 
-        $image_dyn = DB::table('image_mast')->where('status', 1)->where('img_locn', 'Order')->where('company_id', $ctx['company_id'])->get();
+        $domainUrl = 'baidyanathjhansi.msell.in';
+
+$image_dyn = DB::table('image_mast')
+    ->where('status', 1)
+    ->where('img_locn', 'Order')
+    ->where('company_id', $ctx['company_id'])
+    ->orderBy('id', 'DESC')
+    ->get()
+    ->map(function ($img) {
+        $filename = ltrim($img->img, '/');
+        
+        // Space ko %20 se replace karne ka sahi tarika
+        $encoded  = str_replace(' ', '%20', $filename);
+        
+        return [
+            // Ab yahan local URL banega
+            'url' => url("/baidyanath_images/{$encoded}"),
+            'video' => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4',
+            'img'   => $filename,   // backward compat
+        ];
+    });
         $div_code_master = DB::table('_div_code_master')->where('status', '1')->pluck('name', 'id');
         $fetch_year = DB::table('financial_year')->orderBy('id', 'DESC')->first();
         $from_year_t = !empty($fetch_year->from_year) ? $fetch_year->from_year : date('Y'); $to_year_t = !empty($fetch_year->to_year) ? $fetch_year->to_year : (date('Y') + 1);
@@ -1352,6 +1416,35 @@ $matched = $buildBase()
         return response()->json(['status' => true, 'message' => 'Create data fetched (legacy)', 'data' => ['legacy' => true, 'dealer_id' => $dealer_id, 'company_id' => (int) $ctx['company_id'], 'erp_company_id' => $erp_company, 'role_id' => $role_id, 'csa_id' => $csa_id, 'dealer_code' => $dealer_code, 'div_code' => $div_code, 'div_code_master' => $div_code_master, 'image_dyn' => $image_dyn, 'catalog_product_details' => $catalog_product_details, 'categories' => $categories, 'mktg_cat_array' => $mktg_cat_array, 'converstion_unit_item_code' => DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM', 'ITEM_CODE'), 'sale_value_cart' => !empty($cart_details->sale_vale) ? $cart_details->sale_vale : '0', 'count_prod_cart' => !empty($cart_details->count) ? $cart_details->count : '0', 'quantity_type' => !empty($login->order_quantity_type) ? $login->order_quantity_type : 0]]);
     }
 
+
+
+    private function resolveSlabBilling(
+    ?int   $slabId,
+    float  $rate,
+    string $unit,
+    float  $umToAum
+): ?array {
+    if (empty($slabId)) return null;
+
+    $slab = DB::table('SCHEME_SLAB')->where('id', (int) $slabId)->first();
+    if (!$slab) return null;
+
+    $isBox    = $unit === 'BOX';
+    $baseFrom = (float) ($slab->BASE_FROM       ?? 0); // PCS
+    $freePcs  = (float) ($slab->FREE_ITEM1_QTY1 ?? 0); // PCS
+
+    $billedInUnit = ($isBox && $umToAum > 0) ? $baseFrom / $umToAum : $baseFrom;
+    $freeInUnit   = ($isBox && $umToAum > 0) ? $freePcs  / $umToAum : $freePcs;
+
+    return [
+        'qty'        => $billedInUnit,
+        'free'       => $freeInUnit,
+        'total'      => round($rate * $billedInUnit, 2),
+        'conversion' => $isBox ? ($billedInUnit * $umToAum) : $billedInUnit,
+    ];
+}
+
+// change
 private function legacyStore(Request $request, array $ctx)
 {
     if ($request->hasFile('uploadExcelData')) {
@@ -1429,9 +1522,8 @@ private function legacyStore(Request $request, array $ctx)
 
         /* ──────────────────────────────────────────────────────────
          | 3) UPDATE-EXISTING-QTY branch
-         |    Frontend sends update_free_qty ALREADY in ORDER UNIT.
-         |    If update_slab_id is set, we can recompute from slab
-         |    (slab free is PCS → convert to order unit).
+         |    FIX: if slab_id is present, slab wins →
+         |         billed = BASE_FROM, free = FREE_ITEM1_QTY1
          * ────────────────────────────────────────────────────────── */
         if ($request->update_qty_status == '1') {
             $update_qty = (float) $request->update_qty;
@@ -1454,28 +1546,22 @@ private function legacyStore(Request $request, array $ctx)
             $unit     = (string) ($rateInfo['um'] ?? $line->order_unit ?? 'PCS');
             $isBox    = $unit === 'BOX';
 
-            // Free qty from frontend is already in order unit
             $freeQtyInUnit = (float) ($request->update_free_qty ?? 0);
-
-            // If explicit slab given AND frontend didn't send free → recompute
-            $slabId = $request->update_slab_id ?? $request->update_slabid ?? null;
-            if (!empty($slabId) && $freeQtyInUnit <= 0) {
-                $sc = $this->legacyDealerScheme(
-                    (string) $line->product_id,
-                    $update_qty,
-                    $baseRate,
-                    (string) $ctx['dealer_code'],
-                    $slabId,
-                    $company_id
-                );
-                if (!empty($sc['selected'])) {
-                    $freePcs       = (float) ($sc['selected']['free_item']['qty'] ?? 0);
-                    $freeQtyInUnit = $isBox && $umToAum > 0 ? $freePcs / $umToAum : $freePcs;
-                }
-            }
+            $slabId        = $request->update_slab_id ?? $request->update_slabid ?? null;
 
             $totalRs        = (float) ($request->update_total_rs ?: ($baseRate * $update_qty));
             $conversionUnit = $isBox ? ($update_qty * $umToAum) : $update_qty;
+
+            // ── FIX: slab is authoritative ──
+            if (!empty($slabId)) {
+                $sb = $this->resolveSlabBilling((int) $slabId, $baseRate, $unit, $umToAum);
+                if ($sb) {
+                    $update_qty     = $sb['qty'];
+                    $freeQtyInUnit  = $sb['free'];
+                    $totalRs        = $sb['total'];
+                    $conversionUnit = $sb['conversion'];
+                }
+            }
 
             DB::table('demand_order_details_cart')->where('id', $line->id)->update([
                 'quantity'                 => $update_qty,
@@ -1493,13 +1579,8 @@ private function legacyStore(Request $request, array $ctx)
 
         /* ──────────────────────────────────────────────────────────
          | 4) BULK ADD-NEW-ITEMS (parallel arrays)
-         |
-         |    IMPORTANT — unit contract with frontend:
-         |    - qty        → billed qty in ORDER UNIT (PCS/BOX)
-         |    - free_qty   → free qty in ORDER UNIT  (frontend sends
-         |                   already-converted value; if absent we
-         |                   recompute from slab and convert)
-         |    - slab_id    → optional, per-row slab id
+         |    FIX: if slab_id is present, slab wins →
+         |         billed = BASE_FROM, free = FREE_ITEM1_QTY1
          * ────────────────────────────────────────────────────────── */
         $item_codes        = array_values((array) ($request->item_code                ?? []));
         $product_rates     = array_values((array) ($request->product_rate            ?? []));
@@ -1530,23 +1611,17 @@ private function legacyStore(Request $request, array $ctx)
             $isBox    = $unit === 'BOX';
             $order_conv = $isBox ? ($umToAum * $q) : $q;
 
-            // Free qty from frontend is already in order unit
             $freeQtyInUnit = (float) ($free_qtys[$k] ?? 0);
             $slabId        = $slab_ids[$k] ?? null;
 
-            // Slab re-validation / fallback (only if frontend didn't send free)
-            if (!empty($slabId) && $freeQtyInUnit <= 0) {
-                $sc = $this->legacyDealerScheme(
-                    (string) $value,
-                    $q,
-                    $rate > 0 ? $rate : (float) ($rateInfo['rate'] ?? 0),
-                    (string) $ctx['dealer_code'],
-                    $slabId,
-                    $company_id
-                );
-                if (!empty($sc['selected'])) {
-                    $freePcs       = (float) ($sc['selected']['free_item']['qty'] ?? 0);
-                    $freeQtyInUnit = $isBox && $umToAum > 0 ? $freePcs / $umToAum : $freePcs;
+            // ── FIX: slab is authoritative ──
+            if (!empty($slabId)) {
+                $sb = $this->resolveSlabBilling((int) $slabId, $rate, $unit, $umToAum);
+                if ($sb) {
+                    $q             = $sb['qty'];
+                    $freeQtyInUnit = $sb['free'];
+                    $t             = $sb['total'];
+                    $order_conv    = $sb['conversion'];
                 }
             }
 
@@ -1617,7 +1692,6 @@ private function legacyStore(Request $request, array $ctx)
         ], 500);
     }
 }
-
     private function legacyStoreFinal(Request $request, array $ctx)
     {
         $this->ensureBlockOrderDateColumn();
@@ -1915,7 +1989,9 @@ private function legacyStore(Request $request, array $ctx)
         ],
     ]);
 }
-       private function legacyDealerDashboard(Request $request, array $ctx)
+    
+
+    private function legacyDealerDashboard(Request $request, array $ctx)
     {
         $dealer_id = (int) $ctx['dealer_id'];
         $dealer_code = (string) $ctx['dealer_code'];
@@ -2040,12 +2116,23 @@ private function legacyStore(Request $request, array $ctx)
         }
 
         // 6. Ledger Details & Banners
-        $domainUrl = (string) DB::table('company')->where('id', $ctx['company_id'])->value('domain_url');
-        $image_dyn = DB::table('image_mast')->where('status',1)->where('img_locn','Dashboard')->get();
-        $banners = $image_dyn->map(fn($img) => [
-            'url' => "https://{$domainUrl}/public/baidyanath_images/{$img->img}", 
-            'video' => strtolower(pathinfo($img->img, PATHINFO_EXTENSION)) === 'mp4'
-        ]);
+        $image_dyn = DB::table('image_mast')
+            ->where('status', 1)
+            ->where('img_locn', 'Dashboard')
+            ->where('company_id', $ctx['company_id'])   
+            ->orderBy('id', 'DESC')
+            ->get();
+
+        // ✅ FIX: Yahan ab local URL generate hoga production URL ki jagah
+        $banners = $image_dyn->map(function ($img) {
+            $filename = ltrim($img->img, '/');
+            $encoded  = str_replace(' ', '%20', $filename);
+            
+            return [
+                'url'   => url("/baidyanath_images/{$encoded}"), 
+                'video' => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4',
+            ];
+        });
 
         $entries = DB::table('dealer_ledger_busy_details')->where('dealer_id', $dealer_id)->orderBy('trans_date')->orderBy('id')->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);
@@ -2087,6 +2174,8 @@ private function legacyStore(Request $request, array $ctx)
             ]
         ]);
     }
+
+
    public function otc(Request $request, string $mktgCatg = 'OTC')
 {
     $ctx = $this->context($request);
