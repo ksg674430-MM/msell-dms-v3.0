@@ -13,7 +13,7 @@ final class LegacySchemeOptions
             if ($base === null || $free === null || $base === '' || $free === '') {
                 continue;
             }
-            $out[] = [(float) $base, (float) $free];
+            $out[] = [(float) $base, (float) $free, (string) $base, (string) $free];
         }
         return $out;
     }
@@ -39,10 +39,11 @@ final class LegacySchemeOptions
         $hasScheme = $raw !== [];
 
         $out = [];
-        foreach ($hasScheme ? $raw : [[$qty, 0.0]] as [$base, $free]) {
-            $out[] = [$hasScheme ? $base + $free : $base, $free];
+        foreach ($hasScheme ? $raw : [[$qty, 0.0, '', '']] as [$base, $free, $baseRaw, $freeRaw]) {
+            $t = $hasScheme ? $base + $free : $base;
+            $out[] = [$t, $free, $hasScheme ? self::str($t) . '(' . ($base ? $baseRaw : '0') . '+' . ($free ? $freeRaw : '0') . ')' : ''];
         }
-        usort($out, fn ($a, $b) => $a[0] <=> $b[0] ?: $a[1] <=> $b[1]);
+        usort($out, fn ($a, $b) => $a[0] <=> $b[0] ?: strcmp($a[2], $b[2]));
 
         $n = count($out);
         $pick = $n - 1;
@@ -64,17 +65,18 @@ final class LegacySchemeOptions
             if ($step == 0) {
                 $step = 1;
             }
-            $t = $billed * $step + $free * $step;
+            $f = $free * $step;
+            $t = $billed * $step + $f;
             if ($nextSlab == 0 || $t <= $nextSlab) {
-                $list[] = [$t, $free * $step, $pick];
+                $list[] = [$t, $f, self::str($t) . ' (' . self::str($billed * $step) . '+' . self::str($f) . ')'];
             }
             $step++;
         }
 
         $lastTitle = $list ? end($list)[0] : 0;
-        foreach ($out as $k => [$t, $f]) {
-            if ($lastTitle < $t) {
-                $list[] = [$t, $f, $k];
+        foreach ($out as $slab) {
+            if ($lastTitle < $slab[0]) {
+                $list[] = $slab;
             }
         }
 
@@ -94,29 +96,24 @@ final class LegacySchemeOptions
                 $t += $puda;
                 $f = (int) ($t * $perc);
                 if ($f > 0 && ($t - $f) / $f == $ratio && ($stop === null || $t != $stop)) {
-                    $list[] = [$t, (float) $f, $k];
+                    $list[] = [$t, (float) $f, self::str($t) . ' (' . self::str($t - $f) . '+' . $f . ')'];
                 }
             }
         }
-        if ($hasScheme) {
-            foreach ($out as $k => [$t, $f]) {
-                if ((int) $t === (int) $qty) {
-                    $list[] = [$t, $f, $k];
-                }
-            }
+        if ($out[0][1] != 0) {
+            usort($list, fn ($a, $b) => $a[0] <=> $b[0] ?: strcmp($a[2], $b[2]) ?: $a[1] <=> $b[1]);
         }
-        usort($list, fn ($a, $b) => $a[0] <=> $b[0]);
 
         $qtyInt = (int) $qty;
         $picked = [];
-        $rank = fn (array $c) => $out[$c[2]][0] <= $c[0] ? $c[2] : -1;
         foreach ($list as $c) {
-            if ($qtyInt > (int) $c[0]) {
-                continue;
+            if ($qtyInt <= (int) $c[0]) {
+                $picked[self::num($c[0])] = $c;
             }
-            $key = self::num($c[0]);
-            if (!isset($picked[$key]) || $rank($c) >= $rank($picked[$key])) {
-                $picked[$key] = $c;
+        }
+        foreach ($raw as [$base, $f]) {
+            if ((int) ($base + $f) === $qtyInt) {
+                $picked[self::num($base + $f)] = [$base + $f, $f];
             }
         }
 
@@ -143,6 +140,11 @@ final class LegacySchemeOptions
             }
         }
         return null;
+    }
+
+    private static function str(float $n): string
+    {
+        return (string) $n;
     }
 
     public static function num(float $n): string

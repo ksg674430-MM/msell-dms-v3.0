@@ -329,9 +329,12 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
                         ->where(fn ($w) => $w->whereNull('cm.CANCELLEDBY')->orWhereIn('cm.CANCELLEDBY', ['', ' ', 'NULL'])))
                     ->whereExists(fn ($e) => $e->select(DB::raw(1))->from('SCHEME_MAST as sm')->whereColumn('sm.SCHEME_NO', 'sd.SCHEME_NO'))
                     ->whereExists(fn ($e) => $e->select(DB::raw(1))->from('SCHEME_SLAB as sl')->whereColumn('sl.SCHEME_NO', 'sd.SCHEME_NO'));
-                $accCode === null
-                    ? $q->where(fn ($w) => $w->whereIn('sd.ACC_CODE', ['0', ''])->orWhereNull('sd.ACC_CODE'))
-                    : $q->where('sd.ACC_CODE', $accCode);
+                $q->whereExists(function ($e) use ($accCode) {
+                    $e->select(DB::raw(1))->from('SCHEME_DOMAIN as acc')->whereColumn('acc.SCHEME_NO', 'sd.SCHEME_NO');
+                    $accCode === null
+                        ? $e->where(fn ($w) => $w->whereIn('acc.ACC_CODE', ['0', ''])->orWhereNull('acc.ACC_CODE'))
+                        : $e->where('acc.ACC_CODE', $accCode);
+                });
                 $schemeNo = $apply($q)->orderByDesc('sd.id')->value('sd.SCHEME_NO');
                 if ($schemeNo === null) {
                     continue;
