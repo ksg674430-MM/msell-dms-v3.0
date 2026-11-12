@@ -324,8 +324,10 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
                 $q = DB::table('SCHEME_DOMAIN as sd')
                     ->whereExists(fn ($e) => $e->select(DB::raw(1))->from('CIRCULAR_MAST as cm')
                         ->whereColumn('cm.SCHEME_NO', 'sd.SCHEME_NO')
-                        ->where('cm.from_date_condition', '<=', $today)
-                        ->where('cm.to_date_condition', '>=', $today)
+                        ->where(fn ($w) => $w->where('cm.from_date_condition', '<=', $today)
+                            ->orWhere(fn ($r) => $r->whereNull('cm.from_date_condition')->where('cm.FROM_DATE', '<>', '')->where('cm.FROM_DATE', '<=', $today)))
+                        ->where(fn ($w) => $w->where('cm.to_date_condition', '>=', $today)
+                            ->orWhere(fn ($r) => $r->whereNull('cm.to_date_condition')->where(fn ($t) => $t->whereNull('cm.TO_DATE')->orWhereIn('cm.TO_DATE', ['', 'NULL'])->orWhere('cm.TO_DATE', '>=', $today))))
                         ->where(fn ($w) => $w->whereNull('cm.CANCELLEDBY')->orWhereIn('cm.CANCELLEDBY', ['', ' ', 'NULL'])))
                     ->whereExists(fn ($e) => $e->select(DB::raw(1))->from('SCHEME_MAST as sm')->whereColumn('sm.SCHEME_NO', 'sd.SCHEME_NO'))
                     ->whereExists(fn ($e) => $e->select(DB::raw(1))->from('SCHEME_SLAB as sl')->whereColumn('sl.SCHEME_NO', 'sd.SCHEME_NO'));
