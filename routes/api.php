@@ -540,7 +540,7 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     // ---------- HELPERS ----------
     Route::get   ('/helpers/product-rate',       [QuickOrderController::class, 'productRate']);
     // Route::post  ('/helpers/check-scheme',       [QuickOrderController::class, 'checkScheme']);
-    // Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
+    Route::get   ('/helpers/scheme-autocomplete',[QuickOrderController::class, 'schemeAutocomplete']);
 
     // ---------- REPORTS ----------
     Route::get('/reports/otc',                    [QuickOrderController::class, 'otc']);
