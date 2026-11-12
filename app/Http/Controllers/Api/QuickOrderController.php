@@ -46,25 +46,59 @@ class QuickOrderController extends Controller
      |  EXISTING (CURRENT) HELPERS
      * ============================================================ */
 
-    private function context(Request $request): array
-    {
-        $user = $request->user();
-        $dealer_id = $user->dealer_id ?? 0;
-        $dealer = DB::table('dealer')->where('id', $dealer_id)->first();
+  private function context(Request $request): array
+{
+    $user      = $request->user();
+    $dealer_id = $user->dealer_id ?? 0;
+    $dealer    = DB::table('dealer')->where('id', $dealer_id)->first();
 
-        return [
-            'user'          => $user,
-            'dealer'        => $dealer,
-            'dealer_id'     => $dealer_id,
-            'company_id'    => $dealer->company_id ?? ($user->company_id ?? 0),
-            'dealer_code'   => $dealer->dealer_code ?? ($user->dealer_code ?? ''),
-            'csa_id'        => $dealer->csa_id ?? ($user->csa_id ?? 0),
-            'role_id'       => $user->role_id ?? ($dealer->role_id ?? 0),
-            'domain_url'    => $user->domain_url ?? '',
-            'quantity_type' => $dealer->quantity_type ?? 0,
-            'date'          => date('Y-m-d'),
-        ];
+    /* ── dealer_code resolution (legacy-compatible, crash-proof) ──
+     |  Priority:
+     |    1) dealer.dealer_code          ← legacy session me yahi set hota tha
+     |    2) user->dealer_code (Sanctum) ← fallback
+     |    3) dealer_person_login.dealer_code → sirf agar column exist karta ho
+     * ─────────────────────────────────────────────────────────── */
+    $dealerCode = trim((string) ($dealer->dealer_code ?? ''));
+
+    if ($dealerCode === '' && !empty($user->dealer_code)) {
+        $dealerCode = trim((string) $user->dealer_code);
     }
+
+    if ($dealerCode === '' && Schema::hasColumn('dealer_person_login', 'dealer_code')) {
+        $dealerCode = trim((string) (DB::table('dealer_person_login')
+            ->where('dealer_id', $dealer_id)
+            ->value('dealer_code') ?? ''));
+    }
+
+    // dev/staging pe mismatch warn (sirf agar login table me column ho)
+    if (app()->environment('local', 'staging')
+        && Schema::hasColumn('dealer_person_login', 'dealer_code')
+        && $dealerCode !== '') {
+        $loginCode = trim((string) (DB::table('dealer_person_login')
+            ->where('dealer_id', $dealer_id)->value('dealer_code') ?? ''));
+        if ($loginCode !== '' && $loginCode !== $dealerCode) {
+            Log::warning('[context] dealer_code MISMATCH', [
+                'dealer.dealer_code'              => $dealer->dealer_code ?? null,
+                'dealer_person_login.dealer_code' => $loginCode,
+                'used'                            => $dealerCode,
+                'dealer_id'                       => $dealer_id,
+            ]);
+        }
+    }
+
+    return [
+        'user'          => $user,
+        'dealer'        => $dealer,
+        'dealer_id'     => $dealer_id,
+        'company_id'    => (int) ($dealer->company_id ?? ($user->company_id ?? 0)),
+        'dealer_code'   => $dealerCode,
+        'csa_id'        => $dealer->csa_id ?? ($user->csa_id ?? 0),
+        'role_id'       => $user->role_id ?? ($dealer->role_id ?? 0),
+        'domain_url'    => $user->domain_url ?? '',
+        'quantity_type' => $dealer->quantity_type ?? 0,
+        'date'          => date('Y-m-d'),
+    ];
+}
 
     private function erpOrderUrl(int $companyId): string
     {
@@ -327,10 +361,13 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
     }
 
 
-   /* ──────────────────────────────────────────────────────────────
+ /* ──────────────────────────────────────────────────────────────
  * Matched scheme for one item, scoped to a dealer OR to global
  *   $dealerCode = null   → ACC_CODE = '0' / '' / NULL  (global pool)
  *   $dealerCode = 'X'    → ACC_CODE = 'X'              (dealer pool)
+ *
+ * FIX: Tier 2 now tries `sl.ITEM_SIZE = itemSize` first (mirrors
+ * legacy autocomplete_search_url), then falls back to no-size.
  * ────────────────────────────────────────────────────────────── */
 private function matchSchemeForItem(
     string  $itemCode,
@@ -389,8 +426,22 @@ private function matchSchemeForItem(
 
     /* ── Tier 2: PROD_CODE ── */
     if ($prodCode && $prodCode !== '0' && $prodCode !== '') {
+
+        /* 2a: pehle slab ITEM_SIZE ke saath try karo (legacy autocomplete_search_url jaisa) */
+        if ($itemSize && $itemSize !== '' && $itemSize !== '0') {
+            $hit = $buildBase()
+                ->where('sd.PROD_CODE', $prodCode)
+                ->where('sl.ITEM_SIZE', $itemSize)          // 👈 NEW size filter
+                ->groupBy('sd.SCHEME_NO')
+                ->orderByDesc('sd.id')
+                ->first(['sd.SCHEME_NO']);
+            if ($hit) return ['scheme' => $hit, 'tier' => 2];
+        }
+
+        /* 2b: bina size filter wala fallback (agar 2a me kuch na mile) */
         $hit = $buildBase()
             ->where('sd.PROD_CODE', $prodCode)
+            ->groupBy('sd.SCHEME_NO')
             ->orderByDesc('sd.id')
             ->first(['sd.SCHEME_NO']);
         if ($hit) return ['scheme' => $hit, 'tier' => 2];
@@ -400,6 +451,7 @@ private function matchSchemeForItem(
     if ($prodCatg && $prodCatg !== '0' && $prodCatg !== '') {
         $hit = $buildBase()
             ->where('sd.PROD_CATG', $prodCatg)
+            ->groupBy('sd.SCHEME_NO')
             ->orderByDesc('sd.id')
             ->first(['sd.SCHEME_NO']);
         if ($hit) return ['scheme' => $hit, 'tier' => 3];
@@ -411,6 +463,7 @@ private function matchSchemeForItem(
             ->where('sd.ITEM_SIZE', 'LIKE', $itemSize . '%')
             ->where('sd.SIZE_UM', $sizeUm)
             ->where('sd.ITEM_SIZE', '!=', '')
+            ->groupBy('sd.SCHEME_NO')
             ->orderByDesc('sd.id')
             ->first(['sd.SCHEME_NO']);
         if ($hit) return ['scheme' => $hit, 'tier' => 4];
@@ -418,7 +471,6 @@ private function matchSchemeForItem(
 
     return null;
 }
-
 /* ──────────────────────────────────────────────────────────────
  * Main entry — dealer-scoped first, global fallback second
  * ────────────────────────────────────────────────────────────── */
@@ -2110,11 +2162,10 @@ private function legacySchemeSuggestions(
     $conv   = $isBox && $umToAum > 0 ? $umToAum : 1;
     $qtyPcs = $userQty * ($isBox ? $conv : 1);
 
-    // No scheme → single "qty+0" fallback (matches Blade's else branch)
     if (empty($slabs)) {
-        $total = $isBox && $conv > 0 ? $qtyPcs / $conv : $qtyPcs;
-        $value = $isBox && $conv > 0
-            ? "{$total}(" . ($qtyPcs - 0) . '+0=' . $qtyPcs . ')'
+        $total = $isBox ? $qtyPcs / $conv : $qtyPcs;
+        $value = $isBox
+            ? "{$total}({$qtyPcs}+0={$qtyPcs})"
             : "{$qtyPcs}({$qtyPcs}+0={$qtyPcs})";
         return [[
             'value'    => $value,
@@ -2125,27 +2176,24 @@ private function legacySchemeSuggestions(
         ]];
     }
 
-    // PUDA_SIZE drives the top-up increments; fall back to um_to_aum or 1
     $pudaSize = (float) DB::table('WWW_WEB_ITEM_DISPLAY')
-        ->where('ITEM_CODE', $itemCode)
-        ->value('PUDA_SIZE');
+        ->where('ITEM_CODE', $itemCode)->value('PUDA_SIZE');
     if ($pudaSize <= 0) $pudaSize = $umToAum > 0 ? $umToAum : 1;
 
-    // Normalise slabs to PCS and sort ascending by base_from
     usort($slabs, fn ($a, $b) => (float) $a['base_from'] <=> (float) $b['base_from']);
     $raw = array_map(fn ($s) => [
-        'id'    => (int) $s['id'],
+        'id'    => (int)   $s['id'],
         'bill'  => (float) $s['base_from'],
         'free'  => (float) $s['free_final_rate'],
         'total' => (float) $s['base_from'] + (float) $s['free_final_rate'],
     ], $slabs);
 
-    $testedQty       = $raw[0]['total'];
-    $freeQtyOneTime  = $raw[0]['free'];
-    $oldValueDiff    = 1;
-    $phase1          = [];
+    $testedQty      = $raw[0]['total'];
+    $freeQtyOneTime = $raw[0]['free'];
+    $oldValueDiff   = 1;
+    $phase1         = [];
 
-    // ── Phase 1: expand each slab up to the next (or 10× the last) ──
+    /* ── Phase 1: slab-to-slab fill ── */
     foreach ($raw as $key => $slab) {
         $next     = $raw[$key + 1] ?? null;
         $phase1[] = $slab;
@@ -2153,7 +2201,6 @@ private function legacySchemeSuggestions(
         $freeQty  = $slab['free'];
 
         if (!$next) {
-            // Last slab → 10 more iterations
             for ($i = 0; $i < 10; $i++) {
                 $stepTotal = $totalQty + $testedQty;
                 $stepFree  = $freeQty  + $freeQtyOneTime;
@@ -2162,11 +2209,11 @@ private function legacySchemeSuggestions(
                 $freeQty   = $stepFree;
             }
         } else {
-            // Intermediate → fill up to next slab's total
             $stopCond     = $next['total'] / $testedQty;
             $finalStop    = $stopCond - $oldValueDiff;
             $oldValueDiff = $stopCond;
-            for ($i = 0; $i < max(0, (int) $finalStop - 1); $i++) {
+            // ✅ FIX A: NO cast — legacy float comparison
+            for ($i = 0; $i < ($finalStop - 1); $i++) {
                 $stepTotal = $totalQty + $testedQty;
                 $stepFree  = $freeQty  + $freeQtyOneTime;
                 $phase1[]  = ['bill' => $stepTotal - $stepFree, 'free' => $stepFree, 'total' => $stepTotal];
@@ -2176,21 +2223,22 @@ private function legacySchemeSuggestions(
         }
     }
 
-    // ── Phase 2: top up with puda_size increments while ratio stays constant ──
+    /* ── Phase 2: puda_size topup (ratio frozen) ── */
     $phase2 = [];
     foreach ($raw as $key => $slab) {
         $title = $slab['total'];
         $free  = $slab['free'];
         if ($free <= 0 || $title <= 0) break;
 
-        $ratio          = ($title - $free) / $free;
-        $nextKnown      = $raw[$key + 1]['total'] ?? 0;
-        $iterations     = $nextKnown > 0 ? 9 : 10;
+        $freeRatio   = $free / $title;            // ✅ FIX B: ratio EK BAAR
+        $ratio       = ($title - $free) / $free;  // for comparing bill/free later
+        $nextKnown   = $raw[$key + 1]['total'] ?? 0;
+        $iterations  = $nextKnown > 0 ? 9 : 10;
 
         for ($i = 0; $i < $iterations; $i++) {
             if ($nextKnown > 0 && $title == $nextKnown) break;
             $stepTitle = $title + $pudaSize;
-            $stepFree  = (int) ($stepTitle * ($free / $title));
+            $stepFree  = (int) ($stepTitle * $freeRatio);   // ✅ frozen ratio
             $bill      = $stepTitle - $stepFree;
             if ($stepFree > 0 && ($bill / $stepFree) == $ratio && $stepTitle != $nextKnown) {
                 $phase2[] = ['bill' => $bill, 'free' => $stepFree, 'total' => $stepTitle];
@@ -2200,7 +2248,7 @@ private function legacySchemeSuggestions(
         }
     }
 
-    // ── Phase 3: dedupe by total, sort, filter by user qty, format ──
+    /* ── Phase 3: dedupe + filter + format ── */
     $byTotal = [];
     foreach (array_merge($phase1, $phase2) as $r) {
         $byTotal[(int) $r['total']] = $r;
@@ -2210,9 +2258,9 @@ private function legacySchemeSuggestions(
     $out = [];
     foreach ($byTotal as $total => $r) {
         if ($total < $qtyPcs) continue;
-        $bill = $r['bill'];
-        $free = $r['free'];
-        $value = $isBox && $conv > 0
+        $bill  = $r['bill'];
+        $free  = $r['free'];
+        $value = $isBox
             ? ($total / $conv) . "({$bill}+{$free}={$total})"
             : "{$total}({$bill}+{$free}={$total})";
         $out[] = [
@@ -2222,13 +2270,12 @@ private function legacySchemeSuggestions(
             'bill_qty' => $bill,
             'label'    => $value,
         ];
-        if (count($out) >= 50) break;   // safety cap
+        if (count($out) >= 50) break;
     }
 
-    // Empty after filtering (user typed a qty > all suggestions) → fallback
     if (empty($out)) {
-        $total = $isBox && $conv > 0 ? $qtyPcs / $conv : $qtyPcs;
-        $value = $isBox && $conv > 0
+        $total = $isBox ? $qtyPcs / $conv : $qtyPcs;
+        $value = $isBox
             ? "{$total}({$qtyPcs}+0={$qtyPcs})"
             : "{$qtyPcs}({$qtyPcs}+0={$qtyPcs})";
         $out[] = ['value' => $value, 'title' => $qtyPcs, 'free_qty' => 0, 'bill_qty' => $qtyPcs, 'label' => $value];
@@ -2254,15 +2301,15 @@ private function legacySchemeSuggestions(
         ->groupBy('product_id')
         ->pluck('product_id');
 
-    $rateInfo = $this->legacyDealerRate($item_code);
-
+    // dropdown ke liye always available
     $displayQ = DB::table('WWW_WEB_ITEM_DISPLAY')
         ->where('ITEM_STATUS', '!=', 'C')
         ->whereNotIn('ITEM_CODE', $item_codes_str);
     if (!empty($catg)) $displayQ->where('MKTG_CATG', $catg);
     if ($blocked->isNotEmpty()) $displayQ->whereNotIn('ITEM_CODE', $blocked);
 
-    $item_aum_mast_array = $displayQ->groupBy('ITEM_CODE')->orderBy('ITEM_CODE', 'ASC')
+    $item_aum_mast_array = $displayQ->groupBy('ITEM_CODE')
+        ->orderBy('ITEM_CODE', 'ASC')
         ->pluck(DB::raw("CONCAT(ITEM_CODE,' - ',ITEM_NAME) AS ITEM_NAME"), 'ITEM_CODE as k');
 
     $item_mast_name = DB::table('WWW_WEB_ITEM_DISPLAY')
@@ -2270,45 +2317,44 @@ private function legacySchemeSuggestions(
         ->where('ITEM_CODE', $item_code)
         ->value('ITEM_NAME');
 
+    /* ── RATE NOT FOUND: ab clear 401 return karo ── */
+    $rateInfo = $this->legacyDealerRate($item_code);
+    if (!$rateInfo) {
+        Log::warning('[legacyProductRate] rate not found', [
+            'item_code'   => $item_code,
+            'dealer_code' => $dealer_code,
+        ]);
+        return response()->json([
+            'status'  => false,
+            'code'    => 401,
+            'message' => 'Rate not found for item ' . $item_code,
+            'data'    => [
+                'legacy'              => true,
+                'item_aum_mast_array' => $item_aum_mast_array,
+            ],
+        ]);
+    }
+    if ((float) $rateInfo['rate'] <= 0) {
+        return response()->json([
+            'status'  => false,
+            'code'    => 401,
+            'message' => 'Rate is zero for item ' . $item_code,
+            'data'    => [
+                'legacy'              => true,
+                'item_aum_mast_array' => $item_aum_mast_array,
+            ],
+        ]);
+    }
+
+    /* ── scheme (dealer only — legacy me global fallback nahi tha) ── */
     $scheme = $this->legacyDealerScheme(
         $item_code,
         $qty,
-        (float) ($rateInfo['rate'] ?? 0),
+        (float) $rateInfo['rate'],
         $dealer_code,
         $slab_id
     );
 
-    /* ── Fallback "no scheme" slab ───────────────────────────────
-     |  Makes the UI render  "qty(qty+0=qty)"  even when the item
-     |  has no applicable scheme (or qty is below the first slab).
-     |  Uses VALUE type with base_from=0, base_to=Above, free=0 —
-     |  this matches any qty in matchSlab() so the row falls into
-     |  the "VALUE" branch and computes billed = qty, free = 0.
-     * ────────────────────────────────────────────────────────── */
-    $schemeOptions = $scheme['slabs'];
-    $hasFallback = false;
-    foreach ($schemeOptions as $opt) {
-        if (($opt['sale_type'] ?? '') === 'VALUE'
-            && (float) ($opt['base_from'] ?? -1) === 0.0
-            && ($opt['base_to'] ?? null) === 'Above') {
-            $hasFallback = true;
-            break;
-        }
-    }
-    if (!$hasFallback) {
-        $schemeOptions[] = [
-            'id'              => 0,
-            'base_from'       => 0,
-            'base_to'         => 'Above',   // sentinel used by frontend matchSlab
-            'free_final_rate' => 0,
-            'sale_type'       => 'VALUE',
-            'label'           => 'No scheme',
-            'is_fallback'     => true,
-        ];
-    }
-
-   if ($rateInfo) {
-    // Build expanded suggestions (Blade's autocomplete_search_url equivalent)
     $suggestions = $this->legacySchemeSuggestions(
         $scheme['slabs'],
         $item_code,
@@ -2317,20 +2363,13 @@ private function legacySchemeSuggestions(
         $qty
     );
 
-    // PUDA_SIZE for the frontend to compute client-side if needed
     $pudaSize = (float) DB::table('WWW_WEB_ITEM_DISPLAY')
         ->where('ITEM_CODE', $item_code)
         ->value('PUDA_SIZE');
 
-    // Ensure the scheme column always has at least one option (fallback)
-    $schemeOptions = $scheme['slabs'];
-    $hasFallback = false;
-    foreach ($schemeOptions as $opt) {
-        if (($opt['sale_type'] ?? '') === 'VALUE'
-            && (float) ($opt['base_from'] ?? -1) === 0.0
-            && ($opt['base_to'] ?? null) === 'Above') { $hasFallback = true; break; }
-    }
-    if (!$hasFallback) {
+    /* ── fallback option (jab koi scheme na mile bhi) ── */
+    $schemeOptions = $scheme['slabs'] ?: [];
+    if (empty($schemeOptions)) {
         $schemeOptions[] = [
             'id'              => 0,
             'base_from'       => 0,
@@ -2348,26 +2387,37 @@ private function legacySchemeSuggestions(
         'message' => 'success',
         'data'    => [
             'legacy'              => true,
-            'result'              => $rateInfo['rate'],
+            'result'              => (float) $rateInfo['rate'],  // ← frontend purana key
             'item_mast_name'      => $item_mast_name ?? '',
             'item_aum_mast_array' => $item_aum_mast_array,
             'selection_size_um'   => $rateInfo['um'],
             'case_size'           => $rateInfo['um_to_aum'] ?? null,
             'puda_size'           => $pudaSize,
-            'scheme_rate'         => $rateInfo['rate'],
+            'scheme_rate'         => (float) $rateInfo['rate'],
             'scheme_percent'      => 0,
-            'line_total'          => $rateInfo['rate'] * $qty,
+            'line_total'          => (float) $rateInfo['rate'] * $qty,
             'mrp'                 => $rateInfo['mrp'],
 
+            // ── legacy-compat keys (Blade ka `res.result`, `res.slabs`, `res.size`) ──
+            'slabs' => $suggestions,   // ← EXACT same array Blade me jata tha
+            'size'  => $pudaSize,
+            'prod'  => $this->itemProdCode($item_code),
+
+            // ── new keys (frontend naya use kare) ──
             'scheme_slabs' => [
                 'master_text' => !empty($scheme['slabs']) ? 'Scheme applicable' : '',
                 'options'     => $schemeOptions,
-                'suggestions' => $suggestions,   // ← NEW
+                'suggestions' => $suggestions,
             ],
             'scheme' => $scheme['selected'],
         ],
     ]);
-    }
+}
+
+private function itemProdCode(string $itemCode): array
+{
+    $row = DB::table('ITEM_MAST')->where('ITEM_CODE', $itemCode)->first(['PROD_CODE']);
+    return $row && $row->PROD_CODE ? [$row->PROD_CODE] : [];
 }
 
     private function legacyDealerDashboard(Request $request, array $ctx)
