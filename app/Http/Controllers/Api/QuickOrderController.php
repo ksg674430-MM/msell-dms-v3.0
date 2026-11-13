@@ -1109,12 +1109,56 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
         ]);
     }
 
+    private function legacyInvoiceDetails(array $ctx, string $from_date, string $to_date, Request $request)
+{
+    $dealerCode = (string) $ctx['dealer_code'];
+
+    $q = DB::table('ITEMTRAN_HEAD as h')
+        ->join('ITEMTRAN_BODY as b', function ($j) {
+            $j->on('b.VRNO',     '=', 'h.VRNO')
+              ->on('b.DIV_CODE', '=', 'h.DIV_CODE');
+        })
+        ->where('h.ACC_CODE', $dealerCode)
+        ->whereRaw(
+            "date_format(h.VRDATE_FILTER, '%Y-%m-%d') between ? and ?",
+            [$from_date, $to_date]
+        )
+        ->groupBy('h.VRNO', 'h.DIV_CODE', 'h.VRDATE_FILTER', 'h.DRAMT')
+        ->orderBy('h.VRDATE_FILTER', 'DESC')
+        ->orderBy('h.VRNO', 'ASC')
+        ->select([
+            DB::raw('h.VRNO          as invoice_no_p'),
+            DB::raw('h.VRDATE_FILTER as sale_date'),
+            DB::raw('h.DRAMT         as dramt'),
+            DB::raw('NULL            as order_ids'),
+            DB::raw('NULL            as remarks'),
+            DB::raw('NULL            as pdf'),
+        ]);
+
+    if ($request->filled('ref_no')) {
+        $ref = '%' . trim((string) $request->ref_no) . '%';
+        $q->where('h.VRNO', 'LIKE', $ref);
+    }
+
+    return response()->json([
+        'status' => true,
+        'data'   => [
+            'from_date' => $from_date,
+            'to_date'   => $to_date,
+            'rows'      => $q->get(),
+        ],
+    ]);
+}
+
     public function invoiceDetails(Request $request)
     {
         $ctx = $this->context($request);
         $from_date = $request->filled('from_date') ? date('Y-m-d', strtotime($request->from_date)) : date('Y-m-d');
         $to_date = $request->filled('to_date') ? date('Y-m-d', strtotime($request->to_date)) : date('Y-m-d');
         if ($from_date < '2021-04-01') $from_date = '2021-04-01';
+          if ($this->isLegacy($ctx)) {
+        return $this->legacyInvoiceDetails($ctx, $from_date, $to_date, $request);
+    }
 
         $q = DB::table('purchase_order')
             ->join('purchase_order_details', 'purchase_order_details.order_id', '=', 'purchase_order.order_id')
@@ -2233,7 +2277,7 @@ private function itemProdCode(string $itemCode): array
     ]);
 }
 
-   public function legacyCurrentStatus(Request $request)
+ public function legacyCurrentStatus(Request $request)
 {
     $ctx = $this->context($request);
     if (!$this->isLegacy($ctx) && !$request->has('force_legacy')) {
@@ -2246,7 +2290,7 @@ private function itemProdCode(string $itemCode): array
     $dealer_code  = (string) $ctx['dealer_code'];
     $dealer_codes = [$dealer_code];
 
-    $fetch_year = DB::table('financial_year')->orderBy('id', 'DESC')->first();
+    $fetch_year  = DB::table('financial_year')->orderBy('id', 'DESC')->first();
     $from_year_t = !empty($fetch_year->from_year) ? $fetch_year->from_year : date('Y');
     $to_year_t   = !empty($fetch_year->to_year)   ? $fetch_year->to_year   : (date('Y') + 1);
 
@@ -2255,24 +2299,75 @@ private function itemProdCode(string $itemCode): array
     $from_date_month = date('Y-m')  . '-01';
     $to_date_month   = date('Y-m-t');
 
-    $categories = ['ASV', 'CLA', 'GEN', 'GLD', 'OTC', 'OT2', 'JPS', 'FMC', 'JP2', 'GLD_FM'];
-    $detailMap  = [
+    // JP2 and GLD_FM deliberately excluded per requirement.
+    $standardCategories = ['ASV', 'OTC', 'OT2', 'JPS', 'FMC'];
+    $mainLineCodes      = ['CLA', 'GEN', 'GLD'];
+
+    $detailMap = [
         'OTC' => 'otc',
         'OT2' => 'ot2',
         'FMC' => 'fmcg',
-        'JPS' => 'eth',
-        'JP2' => 'jp2',
+        'JPS' => 'jps'
     ];
 
     $rows = [];
 
-    foreach ($categories as $catg) {
-        // Annual target (per MKTG_CATG, PROD_CATG null = top-level)
+    /* ============================================================
+     |  1. ASV_BOX — QTY only (sub-category PROD_CATG='ASV')
+     * ============================================================ */
+    $asvTargetData = DB::table('DEALER_TARGET_MAST')
+        ->where('PROD_CATG', 'ASV')
+        ->where('MKTG_CATG', 'ASV')
+        ->where('FROM_DATE_FILTER', $from_sale_date)
+        ->where('TO_DATE_FILTER',   $to_sale_date)
+        ->whereIn('ACC_CODE', $dealer_codes)
+        ->selectRaw('SUM(TARGET_QTY) as qty')
+        ->first();
+
+    $asvBoxBase = DB::table('ITEMTRAN_HEAD')
+        ->join('ITEMTRAN_BODY', function ($j) {
+            $j->on('ITEMTRAN_BODY.VRNO',     '=', 'ITEMTRAN_HEAD.VRNO');
+            $j->on('ITEMTRAN_BODY.DIV_CODE', '=', 'ITEMTRAN_HEAD.DIV_CODE');
+        })
+        ->join('ITEM_MAST',      'ITEM_MAST.ITEM_CODE',    '=', 'ITEMTRAN_BODY.ITEM_CODE')
+        ->join('ITEM_AUM_MAST',  'ITEM_AUM_MAST.ITEM_CODE','=', 'ITEM_MAST.ITEM_CODE')
+        ->join('PROD_CATG_MAST', 'PROD_CATG_MAST.PROD_CATG','=', 'ITEM_MAST.PROD_CATG')
+        ->join('MKTG_CATG_MAST', 'MKTG_CATG_MAST.MKTG_CATG','=', 'PROD_CATG_MAST.MKTG_CATG')
+        ->where('MKTG_CATG_MAST.MKTG_CATG', 'ASV')
+        ->whereIn('ITEMTRAN_HEAD.ACC_CODE', $dealer_codes);
+
+    $asvBoxAchieved = (float) (clone $asvBoxBase)
+        ->whereRaw("date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d') between ? and ?",
+            [$from_sale_date, $to_sale_date])
+        ->sum(DB::raw('ITEMTRAN_BODY.QTYISSUED / NULLIF(ITEM_AUM_MAST.UMTOAUM, 0)'));
+
+    $asvBoxMonth = (float) (clone $asvBoxBase)
+        ->whereRaw("date_format(ITEMTRAN_BODY.VRDATE_FILTER,'%Y-%m-%d') between ? and ?",
+            [$from_date_month, $to_date_month])
+        ->sum(DB::raw('ITEMTRAN_BODY.QTYISSUED / NULLIF(ITEM_AUM_MAST.UMTOAUM, 0)'));
+
+    $asvBoxQtyTarget = (float) ($asvTargetData->qty ?? 0);
+
+    $rows[] = [
+        'category_code' => 'ASV_BOX',
+        'category'      => 'Asav Box',
+        'unit'          => 'QTY',                            // ← QTY only, no VALUE row
+        'annual'        => ['target' => $asvBoxQtyTarget, 'achieved' => $asvBoxAchieved],
+        'current_month' => ['qty' => $asvBoxMonth, 'sales' => 0],
+        'has_detail'    => false,
+        'detail_key'    => null,
+    ];
+
+    /* ============================================================
+     |  2. Standard categories (ASV, OTC, OT2, JPS, FMC)
+     |     MAIN_LINE inserted immediately after ASV
+     * ============================================================ */
+    foreach ($standardCategories as $catg) {
         $t = DB::table('DEALER_TARGET_MAST')
             ->where('MKTG_CATG', $catg)
             ->whereNull('PROD_CATG')
             ->where('FROM_DATE_FILTER', $from_sale_date)
-            ->where('TO_DATE_FILTER', $to_sale_date)
+            ->where('TO_DATE_FILTER',   $to_sale_date)
             ->whereIn('ACC_CODE', $dealer_codes)
             ->selectRaw('SUM(TARGET_QTY) as qty, SUM(TARGET_AMT) as amt')
             ->first();
@@ -2285,33 +2380,39 @@ private function itemProdCode(string $itemCode): array
         $hasDetail = isset($detailMap[$catg]);
         $detailKey = $detailMap[$catg] ?? null;
 
-        // QTY row
         $rows[] = [
-            'category_code' => $catg,
-            'category'      => $catg,
-            'unit'          => 'QTY',
-            'annual'        => [
-                'target'   => (float) ($t->qty ?? 0),
-                'achieved' => $annualQty,
-            ],
+            'category_code' => $catg, 'category' => $catg, 'unit' => 'QTY',
+            'annual'        => ['target' => (float) ($t->qty ?? 0), 'achieved' => $annualQty],
             'current_month' => ['qty' => $monthQty, 'sales' => 0],
-            'has_detail'    => $hasDetail,
-            'detail_key'    => $detailKey,
+            'has_detail'    => $hasDetail, 'detail_key' => $detailKey,
+        ];
+        $rows[] = [
+            'category_code' => $catg, 'category' => $catg, 'unit' => 'VALUE',
+            'annual'        => ['target' => (float) ($t->amt ?? 0), 'achieved' => $annualVal],
+            'current_month' => ['qty' => 0, 'sales' => $monthVal],
+            'has_detail'    => $hasDetail, 'detail_key' => $detailKey,
         ];
 
-        // VALUE row
-        $rows[] = [
-            'category_code' => $catg,
-            'category'      => $catg,
-            'unit'          => 'VALUE',
-            'annual'        => [
-                'target'   => (float) ($t->amt ?? 0),   // in lakhs, same as legacy
-                'achieved' => $annualVal,               // in rupees
-            ],
-            'current_month' => ['qty' => 0, 'sales' => $monthVal],
-            'has_detail'    => $hasDetail,
-            'detail_key'    => $detailKey,
-        ];
+        // Insert MAIN_LINE (CLA+GEN+GLD) right after ASV
+        if ($catg === 'ASV') {
+            [$mlQtyTarget, $mlQtyAch, $mlQtyMonth,
+             $mlValTarget, $mlValAch, $mlValMonth] = $this->aggregateMainLine(
+                $mainLineCodes, $dealer_codes,
+                $from_sale_date, $to_sale_date,
+                $from_date_month, $to_date_month
+            );
+
+            // VALUE only — summing QTY across CLA/GEN/GLD isn't meaningful
+            $rows[] = [
+                'category_code' => 'MAIN_LINE',
+                'category'      => 'MAIN LINE (CLA+GEN+GLD)',
+                'unit'          => 'VALUE',
+                'annual'        => ['target' => $mlValTarget, 'achieved' => $mlValAch],
+                'current_month' => ['qty' => 0, 'sales' => $mlValMonth],
+                'has_detail'    => false,
+                'detail_key'    => null,
+            ];
+        }
     }
 
     return response()->json([
@@ -2321,6 +2422,42 @@ private function itemProdCode(string $itemCode): array
     ]);
 }
 
+/**
+ * Sum TARGET + sales across CLA, GEN, GLD for both QTY and VALUE windows.
+ * Returns: [qtyTarget, qtyAchieved, qtyMonth, valTarget, valAchieved, valMonth]
+ */
+private function aggregateMainLine(
+    array  $codes,
+    array  $dealerCodes,
+    string $fromSale,
+    string $toSale,
+    string $fromMonth,
+    string $toMonth
+): array {
+    $qtyTarget = 0.0; $qtyAch = 0.0; $qtyMonth = 0.0;
+    $valTarget = 0.0; $valAch = 0.0; $valMonth = 0.0;
+
+    foreach ($codes as $c) {
+        $t = DB::table('DEALER_TARGET_MAST')
+            ->where('MKTG_CATG', $c)
+            ->whereNull('PROD_CATG')
+            ->where('FROM_DATE_FILTER', $fromSale)
+            ->where('TO_DATE_FILTER',   $toSale)
+            ->whereIn('ACC_CODE', $dealerCodes)
+            ->selectRaw('SUM(TARGET_QTY) as qty, SUM(TARGET_AMT) as amt')
+            ->first();
+
+        $qtyTarget += (float) ($t->qty ?? 0);
+        $valTarget += (float) ($t->amt ?? 0);
+
+        $qtyAch   += $this->saleAggregate($c, $dealerCodes, $fromSale,  $toSale,  'qty');
+        $valAch   += $this->saleAggregate($c, $dealerCodes, $fromSale,  $toSale,  'val');
+        $qtyMonth += $this->saleAggregate($c, $dealerCodes, $fromMonth, $toMonth, 'qty');
+        $valMonth += $this->saleAggregate($c, $dealerCodes, $fromMonth, $toMonth, 'val');
+    }
+
+    return [$qtyTarget, $qtyAch, $qtyMonth, $valTarget, $valAch, $valMonth];
+}
 /** Aggregate ITEMTRAN sales for one MKTG_CATG over a date range. */
 private function saleAggregate(
     string $mktgCatg,
