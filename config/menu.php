@@ -234,7 +234,7 @@ return [
         'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
     ],
      [
-        'slug' => 'credit_debit', 'label' => 'Credit Debit Notes', 'icon' => 'fa-server', 'route' => '/credit_debit_notes',
+        'slug' => 'credit_debit', 'label' => 'Credit Debit Notes', 'icon' => 'fa-server', 'route' => '/credit_debit_notes', 'companies' => [405],
     ],
 
     // ============================================================
