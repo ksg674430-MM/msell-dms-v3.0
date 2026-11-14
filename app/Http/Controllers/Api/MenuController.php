@@ -18,43 +18,17 @@ class MenuController extends Controller
         $appEnv    = config('app.env');
 
         $config = require config_path('menu.php');
-        $items  = $this->assignedMenu($companyId, $roleName, $config) ?: $config;
+        $items  = $this->assignedMenu($companyId, $roleName, $config) ?: $this->visibleTree($config, $roleName, $companyId, $appEnv);
 
         $visible = [];
 
         foreach ($items as $item) {
-
-            // ---- 1. Role gate (primary)
-            if (!empty($item['roles'])) {
-                $allowed = array_map('trim', $item['roles']);
-                if (!in_array(trim($roleName), $allowed, true)) {
-                    continue;
-                }
-            }
-
-            // ---- 2. Company allow-list
-            if (!empty($item['companies'])
-                && !in_array($companyId, $item['companies'], true)) {
-                continue;
-            }
-
-            // ---- 3. Company deny-list
-            if (!empty($item['exclude_companies'])
-                && in_array($companyId, $item['exclude_companies'], true)) {
-                continue;
-            }
-
-            // ---- 4. Local-only
-            if (!empty($item['local_only']) && $appEnv !== 'local') {
-                continue;
-            }
-
-            // ---- 5. Label override per role (Details group only)
             if (($item['group'] ?? '') === 'Details') {
                 $item['label'] = $this->detailsLabel($item['slug'], $roleName, $item['label']);
             }
-            if ($item['slug'] === 'dealer_dashboard' && in_array($roleName, ['DEPO', 'Depo'], true)) {
-                $item['label'] = 'Depo Dashboard';
+            if (in_array($roleName, ['DEPO', 'Depo'], true)) {
+                if ($item['slug'] === 'dealer_dashboard') $item['label'] = 'Depo Dashboard';
+                if ($item['label'] === 'Dealer Details') $item['label'] = 'Depo Details';
             }
 
             $visible[] = $item;
@@ -115,10 +89,10 @@ class MenuController extends Controller
         }
 
         $levels = [[$modules, 'm'], [$subs, 's'], [$subSubs, 'ss']];
-        $roleRules = $this->routeRoles($config);
+        $rules = $this->routeRules($config);
         $routeSlugs = $this->routeSlugs($config);
         $usedSlugs = [];
-        $build = function (int $depth, $parentId) use (&$build, &$usedSlugs, $levels, $roleRules, $routeSlugs, $roleName) {
+        $build = function (int $depth, $parentId) use (&$build, &$usedSlugs, $levels, $rules, $routeSlugs, $roleName, $companyId) {
             [$rows, $prefix] = $levels[$depth];
             $nodes = [];
             foreach ($depth ? $rows->where('parent', $parentId) : $rows as $row) {
@@ -133,8 +107,7 @@ class MenuController extends Controller
                 if ($route === null) {
                     continue;
                 }
-                $allowed = $roleRules[$route] ?? null;
-                if (!$allowed || in_array($roleName, $allowed, true)) {
+                if ($this->allowed($rules[$route] ?? [], $roleName, $companyId)) {
                     $slug = $routeSlugs[$route] ?? null;
                     if ($slug !== null && !isset($usedSlugs[$slug])) {
                         $node['slug'] = $usedSlugs[$slug] = $slug;
@@ -160,17 +133,40 @@ class MenuController extends Controller
         return $slugs;
     }
 
-    private function routeRoles(array $nodes, array $inherited = []): array
+    private function routeRules(array $nodes, array $inherited = []): array
     {
         $rules = [];
         foreach ($nodes as $node) {
-            $roles = array_map('trim', $node['roles'] ?? $inherited);
-            if (!empty($node['route']) && $roles) {
-                $rules[$node['route']] = $roles;
+            $roles = $node['roles'] ?? $inherited['roles'] ?? [];
+            if (!empty($node['route'])) {
+                $rules[$node['route']] = ['roles' => $roles] + array_intersect_key($node, array_flip(['companies', 'exclude_companies']));
             }
-            $rules += $this->routeRoles($node['children'] ?? [], $roles);
+            $rules += $this->routeRules($node['children'] ?? [], ['roles' => $roles]);
         }
         return $rules;
+    }
+
+    private function allowed(array $node, string $roleName, int $companyId): bool
+    {
+        return (empty($node['roles']) || in_array(trim($roleName), array_map('trim', $node['roles']), true))
+            && (empty($node['companies']) || in_array($companyId, $node['companies'], true))
+            && (empty($node['exclude_companies']) || !in_array($companyId, $node['exclude_companies'], true));
+    }
+
+    private function visibleTree(array $nodes, string $roleName, int $companyId, ?string $appEnv): array
+    {
+        $out = [];
+        foreach ($nodes as $node) {
+            if (!$this->allowed($node, $roleName, $companyId) || (!empty($node['local_only']) && $appEnv !== 'local')) {
+                continue;
+            }
+            if (isset($node['children'])) {
+                $node['children'] = $this->visibleTree($node['children'], $roleName, $companyId, $appEnv);
+                if (!$node['children']) continue;
+            }
+            $out[] = $node;
+        }
+        return $out;
     }
 
     // -----------------------------------------------------------------

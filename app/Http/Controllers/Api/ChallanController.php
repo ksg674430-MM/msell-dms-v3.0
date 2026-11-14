@@ -1117,7 +1117,7 @@ class ChallanController extends Controller
      * FOR UPDATE locks the last row so two concurrent saves cannot pick
      * the same sequence number. (Still recommend a UNIQUE index on ch_no.)
      */
-    private function generateChNo(int $dpId, int $dealerId, int $companyId): string
+    public static function generateChNo(int $dpId, int $dealerId, int $companyId): string
     {
         $sessionRow = DB::selectOne("SELECT session FROM session WHERE action = '1' LIMIT 1");
         $year       = $sessionRow->session ?? (date('Y') . '-' . (date('Y') + 1));

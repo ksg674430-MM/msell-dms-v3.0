@@ -72,6 +72,8 @@ use App\Http\Controllers\Api\DmsReportController;
 use App\Http\Controllers\Api\DbExportController;
 use App\Http\Controllers\Api\Sfa\ClaimController;
 use App\Http\Controllers\Api\SchemeController;
+use App\Http\Controllers\Api\BillingAgainstOrderController;
+use App\Http\Controllers\Api\CompanyPaymentController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -295,6 +297,13 @@ Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class,
     // CHALLAN FROM ORDERS  → MENU: Order → Convert to Invoice
     // --------------------------------------------------------
     // Route::post('/challans/from-orders', [ChallanController::class, 'fromOrders']);  // selected orders → invoices
+    Route::get ('/billing/against-order',                [BillingAgainstOrderController::class, 'index']);
+    Route::post('/billing/against-order/cancel',         [BillingAgainstOrderController::class, 'cancel']);
+    Route::get ('/billing/against-order/{orderId}',      [BillingAgainstOrderController::class, 'show'])->where('orderId', '[0-9]+');
+    Route::post('/billing/against-order/{orderId}/bill', [BillingAgainstOrderController::class, 'bill'])->where('orderId', '[0-9]+');
+    Route::get ('/company-payments',       [CompanyPaymentController::class, 'index']);
+    Route::get ('/company-payments/banks', [CompanyPaymentController::class, 'banks']);
+    Route::post('/company-payments',       [CompanyPaymentController::class, 'store']);
 
     // ========================================================
     // INVOICE (rich list)  → MENU: Invoice → Invoice Details

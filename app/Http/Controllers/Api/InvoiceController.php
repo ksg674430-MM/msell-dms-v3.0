@@ -59,14 +59,16 @@ class InvoiceController extends Controller
                     co.company_id, co.invoice_type, co.book_status,
                     co.discount_per, co.discount_amt, co.amount, co.amount_round,
                     co.remark, co.remark AS ch_remark,
-                    r.name AS retailer_name, r.address AS retailer_address,
-                    r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
-                    r.contact_per_name,
+                    COALESCE(r.name, bd.name) AS retailer_name, COALESCE(r.address, bd.address) AS retailer_address,
+                    COALESCE(r.landline, bd.landline) AS landline, COALESCE(r.other_numbers, bd.other_numbers) AS other_numbers,
+                    COALESCE(r.tin_no, bd.tin_no) AS tin_no, r.class AS retailer_class,
+                    COALESCE(r.contact_per_name, bd.contact_person) AS contact_per_name,
                     d.name AS dealer_name,
                     l7.name AS beat_name,
                     p.first_name, p.middle_name, p.last_name
                FROM challan_order co
                LEFT JOIN retailer r ON r.id = co.ch_retailer_id
+               LEFT JOIN dealer bd ON bd.id = co.ch_created_for_dealer_id
                LEFT JOIN dealer  d ON d.id = co.ch_dealer_id
                LEFT JOIN location_7 l7 ON l7.id = r.location_id
                LEFT JOIN person p ON p.id = co.ch_user_id
@@ -125,11 +127,12 @@ class InvoiceController extends Controller
 
         $header = DB::selectOne(
             "SELECT co.*,
-                    r.name AS retailer_name, r.address AS retailer_address,
-                    r.landline, r.other_numbers, r.tin_no, r.class AS retailer_class,
-                    r.contact_per_name,
-                    r.state_id_retailer AS retailer_state_id,
-                    r.pin_no            AS retailer_pin_no,
+                    COALESCE(r.name, bd.name) AS retailer_name, COALESCE(r.address, bd.address) AS retailer_address,
+                    COALESCE(r.landline, bd.landline) AS landline, COALESCE(r.other_numbers, bd.other_numbers) AS other_numbers,
+                    COALESCE(r.tin_no, bd.tin_no) AS tin_no, r.class AS retailer_class,
+                    COALESCE(r.contact_per_name, bd.contact_person) AS contact_per_name,
+                    COALESCE(r.state_id_retailer, bd.state_id) AS retailer_state_id,
+                    COALESCE(r.pin_no, bd.pin_no) AS retailer_pin_no,
                     d.name AS dealer_name,
                     d.address        AS dealer_address,
                     d.tin_no         AS dealer_tin_no,
@@ -145,6 +148,7 @@ class InvoiceController extends Controller
                     p.first_name, p.middle_name, p.last_name
                FROM challan_order co
                LEFT JOIN retailer   r  ON r.id  = co.ch_retailer_id
+               LEFT JOIN dealer     bd ON bd.id = co.ch_created_for_dealer_id
                LEFT JOIN dealer     d  ON d.id  = co.ch_dealer_id
                LEFT JOIN location_5 l5 ON l5.id = d.town_id
                LEFT JOIN location_7 l7 ON l7.id = r.location_id
@@ -158,7 +162,9 @@ class InvoiceController extends Controller
             return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
         }
 
-        $st = GstState::same($companyId, (int) $user->state_id, (int) $header->ch_retailer_id) ? 1 : 0;
+        $st = (int) $header->ch_created_for_dealer_id > 0
+            ? (int) ($companyId === 213 || ((int) $header->dealer_state_id > 0 && (int) $header->dealer_state_id === (int) $header->retailer_state_id))
+            : (GstState::same($companyId, (int) $user->state_id, (int) $header->ch_retailer_id) ? 1 : 0);
 
         // ITEMS — catalog_product se naam/hsn/gst lo (catalog_view me sirf 21 rows thi)
         $items = DB::select(

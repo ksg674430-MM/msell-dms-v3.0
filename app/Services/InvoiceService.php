@@ -10,13 +10,14 @@ class InvoiceService
     public function reason(string $invoiceId, int $dealerId): ?string
     {
         $inv = DB::selectOne(
-            "SELECT id, dispatch_status, payment_status, isclaim
+            "SELECT id, dispatch_status, payment_status, isclaim, ch_created_for_dealer_id
                FROM challan_order
               WHERE id = ? AND ch_dealer_id = ?
               LIMIT 1",
             [$invoiceId, $dealerId]
         );
         if (!$inv) return 'Invoice not found.';
+        if ((int) $inv->ch_created_for_dealer_id > 0) return 'Invoice billed against a distributor order cannot be changed here.';
 
         if ((int) $inv->dispatch_status === 3) return 'Invoice already cancelled.';
         if ((int) $inv->dispatch_status === 1) return 'Invoice already dispatched.';
