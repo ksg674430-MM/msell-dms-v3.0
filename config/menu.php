@@ -20,7 +20,31 @@ return [
     // ============================================================
     // Home
     // ============================================================
-    ['slug' => 'home', 'label' => 'Home', 'icon' => 'fa-tachometer', 'route' => '/dashboard'],
+    ['slug' => 'home', 'label' => 'Home', 'icon' => 'fa-tachometer', 'route' => '/dashboard', 'admin' => true],
+
+    ['slug' => 'admin_distributor', 'label' => 'Distributor', 'icon' => 'fa-user', 'route' => '/admin/distributors', 'roles' => ['Super Admin'], 'admin' => true],
+    ['slug' => 'admin_scheme_new',     'label' => 'Scheme',         'icon' => 'fa-user', 'route' => '/admin/schemes/new', 'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true],
+    ['slug' => 'admin_scheme_details', 'label' => 'Scheme Details', 'icon' => 'fa-user', 'route' => '/admin/schemes',     'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true],
+    [
+        'slug' => 'admin_product_master', 'label' => 'Product Master', 'icon' => 'fa-file', 'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true,
+        'children' => [
+            ['slug' => 'admin_items',     'label' => 'SFA Item Details', 'icon' => 'fa-caret-right', 'route' => '/admin/items',     'companies' => [405]],
+            ['slug' => 'admin_prod_catg', 'label' => 'PROD CATG MAST',   'icon' => 'fa-caret-right', 'route' => '/admin/prod-catg', 'companies' => [405]],
+            ['slug' => 'admin_mktg_catg', 'label' => 'MKTG CATG MAST',   'icon' => 'fa-caret-right', 'route' => '/admin/mktg-catg', 'companies' => [405]],
+        ],
+    ],
+    ['slug' => 'admin_scheme_dw', 'label' => 'Scheme Details Distributor Wise', 'icon' => 'fa-user', 'route' => '/admin/schemes/distributor-wise', 'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true],
+    ['slug' => 'admin_orders',   'label' => 'Order Details',     'icon' => 'fa-user', 'route' => '/admin/orders',   'roles' => ['Super Admin'], 'admin' => true],
+    ['slug' => 'admin_payments', 'label' => 'D Payment details', 'icon' => 'fa-user', 'route' => '/admin/payments', 'roles' => ['Super Admin'], 'admin' => true],
+    ['slug' => 'admin_order_life_cycle', 'label' => 'Order Life Cycle Report', 'icon' => 'fa-user', 'route' => '/admin/order-life-cycle', 'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true],
+    [
+        'slug' => 'admin_reports', 'label' => 'Reports', 'icon' => 'fa-file', 'roles' => ['Super Admin'], 'companies' => [405], 'admin' => true,
+        'children' => [
+            ['slug' => 'admin_ss_mainline',  'label' => 'Sale Statement Mainline', 'icon' => 'fa-caret-right', 'route' => '/admin/reports/sale-statement-mainline', 'companies' => [405]],
+            ['slug' => 'admin_ss_ethical',   'label' => 'Sale Statement Ethical',  'icon' => 'fa-caret-right', 'route' => '/admin/reports/sale-statement-ethical',  'companies' => [405]],
+            ['slug' => 'admin_fy_quarterly', 'label' => 'FY Quarterly Report',     'icon' => 'fa-caret-right', 'route' => '/admin/reports/fy-quarterly',           'companies' => [405]],
+        ],
+    ],
 
     // ============================================================
     // Master
@@ -67,7 +91,7 @@ return [
             ['slug' => 'direct_challan_1',        'label' => 'Generate Retailer  Invoice',            'icon' => 'fa-caret-right', 'route' => '/challans/retail',            'roles' => ['DISTRIBUTOR', 'DEPO', 'Super Admin'], 'companies' => [405]],
             ['slug' => 'sale_order_details',    'label' => 'Invoice Through SFA',         'icon' => 'fa-caret-right', 'route' => '/sales-orders',               'roles' => ['DISTRIBUTOR']],
             ['slug' => 'challan_against_order', 'label' => 'Billing Against Order',       'icon' => 'fa-caret-right', 'route' => '/billing/against-order',      'roles' => ['DEPO', 'Depo']],
-            // ['slug' => 'challan_against_super', 'label' => 'Billing Against Super Order', 'icon' => 'fa-caret-right', 'route' => '/challans/from-super-orders', 'roles' => ['Super Admin']],
+            ['slug' => 'challan_against_super', 'label' => 'Billing Against Super Order', 'icon' => 'fa-caret-right', 'route' => '/billing/against-super-order', 'roles' => ['Super Admin']],
             ['slug' => 'make_challan',          'label' => 'Invoice Details',             'icon' => 'fa-caret-right', 'route' => '/invoices'],
             ['slug' => 'return_challan',        'label' => 'Edit Invoice',                'icon' => 'fa-caret-right', 'route' => '/invoices/edit'],
             ['slug' => 'invoice_summary',       'label' => 'Invoice Summary',             'icon' => 'fa-caret-right', 'route' => '/invoices/summary'],
@@ -234,7 +258,7 @@ return [
         'slug' => 'dealer_dashboard', 'label' => 'Dealer Dashboard', 'icon' => 'fa-server', 'route' => '/dealer-dashboard',
     ],
      [
-        'slug' => 'credit_debit', 'label' => 'Credit Debit Notes', 'icon' => 'fa-server', 'route' => '/credit_debit_notes', 'companies' => [405],
+        'slug' => 'credit_debit', 'label' => 'Credit Debit Notes', 'icon' => 'fa-server', 'route' => '/credit_debit_notes', 'companies' => [405], 'admin' => true,
     ],
 
     // ============================================================

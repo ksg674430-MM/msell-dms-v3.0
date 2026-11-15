@@ -83,7 +83,7 @@ class CreditDebitNoteController extends Controller
             );
 
         // Dealer scoping — non-admin users only see their own ACC_CODE
-        if ($roleId !== 1) {
+        if (!$this->isAdmin($user)) {
             $accCode = $this->currentDealerCode($request);
             if ($accCode === null) {
                 return response()->json([
@@ -144,6 +144,7 @@ class CreditDebitNoteController extends Controller
                 'from_date'  => $fromDate,
                 'to_date'    => $toDate,
                 'role_id'    => $roleId,
+                'is_admin'   => $this->isAdmin($user),
                 'total'      => $total,
                 'page'       => $page,
                 'per_page'   => $perPage,
@@ -166,7 +167,6 @@ class CreditDebitNoteController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $user   = $request->user();
-        $roleId = (int) $user->role_id;
 
         $data = $request->validate([
             'VRNO' => ['required', 'string'],
@@ -177,7 +177,7 @@ class CreditDebitNoteController extends Controller
             ->where('VRNO', $data['VRNO']);
 
         // 🔒 Dealer can only delete their own notes
-        if ($roleId !== 1) {
+        if (!$this->isAdmin($user)) {
             $accCode = $this->currentDealerCode($request);
             if ($accCode === null) {
                 return response()->json([
@@ -244,5 +244,10 @@ class CreditDebitNoteController extends Controller
         }
 
         return null;
+    }
+
+    private function isAdmin($user): bool
+    {
+        return strcasecmp(trim((string) DB::table('_role')->where('role_id', $user->role_id)->value('rolename')), 'Super Admin') === 0;
     }
 }

@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\DB;
 
 class MenuController extends Controller
 {
+    private const ADMIN_ONLY_COMPANIES = [405];
+
     public function index(Request $request)
     {
         $user = $request->user();
@@ -18,7 +20,8 @@ class MenuController extends Controller
         $appEnv    = config('app.env');
 
         $config = require config_path('menu.php');
-        $items  = $this->assignedMenu($companyId, $roleName, $config) ?: $this->visibleTree($config, $roleName, $companyId, $appEnv);
+        $adminOnly = strcasecmp($roleName, 'Super Admin') === 0 && in_array($companyId, self::ADMIN_ONLY_COMPANIES, true);
+        $items  = $this->assignedMenu($companyId, $roleName, $config, $adminOnly) ?: $this->visibleTree($config, $roleName, $companyId, $appEnv, $adminOnly);
 
         $visible = [];
 
@@ -57,7 +60,7 @@ class MenuController extends Controller
         ]);
     }
 
-    private function assignedMenu(int $companyId, string $roleName, array $config): array
+    private function assignedMenu(int $companyId, string $roleName, array $config, bool $adminOnly): array
     {
         try {
             $modules = DB::table('web_module as w')
@@ -92,7 +95,7 @@ class MenuController extends Controller
         $rules = $this->routeRules($config);
         $routeSlugs = $this->routeSlugs($config);
         $usedSlugs = [];
-        $build = function (int $depth, $parentId) use (&$build, &$usedSlugs, $levels, $rules, $routeSlugs, $roleName, $companyId) {
+        $build = function (int $depth, $parentId) use (&$build, &$usedSlugs, $levels, $rules, $routeSlugs, $roleName, $companyId, $adminOnly) {
             [$rows, $prefix] = $levels[$depth];
             $nodes = [];
             foreach ($depth ? $rows->where('parent', $parentId) : $rows as $row) {
@@ -107,7 +110,7 @@ class MenuController extends Controller
                 if ($route === null) {
                     continue;
                 }
-                if ($this->allowed($rules[$route] ?? [], $roleName, $companyId)) {
+                if ($this->allowed($rules[$route] ?? [], $roleName, $companyId, $adminOnly)) {
                     $slug = $routeSlugs[$route] ?? null;
                     if ($slug !== null && !isset($usedSlugs[$slug])) {
                         $node['slug'] = $usedSlugs[$slug] = $slug;
@@ -138,30 +141,33 @@ class MenuController extends Controller
         $rules = [];
         foreach ($nodes as $node) {
             $roles = $node['roles'] ?? $inherited['roles'] ?? [];
+            $admin = !empty($node['admin']) || !empty($inherited['admin']);
             if (!empty($node['route'])) {
-                $rules[$node['route']] = ['roles' => $roles] + array_intersect_key($node, array_flip(['companies', 'exclude_companies']));
+                $rules[$node['route']] = ['roles' => $roles, 'admin' => $admin] + array_intersect_key($node, array_flip(['companies', 'exclude_companies']));
             }
-            $rules += $this->routeRules($node['children'] ?? [], ['roles' => $roles]);
+            $rules += $this->routeRules($node['children'] ?? [], ['roles' => $roles, 'admin' => $admin]);
         }
         return $rules;
     }
 
-    private function allowed(array $node, string $roleName, int $companyId): bool
+    private function allowed(array $node, string $roleName, int $companyId, bool $adminOnly = false): bool
     {
-        return (empty($node['roles']) || in_array(trim($roleName), array_map('trim', $node['roles']), true))
+        return (!$adminOnly || !empty($node['admin']))
+            && (empty($node['roles']) || in_array(trim($roleName), array_map('trim', $node['roles']), true))
             && (empty($node['companies']) || in_array($companyId, $node['companies'], true))
             && (empty($node['exclude_companies']) || !in_array($companyId, $node['exclude_companies'], true));
     }
 
-    private function visibleTree(array $nodes, string $roleName, int $companyId, ?string $appEnv): array
+    private function visibleTree(array $nodes, string $roleName, int $companyId, ?string $appEnv, bool $adminOnly = false): array
     {
         $out = [];
         foreach ($nodes as $node) {
-            if (!$this->allowed($node, $roleName, $companyId) || (!empty($node['local_only']) && $appEnv !== 'local')) {
+            if (!$this->allowed($node, $roleName, $companyId, $adminOnly) || (!empty($node['local_only']) && $appEnv !== 'local')) {
                 continue;
             }
             if (isset($node['children'])) {
-                $node['children'] = $this->visibleTree($node['children'], $roleName, $companyId, $appEnv);
+                $children = !empty($node['admin']) ? array_map(fn ($c) => $c + ['admin' => true], $node['children']) : $node['children'];
+                $node['children'] = $this->visibleTree($children, $roleName, $companyId, $appEnv, $adminOnly);
                 if (!$node['children']) continue;
             }
             $out[] = $node;

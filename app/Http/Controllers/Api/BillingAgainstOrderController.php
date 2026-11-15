@@ -27,9 +27,9 @@ class BillingAgainstOrderController extends Controller
                FROM demand_order o
                JOIN dealer d ON d.id = o.dealer_id
               WHERE o.company_id = ? AND o.order_date >= ? AND o.order_date < ?
-                AND o.status <> 2 AND d.csa_id = ? AND d.id <> ?
+                AND o.status <> 2 AND d.id <> ? AND {$this->buyerScope($ctx)}
               ORDER BY o.order_date DESC, o.id DESC",
-            [$ctx['company_id'], $from, date('Y-m-d', strtotime($to . ' +1 day')), $ctx['csa_id'], $ctx['dealer_id']]
+            array_merge([$ctx['company_id'], $from, date('Y-m-d', strtotime($to . ' +1 day')), $ctx['dealer_id']], $this->buyerBindings($ctx))
         );
         if (!$orders) return response()->json(['status' => true, 'rows' => []]);
 
@@ -95,6 +95,7 @@ class BillingAgainstOrderController extends Controller
         );
 
         $productIds = array_values(array_unique(array_map(fn ($l) => (int) $l->product_id, $lines)));
+        $rates = $this->listRates($ctx, $order, $productIds);
         $batches = $productIds ? DB::select(
             "SELECT product_id, batch_no, IF(mfg < '1971-01-01', NULL, DATE_FORMAT(mfg, '%Y-%m-%d')) AS mfg_date, mrp, qty
                FROM stock
@@ -120,7 +121,7 @@ class BillingAgainstOrderController extends Controller
                 'product_name' => $l->product_name ?? ('Product #' . $l->product_id),
                 'hsn_code'     => (string) $l->hsn_code,
                 'gst'          => (float) $l->gst_percent,
-                'rate'         => (float) $l->rate,
+                'rate'         => (float) ($rates[(int) $l->product_id] ?? $l->rate),
                 'mrp'          => (float) $l->mrp,
                 'qty'          => (float) $l->quantity,
                 'free_qty'     => (float) $l->free_qty,
@@ -187,6 +188,7 @@ class BillingAgainstOrderController extends Controller
             ))->keyBy('id');
 
             $same  = $this->sameState($ctx, $order);
+            $rates = $this->listRates($ctx, $order, $orderLines->pluck('product_id')->map(fn ($v) => (int) $v)->unique()->values()->all());
             $lines = [];
             foreach ($items as $it) {
                 $ol = $orderLines[(int) $it['line_id']] ?? null;
@@ -194,7 +196,7 @@ class BillingAgainstOrderController extends Controller
 
                 $qty     = (float) $it['qty'];
                 $free    = (float) ($it['free_qty'] ?? 0);
-                $rate    = (float) $ol->rate;
+                $rate    = (float) ($rates[(int) $ol->product_id] ?? $ol->rate);
                 $gst     = (float) $ol->gst_percent;
                 $td      = (float) ($it['td'] ?? 0);
                 $cd      = (float) ($it['cd'] ?? 0);
@@ -382,20 +384,50 @@ class BillingAgainstOrderController extends Controller
     private function findOrder(array $ctx, string $orderId, bool $lock = false): ?object
     {
         return DB::selectOne(
-            "SELECT o.id, o.order_id, o.order_date, o.dealer_id, o.order_remark, o.status, d.name AS firm_name, d.state_id
+            "SELECT o.id, o.order_id, o.order_date, o.dealer_id, o.order_remark, o.status, d.name AS firm_name, d.state_id, d.csa_id
                FROM demand_order o
                JOIN dealer d ON d.id = o.dealer_id
-              WHERE o.order_id = ? AND o.company_id = ? AND d.csa_id = ? AND d.id <> ?
+              WHERE o.order_id = ? AND o.company_id = ? AND d.id <> ? AND {$this->buyerScope($ctx)}
               LIMIT 1" . ($lock ? ' FOR UPDATE' : ''),
-            [$orderId, $ctx['company_id'], $ctx['csa_id'], $ctx['dealer_id']]
+            array_merge([$orderId, $ctx['company_id'], $ctx['dealer_id']], $this->buyerBindings($ctx))
         );
+    }
+
+    private function buyerScope(array $ctx): string
+    {
+        return $ctx['super']
+            ? 'EXISTS (SELECT 1 FROM dealer_person_login l WHERE l.dealer_id = d.id AND l.csa_id <> 0)'
+            : 'd.csa_id = ?';
+    }
+
+    private function buyerBindings(array $ctx): array
+    {
+        return $ctx['super'] ? [] : [$ctx['csa_id']];
+    }
+
+    private function listRates(array $ctx, object $order, array $productIds): array
+    {
+        if (!$ctx['super'] || !$productIds) return [];
+        $stateId = (int) DB::scalar("SELECT state_id FROM csa WHERE c_id = ? LIMIT 1", [(int) $order->csa_id]);
+        if (!$stateId) return [];
+        $rates = [];
+        foreach (DB::select(
+            "SELECT product_id, ss_case_rate FROM product_rate_list
+              WHERE state_id = ? AND company_id = ? AND ss_case_rate > 0 AND product_id IN (" . implode(',', array_fill(0, count($productIds), '?')) . ")
+              ORDER BY id",
+            array_merge([$stateId, $ctx['company_id']], $productIds)
+        ) as $r) {
+            $rates[(int) $r->product_id] ??= (float) $r->ss_case_rate;
+        }
+        return $rates;
     }
 
     private function context(Request $request): ?array
     {
         $user = $request->user();
         $role = trim((string) DB::table('_role')->where('role_id', $user->role_id)->value('rolename'));
-        if (!in_array($role, ['DEPO', 'Depo'], true) || (int) $user->csa_id <= 0) return null;
+        $super = $request->route('mode') === 'super';
+        if ($super ? strcasecmp($role, 'Super Admin') !== 0 : (!in_array($role, ['DEPO', 'Depo'], true) || (int) $user->csa_id <= 0)) return null;
 
         $dealer = DB::selectOne("SELECT name, state_id FROM dealer WHERE id = ? LIMIT 1", [(int) $user->dealer_id]);
 
@@ -404,6 +436,7 @@ class BillingAgainstOrderController extends Controller
             'dealer_id'   => (int) $user->dealer_id,
             'company_id'  => (int) $user->company_id,
             'csa_id'      => (int) $user->csa_id,
+            'super'       => $super,
             'state_id'    => (int) ($dealer->state_id ?? 0),
             'dealer_name' => (string) ($dealer->name ?? ''),
         ];
@@ -411,7 +444,8 @@ class BillingAgainstOrderController extends Controller
 
     private function denied(): JsonResponse
     {
-        return response()->json(['status' => false, 'message' => 'Billing Against Order is only for super stockist logins.'], 403);
+        $super = request()->route('mode') === 'super';
+        return response()->json(['status' => false, 'message' => $super ? 'Billing Against Super Order is only for admin logins.' : 'Billing Against Order is only for super stockist logins.'], 403);
     }
 
     private function parseDate($value): ?string

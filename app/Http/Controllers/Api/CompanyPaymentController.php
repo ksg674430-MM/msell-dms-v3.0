@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Validator;
 
 class CompanyPaymentController extends Controller
 {
-    private const MODES = ['RTGS/NEFT', 'Cheque', 'Draft'];
+    protected const MODES = ['RTGS/NEFT', 'Cheque', 'Draft'];
 
     public function index(Request $request): JsonResponse
     {
@@ -41,7 +41,11 @@ class CompanyPaymentController extends Controller
     public function store(Request $request): JsonResponse
     {
         if (!$dealer = $this->dealer($request)) return $this->denied();
+        return $this->savePayment($request, $dealer);
+    }
 
+    protected function savePayment(Request $request, object $dealer): JsonResponse
+    {
         $rtgs = $request->input('payment_mode') === 'RTGS/NEFT';
         $v = Validator::make($request->all(), [
             'amount'            => ['required', 'numeric', 'gt:0', 'max:99999999'],
@@ -50,7 +54,7 @@ class CompanyPaymentController extends Controller
             'transaction_no'    => [$rtgs ? 'required' : 'nullable', 'string', 'max:20'],
             'bank_detail'       => [$rtgs ? 'nullable' : 'required', 'string', 'max:20'],
             'cheque_draft_no'   => [$rtgs ? 'nullable' : 'required', 'string', 'max:20'],
-            'date'              => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'date'              => ['required', 'date_format:Y-m-d', 'before_or_equal:' . now('Asia/Kolkata')->toDateString()],
             'remark'            => ['nullable', 'string', 'max:250'],
         ], [
             'transaction_no.required'  => 'Enter the Transaction No. for RTGS/NEFT.',

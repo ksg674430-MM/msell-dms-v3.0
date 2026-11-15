@@ -307,7 +307,8 @@ class SchemeController extends Controller
     {
         $ctx = $this->context($request);
         $curr_date   = date('Y-m-d');
-        $admin_status = $request->admin_status;
+        $isAdmin = strcasecmp(trim((string) DB::table('_role')->where('role_id', $ctx['user']->role_id ?? 0)->value('rolename')), 'Super Admin') === 0;
+        $admin_status = $isAdmin ? $request->admin_status : null;
         $dealer_code  = $admin_status == 1
             ? $request->dealer_code
             : $ctx['dealer_code'];

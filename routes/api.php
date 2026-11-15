@@ -74,6 +74,15 @@ use App\Http\Controllers\Api\Sfa\ClaimController;
 use App\Http\Controllers\Api\SchemeController;
 use App\Http\Controllers\Api\BillingAgainstOrderController;
 use App\Http\Controllers\Api\CompanyPaymentController;
+use App\Http\Controllers\Api\Admin\AdminDashboardController;
+use App\Http\Controllers\Api\Admin\AdminDistributorController;
+use App\Http\Controllers\Api\Admin\AdminProductMasterController;
+use App\Http\Controllers\Api\Admin\AdminSchemeController;
+use App\Http\Controllers\Api\Admin\AdminOrderController;
+use App\Http\Controllers\Api\Admin\AdminPaymentController;
+use App\Http\Controllers\Api\Admin\AdminOrderLifeCycleController;
+use App\Http\Controllers\Api\Admin\AdminSaleStatementController;
+use App\Http\Controllers\Api\Admin\AdminQuarterlyController;
 // ============================================================
 // PUBLIC (no auth)
 // ============================================================
@@ -301,9 +310,45 @@ Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class,
     Route::post('/billing/against-order/cancel',         [BillingAgainstOrderController::class, 'cancel']);
     Route::get ('/billing/against-order/{orderId}',      [BillingAgainstOrderController::class, 'show'])->where('orderId', '[0-9]+');
     Route::post('/billing/against-order/{orderId}/bill', [BillingAgainstOrderController::class, 'bill'])->where('orderId', '[0-9]+');
+    Route::get ('/billing/against-super-order', [BillingAgainstOrderController::class, 'index'])->defaults('mode', 'super');
+    Route::post('/billing/against-super-order/cancel', [BillingAgainstOrderController::class, 'cancel'])->defaults('mode', 'super');
+    Route::get ('/billing/against-super-order/{orderId}', [BillingAgainstOrderController::class, 'show'])->where('orderId', '[0-9]+')->defaults('mode', 'super');
+    Route::post('/billing/against-super-order/{orderId}/bill', [BillingAgainstOrderController::class, 'bill'])->where('orderId', '[0-9]+')->defaults('mode', 'super');
     Route::get ('/company-payments',       [CompanyPaymentController::class, 'index']);
     Route::get ('/company-payments/banks', [CompanyPaymentController::class, 'banks']);
     Route::post('/company-payments',       [CompanyPaymentController::class, 'store']);
+    Route::get ('/admin/dashboard',                     [AdminDashboardController::class, 'index']);
+    Route::get ('/admin/distributors/options',          [AdminDistributorController::class, 'options']);
+    Route::get ('/admin/distributors',                  [AdminDistributorController::class, 'index']);
+    Route::post('/admin/distributors/{dealerId}/status', [AdminDistributorController::class, 'setStatus'])->where('dealerId', '[0-9]+');
+    Route::get ('/admin/distributors/form-options',     [AdminDistributorController::class, 'formOptions']);
+    Route::post('/admin/distributors',                  [AdminDistributorController::class, 'store']);
+    Route::get ('/admin/distributors/{dealerId}',       [AdminDistributorController::class, 'show'])->where('dealerId', '[0-9]+');
+    Route::put ('/admin/distributors/{dealerId}',       [AdminDistributorController::class, 'update'])->where('dealerId', '[0-9]+');
+    Route::post('/admin/distributors/{dealerId}/send-credentials', [AdminDistributorController::class, 'sendCredentials'])->where('dealerId', '[0-9]+');
+    Route::match(['get', 'post'], '/admin/block-order-date', [AdminDistributorController::class, 'blockOrderDate']);
+    Route::match(['get', 'post'], '/admin/dms-message',      [AdminDistributorController::class, 'message']);
+    Route::get ('/dms-message',                         [AdminDistributorController::class, 'banner']);
+    Route::get ('/admin/items',                         [AdminProductMasterController::class, 'items']);
+    Route::put ('/admin/items/{id}',                    [AdminProductMasterController::class, 'updateItem'])->whereNumber('id');
+    Route::get ('/admin/catg-masters/{type}',           [AdminProductMasterController::class, 'masters'])->whereIn('type', ['prod', 'mktg']);
+    Route::post('/admin/catg-masters/{type}',           [AdminProductMasterController::class, 'saveMaster'])->whereIn('type', ['prod', 'mktg']);
+    Route::put ('/admin/catg-masters/{type}/{id}',      [AdminProductMasterController::class, 'saveMaster'])->whereIn('type', ['prod', 'mktg'])->whereNumber('id');
+    Route::get ('/admin/schemes',                       [AdminSchemeController::class, 'index']);
+    Route::get ('/admin/schemes/options',               [AdminSchemeController::class, 'options']);
+    Route::post('/admin/schemes',                       [AdminSchemeController::class, 'store']);
+    Route::get ('/admin/schemes/distributors',          [AdminSchemeController::class, 'distributors']);
+    Route::get ('/admin/schemes/distributor-wise',      [AdminSchemeController::class, 'distributorScheme']);
+    Route::get ('/admin/orders',                        [AdminOrderController::class, 'index']);
+    Route::get ('/admin/payments',                      [AdminPaymentController::class, 'adminIndex']);
+    Route::get ('/admin/payments/banks',                [AdminPaymentController::class, 'adminBanks']);
+    Route::post('/admin/payments',                      [AdminPaymentController::class, 'adminStore']);
+    Route::get ('/admin/order-life-cycle',              [AdminOrderLifeCycleController::class, 'index']);
+    Route::get ('/admin/order-life-cycle/items',        [AdminOrderLifeCycleController::class, 'items']);
+    Route::get ('/admin/sale-statement/territories',    [AdminSaleStatementController::class, 'territories']);
+    Route::get ('/admin/sale-statement/{type}',         [AdminSaleStatementController::class, 'report'])->whereIn('type', ['mainline', 'ethical']);
+    Route::get ('/admin/quarterly/options',             [AdminQuarterlyController::class, 'options']);
+    Route::get ('/admin/quarterly',                     [AdminQuarterlyController::class, 'report']);
 
     // ========================================================
     // INVOICE (rich list)  → MENU: Invoice → Invoice Details
