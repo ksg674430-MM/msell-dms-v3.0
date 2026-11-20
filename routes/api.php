@@ -75,6 +75,7 @@ use App\Http\Controllers\Api\SchemeController;
 use App\Http\Controllers\Api\BillingAgainstOrderController;
 use App\Http\Controllers\Api\CompanyPaymentController;
 use App\Http\Controllers\Api\Admin\AdminDashboardController;
+use App\Http\Controllers\Api\Admin\AdminLogViewerController;
 use App\Http\Controllers\Api\Admin\AdminDistributorController;
 use App\Http\Controllers\Api\Admin\AdminProductMasterController;
 use App\Http\Controllers\Api\Admin\AdminSchemeController;
@@ -318,6 +319,8 @@ Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class,
     Route::get ('/company-payments/banks', [CompanyPaymentController::class, 'banks']);
     Route::post('/company-payments',       [CompanyPaymentController::class, 'store']);
     Route::get ('/admin/dashboard',                     [AdminDashboardController::class, 'index']);
+    Route::get ('/admin/logs',                          [AdminLogViewerController::class, 'index']);
+    Route::get ('/admin/logs/download',                 [AdminLogViewerController::class, 'download']);
     Route::get ('/admin/distributors/options',          [AdminDistributorController::class, 'options']);
     Route::get ('/admin/distributors',                  [AdminDistributorController::class, 'index']);
     Route::post('/admin/distributors/{dealerId}/status', [AdminDistributorController::class, 'setStatus'])->where('dealerId', '[0-9]+');
