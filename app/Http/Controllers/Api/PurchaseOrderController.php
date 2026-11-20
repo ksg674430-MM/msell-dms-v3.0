@@ -51,7 +51,9 @@ class PurchaseOrderController extends Controller
 
     private const ERP_BILL = "COALESCE(po.invoice_no_p, '') NOT IN ('', '0')";
 
-    private const BILLED_LINE = "(COALESCE(pod.item_code, '') NOT IN ('', '0') OR CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) > 0)";
+    private const BILLED_LINE = "(COALESCE(pod.item_code, '') NOT IN ('', '0') OR CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) > 0 OR COALESCE(pod.purchase_inv, '') NOT IN ('', '0'))";
+
+    private const BILLED_AMT = "CASE WHEN CAST(COALESCE(NULLIF(pod.inv_busy_amt, ''), 0) AS DECIMAL(12,2)) > 0 THEN CAST(pod.inv_busy_amt AS DECIMAL(12,2)) ELSE CAST(COALESCE(NULLIF(pod.total_amount, ''), 0) AS DECIMAL(12,2)) END";
 
     public function index(Request $request)
     {
@@ -86,7 +88,7 @@ class PurchaseOrderController extends Controller
                        c.csa_name,
                        COALESCE(c.csa_name, po.firm_name) AS csa_name_display,
                        (SELECT CASE WHEN " . self::ERP_BILL . "
-                                    THEN SUM(CASE WHEN " . self::BILLED_LINE . " THEN CAST(COALESCE(NULLIF(pod.inv_busy_amt, ''), 0) AS DECIMAL(12,2)) ELSE 0 END)
+                                    THEN SUM(CASE WHEN " . self::BILLED_LINE . " THEN " . self::BILLED_AMT . " ELSE 0 END)
                                     ELSE SUM(CAST(pod.total_amount AS DECIMAL(12,2))) END
                           FROM purchase_order_details pod
                          WHERE pod.order_id = po.id) AS total_purchase_amount
@@ -133,7 +135,8 @@ class PurchaseOrderController extends Controller
     "SELECT pod.*,
             " . self::BILLED_LINE . " AS billed,
             CASE WHEN COALESCE(pod.item_code, '') NOT IN ('', '0') THEN pod.quantity
-                 ELSE CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) END AS bill_qty,
+                 WHEN CAST(COALESCE(NULLIF(pod.inv_busy_qty, ''), 0) AS DECIMAL(12,3)) > 0 THEN CAST(pod.inv_busy_qty AS DECIMAL(12,3))
+                 ELSE pod.quantity END AS bill_qty,
             CASE WHEN CAST(COALESCE(NULLIF(pod.inv_busy_rate, ''), 0) AS DECIMAL(12,3)) > 0 THEN pod.inv_busy_rate ELSE pod.rate END AS bill_rate,
             cp.name              AS product_name,
             cp.itemcode          AS itemcode,
