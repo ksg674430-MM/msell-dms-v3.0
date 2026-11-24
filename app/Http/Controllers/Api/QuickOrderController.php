@@ -1297,7 +1297,14 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
 
     private function legacySplitEnabled(int $dealerId): bool
     {
-        return DB::table('dealer_person_login')->where('dealer_id', $dealerId)->where('is_split_entity_enabled', 1)->exists();
+        $code = trim((string) DB::table('dealer')->where('id', $dealerId)->value('dealer_code'));
+        if ($code === '') {
+            return DB::table('dealer_person_login')->where('dealer_id', $dealerId)->where('is_split_entity_enabled', 1)->exists();
+        }
+        return DB::table('dealer_person_login')
+            ->where('is_split_entity_enabled', 1)
+            ->whereIn('dealer_id', DB::table('dealer')->where('dealer_code', $code)->select('id'))
+            ->exists();
     }
 
     private function legacyItemEntities(array $itemCodes, bool $split): array
