@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\Erp405\DMSCommonController as ErpDMSCommonController;
+use App\Http\Controllers\Api\Erp405\DMSRecieverController as ErpDMSRecieverController;
+use App\Http\Controllers\Api\Erp405\DMSSenderController as ErpDMSSenderController;
 use App\Http\Controllers\Api\BalanceStockController;
 
 use App\Http\Controllers\Api\DashboardController;
@@ -89,6 +92,15 @@ use App\Http\Controllers\Api\Admin\AdminQuarterlyController;
 // ============================================================
 // MENU: Login screen
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+
+Route::middleware('erp405')->prefix('erp405')->group(function () {
+    Route::post('parent_receive_function_erp', [ErpDMSRecieverController::class, 'parent_receive_function']);
+    Route::post('count_details_server', [ErpDMSRecieverController::class, 'count_details_server']);
+    Route::post('erp_request_delete_status', [ErpDMSRecieverController::class, 'erp_request_delete_status']);
+    Route::post('send_order_details_erp', [ErpDMSSenderController::class, 'send_order_details_erp']);
+    Route::post('send_order_status_erp', [ErpDMSSenderController::class, 'recieve_order_status_erp']);
+    Route::post('return_order_date_div_wise', [ErpDMSCommonController::class, 'return_order_date_div_wise']);
+});
 Route::get('/dev/db-export/download/{id}', [DbExportController::class, 'download'])->middleware('signed:relative')->name('db-export.download');
 
 Route::middleware('auth:sanctum')->group(function () {

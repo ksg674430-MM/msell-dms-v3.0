@@ -174,6 +174,7 @@ class AdminDistributorController extends Controller
             'status'     => true,
             'csa'        => DB::select("SELECT c_id AS value, csa_name AS label FROM csa WHERE company_id = ? AND active_status = 1 ORDER BY csa_name", [$ctx->company_id]),
             'div_codes'  => $ctx->erp ? DB::select("SELECT name AS value, name AS label FROM _div_code_master WHERE status = 1 ORDER BY name") : [],
+            'secondary_div_codes' => $ctx->erp ? DB::select("SELECT DISTINCT sec_name AS value, sec_name AS label FROM _div_code_master WHERE sec_name <> '' ORDER BY sec_name") : [],
             'roles'      => $this->roles($ctx),
             'divisions'  => DB::select("SELECT id AS value, type AS label FROM _product_division WHERE company_id IN (0, ?) ORDER BY type", [$ctx->company_id]),
             'locations'  => $levels,
@@ -192,7 +193,7 @@ class AdminDistributorController extends Controller
         if (!$dealer) return response()->json(['status' => false, 'message' => 'Distributor not found.'], 404);
 
         $login = DB::selectOne(
-            "SELECT uname, role_id, div_code_main, regis_status, AES_DECRYPT(pass, ?) AS password FROM dealer_person_login WHERE dealer_id = ? ORDER BY dpId LIMIT 1",
+            "SELECT uname, role_id, div_code_main, regis_status, AES_DECRYPT(pass, ?) AS password" . ($ctx->erp ? ", div_code_secondary, is_split_entity_enabled" : '') . " FROM dealer_person_login WHERE dealer_id = ? ORDER BY dpId LIMIT 1",
             [config('app.edsalt'), $dealerId]
         );
         $beats = DB::table('dealer_location_rate_list')->where('dealer_id', $dealerId)->distinct()->pluck('location_id')->map(fn ($v) => (int) $v);
@@ -202,7 +203,7 @@ class AdminDistributorController extends Controller
         return response()->json([
             'status' => true,
             'dealer' => $dealer,
-            'login'  => $login ? ['username' => $login->uname, 'password' => (string) $login->password, 'role_id' => (int) $login->role_id, 'div_code' => (string) $login->div_code_main, 'regis_status' => (string) $login->regis_status] : null,
+            'login'  => $login ? ['username' => $login->uname, 'password' => (string) $login->password, 'role_id' => (int) $login->role_id, 'div_code' => (string) $login->div_code_main, 'div_code_secondary' => (string) ($login->div_code_secondary ?? ''), 'is_split_entity_enabled' => (int) ($login->is_split_entity_enabled ?? 0) === 1, 'regis_status' => (string) $login->regis_status] : null,
             'location' => $path,
             'beats'  => $beats,
             'report_territories' => $report->where('location_2', '>', 0)->pluck('location_2')->map(fn ($v) => (int) $v)->values(),
@@ -332,6 +333,8 @@ class AdminDistributorController extends Controller
             'csa_id'         => ['required', 'integer', Rule::exists('csa', 'c_id')->where('company_id', $ctx->company_id)],
             'regis_status'   => ['required', Rule::in(['0', '1'])],
             'div_code'       => [$divRequired ? 'required' : 'nullable', 'string', 'max:200'],
+            'div_code_secondary' => ['nullable', 'string', 'max:200', Rule::in(array_map(fn ($r) => $r->value, $ctx->erp ? DB::select("SELECT DISTINCT sec_name AS value FROM _div_code_master WHERE sec_name <> ''") : []))],
+            'is_split_entity_enabled' => ['nullable', 'boolean'],
             'role_id'        => ['required', 'integer', Rule::in($roleIds)],
             'username'       => ['required', 'string', 'max:20', Rule::unique('dealer_person_login', 'uname')->where(fn ($q) => $dealerId ? $q->where('dealer_id', '<>', $dealerId) : $q)],
             'password'       => [$creating ? 'required' : 'nullable', 'string', 'min:4', 'max:50'],
@@ -394,6 +397,10 @@ class AdminDistributorController extends Controller
             'regis_status'  => $request->input('regis_status'),
             'csa_id'        => $dealerData['csa_id'],
         ];
+        if ($ctx->erp) {
+            $loginData['div_code_secondary'] = trim((string) $request->input('div_code_secondary', '')) ?: null;
+            $loginData['is_split_entity_enabled'] = $request->boolean('is_split_entity_enabled') ? 1 : 0;
+        }
         $password = (string) $request->input('password', '');
 
         DB::transaction(function () use (&$dealerId, $creating, $ctx, $dealerData, $loginData, $password, $beats, $territories, $divisions) {

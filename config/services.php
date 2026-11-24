@@ -45,4 +45,10 @@ return [
     'test_mode'   => env('IRN_TEST_MODE',   true),
 ],
 
+
+    'erp405' => [
+        'token'       => env('ERP_405_TOKEN', ''),
+        'allowed_ips' => env('ERP_405_ALLOWED_IPS', ''),
+    ],
+
 ];

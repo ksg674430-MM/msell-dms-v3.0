@@ -45,7 +45,7 @@ class AdminOrderController extends Controller
 
         $total = (int) DB::scalar("SELECT COUNT(*) FROM demand_order o WHERE $sqlWhere", $bind);
         $rows = DB::select(
-            "SELECT o.id, o.order_id, o.prefix, o.sale_div_code, o.date_time, o.order_date, o.erp_order_no,
+            "SELECT o.id, o.order_id, o.prefix, o.sale_div_code, " . ($ctx->erp ? 'o.entity_code, ' : '') . "o.date_time, o.order_date, o.erp_order_no,
                     o.send_order_erp_date_time, o.order_remark, o.dealer_id, d.dealer_code, d.name AS dealer_name
                FROM demand_order o
                LEFT JOIN dealer d ON d.id = o.dealer_id
@@ -74,6 +74,7 @@ class AdminOrderController extends Controller
             'from_date' => $from->toDateString(),
             'to_date'   => $to->toDateString(),
             'rows'      => $rows,
+            'show_entity' => $ctx->erp,
             'total'     => $total,
             'page'      => $page,
             'per_page'  => $perPage,

@@ -43,5 +43,6 @@ protected $middlewareAliases = [
     'throttle'         => \Illuminate\Routing\Middleware\ThrottleRequests::class,
     'verified'         => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
     'legacy.only'      => \App\Http\Middleware\EnsureBaidyanath::class,
+    'erp405'           => \App\Http\Middleware\EnsureErp405::class,
 ];
 }

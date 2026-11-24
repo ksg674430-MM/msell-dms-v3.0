@@ -605,7 +605,7 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
         $div_code = $dealer->dealer_erp_div_code ?? ($selectCsa->div_code_main ?? '0');
         $dealer_array = [];
         if ($selectCsa) {
-            $dealer_array = DB::table('dealer')->where('company_id', $company_id)->where('csa_id', $selectCsa->csa_id)->where('dealer_status', 1)->orderBy('id', 'ASC')->get()->toArray();
+            $dealer_array = DB::table('dealer')->where('company_id', $company_id)->where('csa_id', $selectCsa->csa_id)->where('id', '<>', $dealer_id)->where('dealer_status', 1)->orderBy('id', 'ASC')->get()->toArray();
         }
 
         $checkSuper = DB::table('dealer')->where('id', $dealer_id)->first();
@@ -643,7 +643,7 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
             $orderDate = $request->order_date ?: date('Y-m-d');
             $dealer_id_cus = $this->allowedDealerId($ctx, $request->dealer_id_cus_select == '1' ? $dealer_id : $request->dealer_id_cus);
 
-            if (!$dealer_id_cus) {
+            if (!$dealer_id_cus || ($request->dealer_id_cus_select == '2' && $dealer_id_cus === (int) $dealer_id)) {
                 DB::rollBack();
                 return response()->json(['status' => false, 'message' => 'You cannot place an order for this distributor.'], 403);
             }
@@ -1252,15 +1252,80 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
     /**
      * FIXED: Prevent BIGINT limit overflow (9223372036854775807)
      */
-    private function legacyNewOrderId(array $ctx): string
+    private function legacyNewOrderId(array $ctx, int $offset = 0): string
     {
         $auth_id = $this->legacyAuthId($ctx);
-        $id = date('YmdHis') . $auth_id;
+        $at = time() + $offset;
+        $id = date('YmdHis', $at) . $auth_id;
 
         // If ID > 19 digits, shorten the year to fit in BIGINT
         return strlen($id) < 19 || (strlen($id) === 19 && strcmp($id, (string) PHP_INT_MAX) <= 0)
             ? $id
-            : date('ymdHis') . $auth_id;
+            : date('ymdHis', $at) . $auth_id;
+    }
+
+    private function legacyUniqueOrderId(array $ctx, string $table, int &$offset): string
+    {
+        do {
+            $id = $this->legacyNewOrderId($ctx, $offset++);
+        } while (DB::table($table)->where('order_id', $id)->exists());
+        return $id;
+    }
+
+    private const LEGACY_ENTITIES = [
+        'JH' => [
+            'name' => 'SHREE BAIDYANATH AYURVED BHAWAN PVT LTD',
+            'bank' => ['bank_name' => 'HDFC BANK', 'branch' => '209-214, KAILASH BUILDING, KASTURBA GANDHI MARG, NEW DELHI-110001', 'account_no' => '00030120000163', 'ifsc' => 'HDFC0000003'],
+        ],
+        'BP' => [
+            'name' => 'BAIDYAPATH AYURVED LLP',
+            'bank' => ['bank_name' => 'HDFC BANK', 'branch' => 'B 6/3, SAFDARJUNG ENCLAVE, OPP. DEER PARK, NEW DELHI-110029', 'account_no' => '57500000147165', 'ifsc' => 'HDFC0000503'],
+        ],
+    ];
+
+    private function legacyEntityCode($value): string
+    {
+        $e = strtoupper(trim((string) $value));
+        return ($e === '' || $e === 'NULL') ? 'JH' : $e;
+    }
+
+    private function legacyEntityInfo(string $code): array
+    {
+        $info = self::LEGACY_ENTITIES[$code] ?? self::LEGACY_ENTITIES['JH'];
+        return ['entity_code' => $code, 'entity_name' => $info['name'], 'bank' => ['name' => $info['name']] + $info['bank']];
+    }
+
+    private function legacySplitEnabled(int $dealerId): bool
+    {
+        return DB::table('dealer_person_login')->where('dealer_id', $dealerId)->where('is_split_entity_enabled', 1)->exists();
+    }
+
+    private function legacyItemEntities(array $itemCodes, bool $split): array
+    {
+        $itemCodes = array_values(array_unique(array_map('strval', $itemCodes)));
+        $raw = $split && $itemCodes ? DB::table('WWW_WEB_ITEM_DISPLAY')->whereIn('ITEM_CODE', $itemCodes)->pluck('entity_code', 'ITEM_CODE')->all() : [];
+        $out = [];
+        foreach ($itemCodes as $code) {
+            $out[$code] = $split ? $this->legacyEntityCode($raw[$code] ?? '') : 'JH';
+        }
+        return $out;
+    }
+
+    private function legacySortEntities(array $byEntity): array
+    {
+        uksort($byEntity, fn ($a, $b) => $a === 'JH' ? -1 : ($b === 'JH' ? 1 : strcmp($a, $b)));
+        return $byEntity;
+    }
+
+    private function legacySaleDivCode(string $entity, string $default, int $dealerId, int $roleId): string
+    {
+        if ($entity === 'BP' && $roleId !== 37) {
+            $secondary = trim((string) DB::table('dealer_person_login')->where('dealer_id', $dealerId)->value('div_code_secondary'));
+            if ($secondary !== '' && $secondary !== '0') {
+                return $secondary;
+            }
+        }
+        return $default;
     }
 
     private function legacyDealerRate(string $itemCode): ?array
@@ -1291,34 +1356,36 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
     }
 
 
-private function legacyBuildCartPayload(int $dealer_id, int $uid): array
+private function legacyCartPayload(int $dealer_id): array
 {
-    $records = DB::table('demand_order_cart')
-        ->join('demand_order_details_cart', 'demand_order_details_cart.order_id', '=', 'demand_order_cart.order_id')
+    $heads = DB::table('demand_order_cart')->where('dealer_id', $dealer_id)->orderBy('id')->get(['id', 'order_id', 'order_date', 'order_remark']);
+    if ($heads->isEmpty()) {
+        return ['uid' => 0, 'order_date' => '', 'order_remark' => '', 'final_out' => [], 'entities' => []];
+    }
+
+    $records = DB::table('demand_order_details_cart')
         ->leftJoin('WWW_WEB_ITEM_DISPLAY', 'WWW_WEB_ITEM_DISPLAY.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
-        ->leftJoin('ITEM_AUM_MAST', 'ITEM_AUM_MAST.ITEM_CODE', '=', 'demand_order_details_cart.product_id')   // ← NEW
+        ->leftJoin('ITEM_AUM_MAST', 'ITEM_AUM_MAST.ITEM_CODE', '=', 'demand_order_details_cart.product_id')
         ->select(
-            'demand_order_cart.*',
             'demand_order_details_cart.*',
             'demand_order_details_cart.id as pid',
             'WWW_WEB_ITEM_DISPLAY.ITEM_NAME',
             'WWW_WEB_ITEM_DISPLAY.MKTG_CATG',
-            'ITEM_AUM_MAST.UMTOAUM as UM_TO_AUM'                        // ← NEW
+            'ITEM_AUM_MAST.UMTOAUM as UM_TO_AUM'
         )
-        ->where('demand_order_cart.dealer_id', $dealer_id)
-        ->where('demand_order_cart.id', $uid)
+        ->whereIn('demand_order_details_cart.order_id', $heads->pluck('order_id')->all())
         ->groupBy('demand_order_details_cart.id')
+        ->orderBy('demand_order_details_cart.id')
         ->get();
 
-    $final_out_map = [];
+    $entityOf = $this->legacyItemEntities($records->pluck('product_id')->all(), $this->legacySplitEnabled($dealer_id));
+    $all = [];
+    $byEntity = [];
     foreach ($records as $v) {
         $catKey = $v->MKTG_CATG ?? 'Uncategorized';
-        if (!isset($final_out_map[$catKey])) $final_out_map[$catKey] = [];
-
         $total = (float) $v->quantity;
         $free  = (float) $v->free_qty;
-
-        $final_out_map[$catKey][] = [
+        $row = [
             'total_rs'               => $v->total_rs,
             'pid'                    => $v->pid,
             'order_id'               => $v->order_id,
@@ -1333,15 +1400,33 @@ private function legacyBuildCartPayload(int $dealer_id, int $uid): array
             'remarks'                => $v->remarks,
             't1_rate'                => $v->t1_rate,
             'atd_rate'               => $v->atd_rate,
-            'conversion_factor'      => (float) ($v->UM_TO_AUM ?? 0),   // ← NEW
+            'conversion_factor'      => (float) ($v->UM_TO_AUM ?? 0),
         ];
+        $all[$catKey][] = $row;
+        $byEntity[$entityOf[(string) $v->product_id] ?? 'JH'][$catKey][] = $row;
     }
 
-    $final_out = [];
-    foreach ($final_out_map as $catName => $rows) {
-        $final_out[] = [$catName => $rows];
+    $wrap = function (array $map): array {
+        $out = [];
+        foreach ($map as $catName => $rows) {
+            $out[] = [$catName => $rows];
+        }
+        return $out;
+    };
+
+    $entities = [];
+    foreach ($this->legacySortEntities($byEntity) as $code => $map) {
+        $entities[] = $this->legacyEntityInfo((string) $code) + ['final_out' => $wrap($map)];
     }
-    return $final_out;
+
+    $first = $heads->first();
+    return [
+        'uid'          => (int) $first->id,
+        'order_date'   => (string) ($first->order_date ?? ''),
+        'order_remark' => (string) ($first->order_remark ?? ''),
+        'final_out'    => $wrap($all),
+        'entities'     => $entities,
+    ];
 }
 
 
@@ -1360,15 +1445,7 @@ private function legacyBuildCartPayload(int $dealer_id, int $uid): array
         }
 
         $order_no = $request->order_no;
-        $acc = DB::table('ACC_MAST')->where('ACC_CODE', $dealer_code)->first();
-        $login = DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->first();
-
-        if ($dealer_code === '00001') {
-            $div_code = !empty($acc->DIV_CODE) ? $acc->DIV_CODE : 'JH';
-        } else {
-            $div_code_else = !empty($login->div_code_main) ? $login->div_code_main : '0';
-            $div_code = !empty($acc->DIV_CODE) ? $acc->DIV_CODE : $div_code_else;
-        }
+        $div_code = $this->legacyHistoryDivCode($dealer_id, $dealer_code);
 
         $recordsQ = DB::table('demand_order')->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')->whereRaw("date_format(demand_order.order_date,'%Y-%m-%d')>='$from_date' and date_format(demand_order.order_date,'%Y-%m-%d')<='$to_date'")->groupBy('demand_order.id')->orderBy('demand_order.id', 'DESC');
 
@@ -1382,7 +1459,7 @@ private function legacyBuildCartPayload(int $dealer_id, int $uid): array
             if ($dealer_id === 1170) {
                 $records = $recordsQ->select('demand_order.*', 'demand_order.id as order_id', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->where('demand_order.dealer_id', $dealer_id)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
             } else {
-                $records = $recordsQ->select('demand_order.*', 'demand_order.id as order_id', 'ACC_MAST.*', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->where('sale_div_code', $div_code)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
+                $records = $recordsQ->select('demand_order.*', 'demand_order.id as order_id', 'ACC_MAST.*', 'demand_order.id', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->where('sale_div_code', $div_code)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
             }
         } else {
             $records = $recordsQ->select('demand_order.*', 'demand_order.id as order_id', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->where('demand_order.dealer_id', $dealer_id)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
@@ -1395,14 +1472,14 @@ private function legacyBuildCartPayload(int $dealer_id, int $uid): array
                     $q->where('demand_order.order_id', 'LIKE', '%' . $order_no . '%')->orWhere('erp_order_no', 'LIKE', '%' . $order_no . '%');
                 });
             }
-            $records_depo = $depoQ->select('demand_order.*', 'demand_order.id as order_id', 'ACC_MAST.*', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->where('dealer_id', $dealer_id)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
+            $records_depo = $depoQ->select('demand_order.*', 'demand_order.id as order_id', 'ACC_MAST.*', 'demand_order.id', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"))->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->where('dealer_id', $dealer_id)->orderBy('demand_order.order_date', 'DESC')->get()->toArray();
             $records = array_merge($records_depo, $records);
         }
 
         $depo_filter = []; $dealer_name = [];
 
         if ($role_id === 1) {
-            $adminQ = DB::table('demand_order')->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->whereRaw("date_format(demand_order.order_date,'%Y-%m-%d')>='$from_date' and date_format(demand_order.order_date,'%Y-%m-%d')<='$to_date'")->groupBy('demand_order.id')->orderBy('demand_order.id', 'DESC')->select('demand_order.*', 'dealer.dealer_code as dealer_code', 'demand_order.id as order_id', 'ACC_MAST.*', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"));
+            $adminQ = DB::table('demand_order')->join('demand_order_details', 'demand_order_details.order_id', '=', 'demand_order.order_id')->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->join('ACC_MAST', 'ACC_MAST.ACC_CODE', '=', 'dealer.dealer_code')->whereRaw("date_format(demand_order.order_date,'%Y-%m-%d')>='$from_date' and date_format(demand_order.order_date,'%Y-%m-%d')<='$to_date'")->groupBy('demand_order.id')->orderBy('demand_order.id', 'DESC')->select('demand_order.*', 'dealer.dealer_code as dealer_code', 'demand_order.id as order_id', 'ACC_MAST.*', 'demand_order.id', DB::raw("(SUM((total_rs-t1_rate-atd_rate)+atd_rate)) as total_value"));
             if (!empty($order_no)) {
                 $adminQ->where(function ($q) use ($order_no) {
                     $q->where('demand_order.order_id', 'LIKE', '%' . $order_no . '%')->orWhere('erp_order_no', 'LIKE', '%' . $order_no . '%');
@@ -1509,9 +1586,10 @@ private function legacyStore(Request $request, array $ctx)
     $terms      = array_values((array) ($request->scheme_term ?? []));
     $remarks    = array_values((array) ($request->remarks ?? []));
 
-    $check = DB::table('demand_order_cart')->where('dealer_id', $dealer_id)->first();
-    $inCart = $check
-        ? DB::table('demand_order_details_cart')->where('order_id', $check->order_id)->pluck('product_id')->map(fn ($v) => (string) $v)->all()
+    $heads = DB::table('demand_order_cart')->where('dealer_id', $dealer_id)->orderBy('id')->get();
+    $cartOrderIds = $heads->pluck('order_id')->all();
+    $inCart = $cartOrderIds
+        ? DB::table('demand_order_details_cart')->whereIn('order_id', $cartOrderIds)->pluck('product_id')->map(fn ($v) => (string) $v)->all()
         : [];
 
     $lines = [];
@@ -1537,39 +1615,22 @@ private function legacyStore(Request $request, array $ctx)
         return $fail('Add at least one item with a quantity.');
     }
 
+    $entityOf = $this->legacyItemEntities(array_keys($lines), $this->legacySplitEnabled($dealer_id));
+    $remark = filled($request->final_remarks)
+        ? mb_substr((string) $request->final_remarks, 0, 150)
+        : (string) ($heads->first()->order_remark ?? '');
+
     DB::beginTransaction();
     try {
-        if ($check) {
-            $order_id   = $check->order_id;
-            $uid        = $check->id;
-            $order_date = $check->order_date;
-            if (filled($request->final_remarks)) {
-                DB::table('demand_order_cart')->where('id', $uid)->update(['order_remark' => mb_substr((string) $request->final_remarks, 0, 150)]);
-            }
-        } else {
-            $order_id   = $this->legacyNewOrderId($ctx);
-            $order_date = date('Y-m-d');
-            $uid = DB::table('demand_order_cart')->insertGetId([
-                'order_id'          => $order_id,
-                'dealer_id'         => $dealer_id,
-                'created_date'      => date('Y-m-d H:i:s'),
-                'order_date'        => $order_date,
-                'created_person_id' => $auth_id,
-                'date_time'         => date('Y-m-d H:i:s'),
-                'company_id'        => $erp_company,
-                'sale_div_code'     => $sale_div_code,
-                'csa_id'            => $csa_id,
-                'order_remark'      => mb_substr((string) ($request->final_remarks ?? ''), 0, 150),
-                'total_value'       => 0,
-                'vr_no_define'      => $depo_dealer_status,
-            ]);
+        if (filled($request->final_remarks) && $heads->isNotEmpty()) {
+            DB::table('demand_order_cart')->whereIn('id', $heads->pluck('id')->all())->update(['order_remark' => $remark]);
         }
 
+        $touched = [];
         if ($updating) {
-            $line = DB::table('demand_order_details_cart')
-                ->where('order_id', $order_id)
-                ->where('product_id', (string) $request->update_product_id)
-                ->first();
+            $line = $cartOrderIds
+                ? DB::table('demand_order_details_cart')->whereIn('order_id', $cartOrderIds)->where('product_id', (string) $request->update_product_id)->first()
+                : null;
             if (!$line) {
                 DB::rollBack();
                 return $fail('Item not found in your cart.');
@@ -1580,31 +1641,69 @@ private function legacyStore(Request $request, array $ctx)
                 return $fail($priced['error']);
             }
             DB::table('demand_order_details_cart')->where('id', $line->id)->update($this->legacyCartLineValues($dealer_id, (string) $line->product_id, $priced));
+            $touched[(string) $line->order_id] = true;
         }
 
-        $rows = [];
+        $headByEntity = [];
+        foreach ($heads as $h) {
+            $headByEntity[$this->legacyEntityCode($h->entity_code ?? '')] ??= (string) $h->order_id;
+        }
+
+        $byEntity = [];
         foreach ($lines as $code => $priced) {
-            $rows[] = [
-                'order_id'     => $order_id,
-                'product_id'   => $code,
-                'scheme_qty'   => 0,
-                'purchase_inv' => '',
-                'mfg_date'     => '0000-00-00',
-                'expiry_date'  => '0000-00-00',
-                'receive_date' => '0000-00-00',
-                'batch_no'     => '',
-                'pr_rate'      => '',
-                'gst'          => '',
-                'cases'        => '',
-                'remarks'      => $priced['remarks'],
-            ] + $this->legacyCartLineValues($dealer_id, $code, $priced);
+            $byEntity[$entityOf[(string) $code] ?? 'JH'][$code] = $priced;
         }
-        if ($rows) {
+
+        $offset = 0;
+        foreach ($this->legacySortEntities($byEntity) as $entity => $entityLines) {
+            $entity = (string) $entity;
+            if (!isset($headByEntity[$entity])) {
+                $newOrderId = $this->legacyUniqueOrderId($ctx, 'demand_order_cart', $offset);
+                DB::table('demand_order_cart')->insert([
+                    'order_id'          => $newOrderId,
+                    'dealer_id'         => $dealer_id,
+                    'created_date'      => date('Y-m-d H:i:s'),
+                    'order_date'        => date('Y-m-d'),
+                    'created_person_id' => $auth_id,
+                    'date_time'         => date('Y-m-d H:i:s'),
+                    'company_id'        => $erp_company,
+                    'sale_div_code'     => $this->legacySaleDivCode($entity, (string) $sale_div_code, $dealer_id, $role_id),
+                    'csa_id'            => $csa_id,
+                    'order_remark'      => $remark,
+                    'total_value'       => 0,
+                    'vr_no_define'      => $depo_dealer_status,
+                    'entity_code'       => $entity,
+                ]);
+                $headByEntity[$entity] = $newOrderId;
+            }
+            $order_id = $headByEntity[$entity];
+
+            $rows = [];
+            foreach ($entityLines as $code => $priced) {
+                $rows[] = [
+                    'order_id'     => $order_id,
+                    'product_id'   => $code,
+                    'scheme_qty'   => 0,
+                    'purchase_inv' => '',
+                    'mfg_date'     => '0000-00-00',
+                    'expiry_date'  => '0000-00-00',
+                    'receive_date' => '0000-00-00',
+                    'batch_no'     => '',
+                    'pr_rate'      => '',
+                    'gst'          => '',
+                    'cases'        => '',
+                    'remarks'      => $priced['remarks'],
+                ] + $this->legacyCartLineValues($dealer_id, (string) $code, $priced);
+            }
             DB::table('demand_order_details_cart')->insert($rows);
+            $touched[$order_id] = true;
         }
-        DB::table('demand_order_cart')->where('id', $uid)->update([
-            'total_value' => DB::table('demand_order_details_cart')->where('order_id', $order_id)->sum('total_rs'),
-        ]);
+
+        foreach (array_keys($touched) as $orderId) {
+            DB::table('demand_order_cart')->where('order_id', $orderId)->update([
+                'total_value' => DB::table('demand_order_details_cart')->where('order_id', $orderId)->sum('total_rs'),
+            ]);
+        }
 
         DB::commit();
     } catch (\Throwable $e) {
@@ -1613,16 +1712,19 @@ private function legacyStore(Request $request, array $ctx)
         return $fail('Cart update failed (legacy)', 500);
     }
 
+    $cart = $this->legacyCartPayload($dealer_id);
+
     return response()->json([
         'status'  => true,
         'message' => 'Cart updated (legacy)',
         'data'    => [
             'legacy'        => true,
-            'uid'           => $uid,
-            'order_id'      => 'B-' . $uid,
-            'order_date'    => $order_date,
+            'uid'           => $cart['uid'],
+            'order_id'      => 'B-' . $cart['uid'],
+            'order_date'    => $cart['order_date'],
             'dealer_id_cus' => $dealer_id,
-            'final_out'     => $this->legacyBuildCartPayload($dealer_id, (int) $uid),
+            'final_out'     => $cart['final_out'],
+            'entities'      => $cart['entities'],
         ],
     ]);
 }
@@ -1676,27 +1778,6 @@ private function legacyCartLineValues(int $dealerId, string $itemCode, array $pr
         }
     }
 
-    // Cart head
-    $head = DB::table('demand_order_cart')->where('id', $order_id_for_use)->first();
-    if (!$head || (int) $head->dealer_id !== $dealer_id) {
-        return response()->json(['status' => false, 'message' => 'Cart not found'], 404);
-    }
-
-    // Cart lines
-    $lines = DB::table('demand_order_details_cart')
-        ->join('demand_order_cart', 'demand_order_cart.order_id', '=', 'demand_order_details_cart.order_id')
-        ->select('demand_order_details_cart.*')
-        ->where('demand_order_cart.id', $order_id_for_use)
-        ->groupBy('demand_order_details_cart.id')
-        ->get();
-
-    if ($lines->isEmpty()) {
-        return response()->json(['status' => false, 'message' => 'Empty cart'], 422);
-    }
-
-    $final_remarks = (string) ($head->order_remark ?? '');
-    $sale_div_code = (string) ($head->sale_div_code ?? 'JH');
-
     if ($role_id === 37) {
         $depo_dealer_status = 'DO';
     } elseif ($role_id === 1) {
@@ -1705,95 +1786,98 @@ private function legacyCartLineValues(int $dealerId, string $itemCode, array $pr
         $depo_dealer_status = 'SO';
     }
 
-    $order_id   = $this->legacyNewOrderId($ctx);
-    $detailRows = [];
-    $total_rs   = [];
-
-    foreach ($lines as $v) {
-        $total_rs[] = $v->total_rs;
-
-        // 🔧 FIX: recompute the tax fields from demand_order_details_cart.total_rs
-        // (guards against carts created before the legacyStore fix).
-        [$atdRate, $tdDisc, $t1Pct] = $this->legacyCommonDiscount(
-            $dealer_id, (string) $v->product_id, (float) $v->total_rs
-        );
-
-        $detailRows[] = [
-            'order_id'                 => (string) $order_id,
-            'product_id'               => (string) $v->product_id,
-            'rate'                     => (string) $v->rate,
-            'mrp'                      => (string) $v->mrp,
-            'quantity'                 => (string) (float) ($v->quantity ?: 0),
-
-            'scheme_qty'               => (string) (float) ($v->scheme_qty ?: 0),
-            'purchase_inv'             => (string) ($v->purchase_inv ?? ''),
-            'mfg_date'                 => (string) ($v->mfg_date ?: '0000-00-00'),
-            'expiry_date'              => (string) ($v->expiry_date ?: '0000-00-00'),
-            'receive_date'             => (string) ($v->receive_date ?: '0000-00-00'),
-            'batch_no'                 => (string) ($v->batch_no ?? ''),
-
-            'pr_rate'                  => (float) ($v->pr_rate ?: 0),
-            'gst'                      => (float) ($v->gst ?: 0),
-            'cases'                    => (int)   ($v->cases ?: 0),
-
-            'free_qty'                 => (int)   ($v->free_qty ?: 0),
-            'total_rs'                 => (float) ($v->total_rs ?: 0),
-            'scheme_qty_with_free_qty' => (int)   ($v->scheme_qty_with_free_qty ?: 0),
-
-            'order_unit'               => (string) ($v->order_unit ?? 'PCS'),
-            'order_converstion_unit'   => (string) ($v->order_converstion_unit ?: '0'),
-            'remarks'                  => mb_substr((string) ($v->remarks ?? ''), 0, 200),
-            't1_rate'                  => (string) $tdDisc,
-            'atd_rate'                 => (string) $atdRate,
-            't1_rate_perc'             => (string) $t1Pct,
-        ];
-    }
+    $split = $this->legacySplitEnabled($dealer_id);
+    $created = [];
 
     DB::beginTransaction();
     try {
-        DB::table('demand_order_details')->insert($detailRows);
-
-        DB::table('demand_order')->insert([
-            'order_id'          => $order_id,
-            'dealer_id'         => $dealer_id,
-            'created_date'      => date('Y-m-d H:i:s'),
-            'order_date'        => date('Y-m-d'),
-            'created_person_id' => $auth_id,
-            'date_time'         => date('Y-m-d H:i:s'),
-            'company_id'        => $erp_company,
-            'sale_div_code'     => $sale_div_code,
-            'csa_id'            => $csa_id,
-            'order_remark'      => mb_substr($final_remarks, 0, 100),
-            'total_value'       => array_sum($total_rs),
-            'vr_no_define'      => $depo_dealer_status,
-        ]);
-
-        // Clear the cart
-        $cart_order_id = DB::table('demand_order_cart')
-            ->where('id', $order_id_for_use)
-            ->value('order_id');
-
-        if ($cart_order_id) {
-            DB::table('demand_order_details_cart')->where('order_id', $cart_order_id)->delete();
+        $heads = DB::table('demand_order_cart')->where('dealer_id', $dealer_id)->orderBy('id')->lockForUpdate()->get();
+        if ($heads->isEmpty() || (filled($order_id_for_use) && !$heads->contains(fn ($h) => (string) $h->id === (string) $order_id_for_use))) {
+            DB::rollBack();
+            return response()->json(['status' => false, 'message' => 'Cart not found'], 404);
         }
-        DB::table('demand_order_cart')->where('id', $order_id_for_use)->delete();
+        $cartOrderIds = $heads->pluck('order_id')->all();
+        $headByOrder = $heads->keyBy(fn ($h) => (string) $h->order_id);
+
+        $lines = DB::table('demand_order_details_cart')->whereIn('order_id', $cartOrderIds)->orderBy('id')->get();
+        if ($lines->isEmpty()) {
+            DB::rollBack();
+            return response()->json(['status' => false, 'message' => 'Empty cart'], 422);
+        }
+
+        $entityOf = $this->legacyItemEntities($lines->pluck('product_id')->all(), $split);
+        $grouped = [];
+        foreach ($lines as $v) {
+            $grouped[$entityOf[(string) $v->product_id] ?? 'JH'][] = $v;
+        }
+
+        $offset = 0;
+        foreach ($this->legacySortEntities($grouped) as $entity => $rows) {
+            $entity = (string) $entity;
+            $hdr = $headByOrder[(string) $rows[0]->order_id] ?? $heads->first();
+            $order_id = $this->legacyUniqueOrderId($ctx, 'demand_order', $offset);
+            $detailRows = [];
+            $total_rs = 0.0;
+
+            foreach ($rows as $v) {
+                $total_rs += (float) $v->total_rs;
+                [$atdRate, $tdDisc, $t1Pct] = $this->legacyCommonDiscount($dealer_id, (string) $v->product_id, (float) $v->total_rs);
+
+                $detailRows[] = [
+                    'order_id'                 => (string) $order_id,
+                    'product_id'               => (string) $v->product_id,
+                    'rate'                     => (string) $v->rate,
+                    'mrp'                      => (string) $v->mrp,
+                    'quantity'                 => (string) (float) ($v->quantity ?: 0),
+                    'scheme_qty'               => (string) (float) ($v->scheme_qty ?: 0),
+                    'purchase_inv'             => (string) ($v->purchase_inv ?? ''),
+                    'mfg_date'                 => (string) ($v->mfg_date ?: '0000-00-00'),
+                    'expiry_date'              => (string) ($v->expiry_date ?: '0000-00-00'),
+                    'receive_date'             => (string) ($v->receive_date ?: '0000-00-00'),
+                    'batch_no'                 => (string) ($v->batch_no ?? ''),
+                    'pr_rate'                  => (float) ($v->pr_rate ?: 0),
+                    'gst'                      => (float) ($v->gst ?: 0),
+                    'cases'                    => (int)   ($v->cases ?: 0),
+                    'free_qty'                 => (int)   ($v->free_qty ?: 0),
+                    'total_rs'                 => (float) ($v->total_rs ?: 0),
+                    'scheme_qty_with_free_qty' => (int)   ($v->scheme_qty_with_free_qty ?: 0),
+                    'order_unit'               => (string) ($v->order_unit ?? 'PCS'),
+                    'order_converstion_unit'   => (string) ($v->order_converstion_unit ?: '0'),
+                    'remarks'                  => mb_substr((string) ($v->remarks ?? ''), 0, 200),
+                    't1_rate'                  => (string) $tdDisc,
+                    'atd_rate'                 => (string) $atdRate,
+                    't1_rate_perc'             => (string) $t1Pct,
+                ];
+            }
+
+            DB::table('demand_order_details')->insert($detailRows);
+            DB::table('demand_order')->insert([
+                'order_id'          => $order_id,
+                'dealer_id'         => $dealer_id,
+                'created_date'      => date('Y-m-d H:i:s'),
+                'order_date'        => date('Y-m-d'),
+                'created_person_id' => $auth_id,
+                'date_time'         => date('Y-m-d H:i:s'),
+                'company_id'        => $erp_company,
+                'sale_div_code'     => $this->legacySaleDivCode($entity, (string) ($hdr->sale_div_code ?: 'JH'), $dealer_id, $role_id),
+                'csa_id'            => $csa_id,
+                'order_remark'      => mb_substr((string) ($hdr->order_remark ?? ''), 0, 100),
+                'total_value'       => $total_rs,
+                'vr_no_define'      => $depo_dealer_status,
+                'entity_code'       => $entity,
+            ]);
+            $created[] = ['order_id' => $order_id, 'entity_code' => $entity];
+        }
+
+        DB::table('demand_order_details_cart')->whereIn('order_id', $cartOrderIds)->delete();
+        DB::table('demand_order_cart')->whereIn('id', $heads->pluck('id')->all())->delete();
 
         DB::commit();
-
-        return response()->json([
-            'status'  => true,
-            'message' => 'Order finalized (legacy)',
-            'data'    => [
-                'legacy'   => true,
-                'order_id' => $order_id,
-            ],
-        ]);
     } catch (\Throwable $e) {
         DB::rollBack();
 
         Log::error('[legacy] storeFinal failed', [
             'cart_id'   => $order_id_for_use,
-            'order_id'  => $order_id,
             'dealer_id' => $dealer_id,
             'error'     => $e->getMessage(),
         ]);
@@ -1804,37 +1888,59 @@ private function legacyCartLineValues(int $dealerId, string $itemCode, array $pr
             'error'   => $e->getMessage(),
         ], 500);
     }
+
+    $count = count($created);
+    return response()->json([
+        'status'  => true,
+        'message' => $count > 1
+            ? $count . ' orders placed (' . implode(', ', array_column($created, 'entity_code')) . ')'
+            : 'Order finalized (legacy)',
+        'data'    => [
+            'legacy'    => true,
+            'order_id'  => $created[0]['order_id'],
+            'orders'    => $created,
+        ],
+    ]);
 }
 
     private function legacyCartDataForModal(Request $request, array $ctx)
     {
         $dealer_id = (int) $ctx['dealer_id'];
-        $head = DB::table('demand_order_cart')->join('dealer', 'dealer.id', '=', 'demand_order_cart.dealer_id')->select('dealer.*', 'demand_order_cart.id as ppid', 'demand_order_cart.order_remark as cart_remark')->where('demand_order_cart.dealer_id', $dealer_id)->first();
-        $uid = !empty($head->ppid) ? (int) $head->ppid : 0; $order_date = ''; $final_out = [];
+        $cart = $this->legacyCartPayload($dealer_id);
+        $party_name = $cart['uid'] ? (string) DB::table('dealer')->where('id', $dealer_id)->value('name') : '';
 
-        if ($uid) { $final_out = $this->legacyBuildCartPayload($dealer_id, $uid); $order_date = (string) DB::table('demand_order_cart')->where('id', $uid)->value('order_date'); }
-
-        return response()->json(['status' => true, 'message' => 'Cart data (legacy)', 'data' => ['legacy' => true, 'uid' => $uid ?: '', 'order_id' => 'B-' . $uid, 'order_date' => $order_date, 'party_name' => $head->name ?? '', 'order_remark' => $head->cart_remark ?? '', 'final_out' => $final_out, 'dealer_id_cus' => $dealer_id]]);
+        return response()->json(['status' => true, 'message' => 'Cart data (legacy)', 'data' => ['legacy' => true, 'uid' => $cart['uid'] ?: '', 'order_id' => 'B-' . $cart['uid'], 'order_date' => $cart['order_date'], 'party_name' => $party_name, 'order_remark' => $cart['order_remark'], 'final_out' => $cart['final_out'], 'entities' => $cart['entities'], 'dealer_id_cus' => $dealer_id]]);
     }
 
     private function legacyDeleteCartItem(Request $request, array $ctx)
     {
-        $pid = $request->id; $order_id = $request->order_id; $product_id = $request->product_id;
-        $cart = DB::table('demand_order_cart')->where('id', $order_id)->where('dealer_id', (int) $ctx['dealer_id'])->first();
-        if (!$cart) return response()->json(['status' => false, 'message' => 'Cart not found'], 404);
+        $dealer_id = (int) $ctx['dealer_id'];
+        $line = DB::table('demand_order_details_cart')
+            ->join('demand_order_cart', 'demand_order_cart.order_id', '=', 'demand_order_details_cart.order_id')
+            ->where('demand_order_details_cart.id', (int) $request->id)
+            ->where('demand_order_details_cart.product_id', (string) $request->product_id)
+            ->where('demand_order_cart.dealer_id', $dealer_id)
+            ->first(['demand_order_details_cart.id', 'demand_order_cart.id as cart_id', 'demand_order_cart.order_id']);
+        if (!$line) return response()->json(['status' => false, 'message' => 'Item not found in your cart.'], 404);
 
-        DB::table('demand_order_details_cart')->where('order_id', $cart->order_id)->where('product_id', $product_id)->where('id', $pid)->delete();
-        DB::table('demand_order_cart')->where('id', $cart->id)->update(['total_value' => DB::table('demand_order_details_cart')->where('order_id', $cart->order_id)->sum('total_rs')]);
+        DB::transaction(function () use ($line) {
+            DB::table('demand_order_details_cart')->where('id', $line->id)->delete();
+            if (DB::table('demand_order_details_cart')->where('order_id', $line->order_id)->exists()) {
+                DB::table('demand_order_cart')->where('id', $line->cart_id)->update(['total_value' => DB::table('demand_order_details_cart')->where('order_id', $line->order_id)->sum('total_rs')]);
+            } else {
+                DB::table('demand_order_cart')->where('id', $line->cart_id)->delete();
+            }
+        });
 
-        $final_out = $this->legacyBuildCartPayload((int) $cart->dealer_id, (int) $cart->id);
-        return response()->json(['status' => true, 'message' => 'Item removed (legacy)', 'data' => ['legacy' => true, 'uid' => $order_id, 'order_id' => 'B-' . $order_id, 'order_date' => $cart->order_date ?? '', 'dealer_id_cus' => $cart->dealer_id ?? $ctx['dealer_id'], 'final_out' => $final_out]]);
+        $cart = $this->legacyCartPayload($dealer_id);
+        return response()->json(['status' => true, 'message' => 'Item removed (legacy)', 'data' => ['legacy' => true, 'uid' => $cart['uid'] ?: '', 'order_id' => 'B-' . $cart['uid'], 'order_date' => $cart['order_date'], 'dealer_id_cus' => $dealer_id, 'final_out' => $cart['final_out'], 'entities' => $cart['entities']]]);
     }
 
     private function legacyEdit(Request $request, array $ctx, $id)
     {
         try { $uid = Crypt::decryptString($id); } catch (\Throwable $e) { $uid = (int) $id; }
         $dealer_id = (int) $ctx['dealer_id']; $dealer_code = (string) $ctx['dealer_code'];
-        $order_details = DB::table('demand_order')->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->select('dealer.*', 'demand_order.order_remark as order_remark')->where('demand_order.id', $uid)->first();
+        $order_details = DB::table('demand_order')->join('dealer', 'dealer.id', '=', 'demand_order.dealer_id')->select('dealer.*', 'demand_order.order_remark as order_remark', 'demand_order.entity_code as order_entity_code')->where('demand_order.id', $uid)->first();
         if (!$order_details) return response()->json(['status' => false, 'message' => 'Order not found'], 404);
 
         $dealer_details = DB::table('ACC_MAST')->where('ACC_CODE', $order_details->dealer_code)->first(); $div_code_entry = DB::table('ACC_MAST')->where('ACC_CODE', $dealer_code)->first();
@@ -1853,7 +1959,7 @@ private function legacyCartLineValues(int $dealerId, string $itemCode, array $pr
             $final_out[] = $out_2;
         }
 
-        return response()->json(['status' => true, 'message' => 'Order detail (legacy)', 'data' => ['legacy' => true, 'order_id' => 'B-' . $uid, 'party_name' => $dealer_details->ACC_NAME ?? '', 'order_remark' => $order_details->order_remark ?? '', 'order_date' => $order_date ?? '', 'div_code' => $div_code, 'mktg_cat_array' => $mktg_cat_array, 'final_out' => $final_out, 'converstion_unit_item_code' => DB::table('ITEM_AUM_MAST')->groupBy('ITEM_CODE')->pluck('UMTOAUM', 'ITEM_CODE'), 'item_aum_mast_array' => DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM as v', 'ITEM_CODE as k')]]);
+        return response()->json(['status' => true, 'message' => 'Order detail (legacy)', 'data' => $this->legacyEntityInfo($this->legacyEntityCode($order_details->order_entity_code ?? '')) + ['legacy' => true, 'order_id' => 'B-' . $uid, 'party_name' => $dealer_details->ACC_NAME ?? '', 'order_remark' => $order_details->order_remark ?? '', 'order_date' => $order_date ?? '', 'div_code' => $div_code, 'mktg_cat_array' => $mktg_cat_array, 'final_out' => $final_out, 'converstion_unit_item_code' => DB::table('ITEM_AUM_MAST')->groupBy('ITEM_CODE')->pluck('UMTOAUM', 'ITEM_CODE'), 'item_aum_mast_array' => DB::table('ITEM_AUM_MAST')->pluck('UMTOAUM as v', 'ITEM_CODE as k')]]);
     }
 
 
@@ -2498,12 +2604,36 @@ public function otc1(Request $request)    { return $this->otc($request, 'OTC'); 
     {
         $ctx = $this->context($request);
         if (!$this->isLegacy($ctx)) return response()->json(['status' => false, 'message' => 'This endpoint is only available for company 405.'], 403);
+        if ((int) $ctx['role_id'] !== 37 || (string) $ctx['dealer_code'] === '00001') return response()->json(['status' => false, 'message' => 'Only depots can send orders to ERP.'], 403);
 
-        $order_no = (array) $request->input('order_no', []); $checkbox_uncheck = (array) $request->input('checkbox_uncheck', []);
+        $div_code = $this->legacyHistoryDivCode((int) $ctx['dealer_id'], (string) $ctx['dealer_code']);
+        $ids = fn (string $key) => array_values(array_filter(array_map('intval', (array) $request->input($key, [])), fn ($v) => $v > 0));
+        $scope = fn (array $ids, int $status) => DB::table('demand_order')->whereIn('id', $ids)->where('sale_div_code', $div_code)->where('dealer_id', '<>', (int) $ctx['dealer_id'])->where('send_order_erp_status', $status);
+        $now = date('Y-m-d H:i:s');
+        $mirror = Schema::hasColumn('demand_order', 'send_order_erp_status_cuurent');
+        $values = fn (int $status) => ['send_order_erp_status' => $status, 'send_order_erp_date_time' => $now] + ($mirror ? ['send_order_erp_status_cuurent' => $status] : []);
 
-        if (!empty($checkbox_uncheck)) DB::table('demand_order')->whereIn('id', $checkbox_uncheck)->update(['send_order_erp_status' => 2, 'send_order_erp_status_cuurent' => 2, 'send_order_erp_date_time' => date('Y-m-d H:i:s')]);
-        if (!empty($order_no)) DB::table('demand_order')->whereIn('id', $order_no)->update(['send_order_erp_status' => 1, 'send_order_erp_status_cuurent' => 1, 'send_order_erp_date_time' => date('Y-m-d H:i:s')]);
+        [$sent, $unsent] = DB::transaction(function () use ($ids, $scope, $values) {
+            $unsend = $ids('checkbox_uncheck');
+            $send = $ids('order_no');
+            $unsent = $unsend ? $scope($unsend, 1)->update($values(2)) : 0;
+            $sent = $send ? $scope($send, 2)->update($values(1)) : 0;
+            return [$sent, $unsent];
+        });
 
-        return response()->json(['status' => true, 'message' => 'ERP status updated', 'data' => ['marked_sent' => count($order_no), 'marked_unsent' => count($checkbox_uncheck)]]);
+        return response()->json(['status' => true, 'message' => $sent ? "{$sent} order(s) sent to ERP." : 'No orders were updated.', 'data' => ['marked_sent' => $sent, 'marked_unsent' => $unsent]]);
+    }
+
+    private function legacyHistoryDivCode(int $dealer_id, string $dealer_code): string
+    {
+        $acc_div = (string) DB::table('ACC_MAST')->where('ACC_CODE', $dealer_code)->value('DIV_CODE');
+        if ($dealer_code === '00001') {
+            return $acc_div !== '' ? $acc_div : 'JH';
+        }
+        if ($acc_div !== '') {
+            return $acc_div;
+        }
+        $main = (string) DB::table('dealer_person_login')->where('dealer_id', $dealer_id)->value('div_code_main');
+        return $main !== '' ? $main : '0';
     }
 }
