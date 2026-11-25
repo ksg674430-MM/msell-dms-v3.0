@@ -42,7 +42,7 @@ class AdminSaleStatementController extends Controller
 
         return response()->json([
             'status' => true,
-            'rows'   => DB::select("SELECT id AS value, name AS label FROM location_2 WHERE company_id = ? AND status = 1 ORDER BY name", [$ctx->company_id]),
+            'rows'   => DB::select("SELECT id AS value, name AS label FROM location_4 WHERE company_id = ? AND status = 1 ORDER BY name", [$ctx->company_id]),
         ]);
     }
 
@@ -143,8 +143,8 @@ class AdminSaleStatementController extends Controller
         $bind = [$companyId];
         $terrSql = '';
         if ($territories) {
-            $terrSql = ' AND EXISTS (SELECT 1 FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id
-                                      WHERE r.dealer_id = d.id AND v.l2_id IN (' . implode(',', array_fill(0, count($territories), '?')) . '))';
+            $terrSql = ' AND EXISTS (SELECT 1 FROM dealer_location_rate_list r JOIN location_view v ON v.l7_id = r.location_id
+                                      WHERE r.dealer_id = d.id AND v.l4_id IN (' . implode(',', array_fill(0, count($territories), '?')) . '))';
             array_push($bind, ...$territories);
         }
         $rows = DB::select(
@@ -166,7 +166,7 @@ class AdminSaleStatementController extends Controller
         $cities = [];
         foreach (array_chunk($ids, 1000) as $chunk) {
             foreach (DB::select(
-                "SELECT r.dealer_id, MIN(v.l4_name) AS city FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id
+                "SELECT r.dealer_id, MIN(v.l6_name) AS city FROM dealer_location_rate_list r JOIN location_view v ON v.l7_id = r.location_id
                   WHERE r.dealer_id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ") GROUP BY r.dealer_id",
                 $chunk
             ) as $c) $cities[(int) $c->dealer_id] = (string) $c->city;
