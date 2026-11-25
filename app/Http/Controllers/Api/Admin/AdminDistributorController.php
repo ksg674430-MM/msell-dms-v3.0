@@ -36,7 +36,7 @@ class AdminDistributorController extends Controller
                     [$ctx->company_id]
                 ),
             'territories'  => DB::select(
-                "SELECT id AS value, name AS label FROM location_2 WHERE company_id = ? AND status = 1 ORDER BY name",
+                "SELECT id AS value, name AS label FROM location_4 WHERE company_id = ? AND status = 1 ORDER BY name",
                 [$ctx->company_id]
             ),
             'distributors' => DB::select(
@@ -82,8 +82,7 @@ class AdminDistributorController extends Controller
         }
         if ($territories) {
             $in = implode(',', array_fill(0, count($territories), '?'));
-            $where[] = "(d.id IN (SELECT r.dealer_id FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id WHERE v.l2_id IN ($in))
-                        OR d.town_id IN (SELECT l4.id FROM location_4 l4 JOIN location_3 l3 ON l3.id = l4.location_3_id WHERE l3.location_2_id IN ($in)))";
+            $where[] = "(d.town_id IN ($in) OR d.id IN (SELECT r.dealer_id FROM dealer_location_rate_list r JOIN location_5 l5 ON l5.id = r.location_id WHERE l5.location_4_id IN ($in)))";
             array_push($bind, ...$territories, ...$territories);
         }
         if ($search !== '') {
@@ -114,8 +113,10 @@ class AdminDistributorController extends Controller
                 $logins[$l->dealer_id] ??= $l;
             }
             foreach (DB::select(
-                "SELECT r.dealer_id, GROUP_CONCAT(DISTINCT v.l2_name ORDER BY v.l2_name SEPARATOR ', ') AS names
-                   FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id
+                "SELECT r.dealer_id, GROUP_CONCAT(DISTINCT l4.name ORDER BY l4.name SEPARATOR ', ') AS names
+                   FROM dealer_location_rate_list r
+                   JOIN location_5 l5 ON l5.id = r.location_id
+                   JOIN location_4 l4 ON l4.id = l5.location_4_id
                   WHERE r.dealer_id IN ($in)
                   GROUP BY r.dealer_id",
                 $pageIds
@@ -125,10 +126,7 @@ class AdminDistributorController extends Controller
             $townIds = array_values(array_unique(array_filter(array_map(fn ($r) => (int) $r->town_id, $rows))));
             if ($townIds) {
                 foreach (DB::select(
-                    "SELECT l4.id, l2.name FROM location_4 l4
-                       JOIN location_3 l3 ON l3.id = l4.location_3_id
-                       JOIN location_2 l2 ON l2.id = l3.location_2_id
-                      WHERE l4.id IN (" . implode(',', array_fill(0, count($townIds), '?')) . ")",
+                    "SELECT id, name FROM location_4 WHERE id IN (" . implode(',', array_fill(0, count($townIds), '?')) . ")",
                     $townIds
                 ) as $t) {
                     $townTerritory[$t->id] = $t->name;
