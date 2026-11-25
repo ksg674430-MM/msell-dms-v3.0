@@ -205,7 +205,7 @@ class InvoiceService
             'date'                 => $now->toDateString(),
             'time'                 => $now->toTimeString(),
             'server_date'          => $now,
-            'created_by'           => (string) $order->user_id,
+            'created_by'           => '',
             'created_by_dealer_id' => (int) $order->dealer_id,
         ];
 
