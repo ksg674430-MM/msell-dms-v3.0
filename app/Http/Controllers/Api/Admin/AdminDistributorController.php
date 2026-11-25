@@ -22,17 +22,19 @@ class AdminDistributorController extends Controller
 
         return response()->json([
             'status'       => true,
-            'depots'       => DB::select(
-                "SELECT l.div_code_main AS value, MIN(CONCAT(d.dealer_code, ' - ', d.name)) AS label
-                   FROM dealer d
-                   JOIN dealer_person_login l ON l.dealer_id = d.id
-                   JOIN _role r ON r.role_id = l.role_id
-                  WHERE d.company_id = ? AND d.dealer_status = 1 AND r.rolename IN ('DEPO', 'Depo')
-                    AND COALESCE(l.div_code_main, '') <> ''
-                  GROUP BY l.div_code_main
-                  ORDER BY label",
-                [$ctx->company_id]
-            ),
+            'depots'       => $ctx->erp
+                ? DB::select("SELECT DISTINCT name AS value, name AS label FROM _div_code_master WHERE status = 1 AND name <> '' ORDER BY name")
+                : DB::select(
+                    "SELECT l.div_code_main AS value, l.div_code_main AS label
+                       FROM dealer d
+                       JOIN dealer_person_login l ON l.dealer_id = d.id
+                       JOIN _role r ON r.role_id = l.role_id
+                      WHERE d.company_id = ? AND d.dealer_status = 1 AND r.rolename IN ('DEPO', 'Depo')
+                        AND COALESCE(l.div_code_main, '') <> ''
+                      GROUP BY l.div_code_main
+                      ORDER BY l.div_code_main",
+                    [$ctx->company_id]
+                ),
             'territories'  => DB::select(
                 "SELECT id AS value, name AS label FROM location_2 WHERE company_id = ? AND status = 1 ORDER BY name",
                 [$ctx->company_id]
@@ -67,13 +69,22 @@ class AdminDistributorController extends Controller
             $bind[] = (int) $status;
         }
         if ($depots) {
-            $where[] = 'EXISTS (SELECT 1 FROM dealer_person_login l WHERE l.dealer_id = d.id AND l.div_code_main IN (' . implode(',', array_fill(0, count($depots), '?')) . '))';
+            $in = implode(',', array_fill(0, count($depots), '?'));
+            $byLogin = "d.id IN (SELECT dealer_id FROM dealer_person_login WHERE div_code_main IN ($in))";
             array_push($bind, ...$depots);
+            if ($ctx->erp) {
+                $where[] = "($byLogin OR (d.id NOT IN (SELECT dealer_id FROM dealer_person_login WHERE dealer_id IS NOT NULL AND div_code_main <> '')
+                                         AND d.dealer_code IN (SELECT ACC_CODE FROM ACC_MAST WHERE DIV_CODE IN ($in))))";
+                array_push($bind, ...$depots);
+            } else {
+                $where[] = $byLogin;
+            }
         }
         if ($territories) {
-            $where[] = 'EXISTS (SELECT 1 FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id
-                                 WHERE r.dealer_id = d.id AND v.l2_id IN (' . implode(',', array_fill(0, count($territories), '?')) . '))';
-            array_push($bind, ...$territories);
+            $in = implode(',', array_fill(0, count($territories), '?'));
+            $where[] = "(d.id IN (SELECT r.dealer_id FROM dealer_location_rate_list r JOIN location_view v ON v.l5_id = r.location_id WHERE v.l2_id IN ($in))
+                        OR d.town_id IN (SELECT l4.id FROM location_4 l4 JOIN location_3 l3 ON l3.id = l4.location_3_id WHERE l3.location_2_id IN ($in)))";
+            array_push($bind, ...$territories, ...$territories);
         }
         if ($search !== '') {
             $where[] = '(d.dealer_code LIKE ? OR d.name LIKE ? OR d.email LIKE ? OR d.other_numbers LIKE ?)';
@@ -84,7 +95,7 @@ class AdminDistributorController extends Controller
 
         $total = (int) DB::scalar("SELECT COUNT(*) FROM dealer d WHERE $sqlWhere", $bind);
         $rows = DB::select(
-            "SELECT d.id, d.dealer_code, d.name, d.email, d.other_numbers AS mobile, d.dealer_status
+            "SELECT d.id, d.dealer_code, d.name, d.email, d.other_numbers AS mobile, d.dealer_status, d.town_id
                FROM dealer d
               WHERE $sqlWhere
               ORDER BY d.id DESC
@@ -93,7 +104,7 @@ class AdminDistributorController extends Controller
         );
 
         $pageIds = array_map(fn ($r) => (int) $r->id, $rows);
-        $logins = $territoryNames = [];
+        $logins = $territoryNames = $townTerritory = $accDiv = [];
         if ($pageIds) {
             $in = implode(',', array_fill(0, count($pageIds), '?'));
             foreach (DB::select(
@@ -111,14 +122,31 @@ class AdminDistributorController extends Controller
             ) as $t) {
                 $territoryNames[$t->dealer_id] = $t->names;
             }
+            $townIds = array_values(array_unique(array_filter(array_map(fn ($r) => (int) $r->town_id, $rows))));
+            if ($townIds) {
+                foreach (DB::select(
+                    "SELECT l4.id, l2.name FROM location_4 l4
+                       JOIN location_3 l3 ON l3.id = l4.location_3_id
+                       JOIN location_2 l2 ON l2.id = l3.location_2_id
+                      WHERE l4.id IN (" . implode(',', array_fill(0, count($townIds), '?')) . ")",
+                    $townIds
+                ) as $t) {
+                    $townTerritory[$t->id] = $t->name;
+                }
+            }
+            $noDiv = array_values(array_filter($rows, fn ($r) => ($logins[$r->id]->div_code_main ?? '') === ''));
+            if ($ctx->erp && $noDiv) {
+                $accDiv = DB::table('ACC_MAST')->whereIn('ACC_CODE', array_map(fn ($r) => $r->dealer_code, $noDiv))->pluck('DIV_CODE', 'ACC_CODE')->all();
+            }
         }
 
         foreach ($rows as $r) {
             $l = $logins[$r->id] ?? null;
-            $r->div_code = $l->div_code_main ?? '';
+            $r->div_code = ($l->div_code_main ?? '') !== '' ? $l->div_code_main : (string) ($accDiv[$r->dealer_code] ?? '');
             $r->username = $l->uname ?? '';
             $r->last_login = $l->lastvisit ?? null;
-            $r->territory = $territoryNames[$r->id] ?? '';
+            $r->territory = $townTerritory[(int) $r->town_id] ?? ($territoryNames[$r->id] ?? '');
+            unset($r->town_id);
             $r->dealer_status = (int) $r->dealer_status;
         }
 
