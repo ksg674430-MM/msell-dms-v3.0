@@ -1125,31 +1125,21 @@ class ChallanController extends Controller
         $expyear = explode('-', $year);
         $ystr    = substr($expyear[0] ?? '', 2) . '-' . substr($expyear[1] ?? '', 2);
 
+        [$prefix, $width] = $companyId === 213
+            ? ["{$dpId}/{$ystr}/", 5]
+            : [(($companyId === 331) ? 'EF' : 'RPL') . "/{$dealerId}/{$year}/", 6];
+
         $last = DB::selectOne(
-            "SELECT ch_no FROM challan_order
-              WHERE ch_dealer_id = ? AND book_status = '0'
-              ORDER BY auto DESC LIMIT 1
-              FOR UPDATE",
-            [$dealerId]
+            "SELECT MAX(CAST(SUBSTRING(ch_no, ?) AS UNSIGNED)) AS n
+               FROM challan_order
+              WHERE ch_no LIKE ?
+                FOR UPDATE",
+            [strlen($prefix) + 1, $prefix . '%']
         );
 
-        $nextNum = 1;
-        if ($last && !empty($last->ch_no)) {
-            $parts = explode('/', $last->ch_no);
-            $tail  = end($parts);
-            if (is_numeric($tail)) {
-                $nextNum = ((int) $tail) + 1;
-            }
-        }
+        $nextNum = ((int) ($last->n ?? 0)) + 1;
 
-        if ($companyId === 213) {
-            $num = str_pad((string) $nextNum, 5, '0', STR_PAD_LEFT);
-            return "{$dpId}/{$ystr}/{$num}";
-        }
-
-        $num = str_pad((string) $nextNum, 6, '0', STR_PAD_LEFT);
-        $prefix = ($companyId === 331) ? 'EF' : 'RPL';
-        return "{$prefix}/{$dealerId}/{$year}/{$num}";
+        return $prefix . str_pad((string) $nextNum, $width, '0', STR_PAD_LEFT);
     }
 
     /**
