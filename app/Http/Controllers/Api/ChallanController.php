@@ -162,7 +162,7 @@ class ChallanController extends Controller
 
         // ---- Beats (field force) — DISTRIBUTOR only
         $beats = [];
-        if ($roleName === 'DISTRIBUTOR') {
+        if (strcasecmp($roleName, 'DISTRIBUTOR') === 0) {
             $beats = DB::select(
                 "SELECT DISTINCT d.user_id AS id,
                         CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name,

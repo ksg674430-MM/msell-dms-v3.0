@@ -153,7 +153,7 @@ class MenuController extends Controller
     private function allowed(array $node, string $roleName, int $companyId, bool $adminOnly = false): bool
     {
         return (!$adminOnly || !empty($node['admin']))
-            && (empty($node['roles']) || in_array(trim($roleName), array_map('trim', $node['roles']), true))
+            && (empty($node['roles']) || in_array(strtolower(trim($roleName)), array_map(fn ($r) => strtolower(trim($r)), $node['roles']), true))
             && (empty($node['companies']) || in_array($companyId, $node['companies'], true))
             && (empty($node['exclude_companies']) || !in_array($companyId, $node['exclude_companies'], true));
     }
