@@ -240,6 +240,7 @@ Route::prefix('dms-reports')->group(function () {
     Route::get('/filters/skus',                          [BalanceStockController::class, 'skus']);            // filter: SKU
     Route::delete('/reports/balance-stock/{id}', [BalanceStockController::class, 'destroy']);// delete stock
     Route::post('/reports/balance-stock/edit', [BalanceStockController::class, 'bulkUpdate']);//  edit stock
+    Route::post('/reports/current-stock/{id}', [BalanceStockController::class, 'currentStockUpdate'])->whereNumber('id');
     Route::post('/reports/balance-stock/delete', [BalanceStockController::class, 'destroyMany']);
 
     // --------------------------------------------------------

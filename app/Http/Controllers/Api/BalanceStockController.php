@@ -748,6 +748,32 @@ class BalanceStockController extends Controller
         ]);
     }
 
+    public function currentStockUpdate(Request $request, int $id): JsonResponse
+    {
+        $user      = $request->user();
+        $dealerId  = (int) $user->dealer_id;
+        $companyId = (int) ($user->company_id ?? 0);
+
+        $data = $request->validate([
+            'qty'      => 'required|numeric|min:0',
+            'batch_no' => 'nullable|string|max:50',
+        ]);
+
+        $existing = DB::selectOne("SELECT * FROM stock WHERE id = ? AND dealer_id = ? LIMIT 1", [$id, $dealerId]);
+        if (!$existing) {
+            return response()->json(['status' => false, 'message' => 'Stock row not found.'], 404);
+        }
+
+        $update = ['qty' => (float) $data['qty']];
+        if ($companyId === 40 && array_key_exists('batch_no', $data)) {
+            $update['batch_no'] = (string) ($data['batch_no'] ?? '');
+        }
+
+        DB::transaction(fn () => app(StockService::class)->editRow($dealerId, $companyId, $existing, $update, false));
+
+        return response()->json(['status' => true, 'message' => 'Stock successfully Updated']);
+    }
+
     public function bulkUpdate(Request $request): JsonResponse
     {
         $user      = $request->user();
