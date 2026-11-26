@@ -604,6 +604,7 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
     Route::get   ('/tax-invoice',     [QuickOrderController::class, 'taxInvoice']);
+    Route::get   ('/tax-invoice/pdf', [QuickOrderController::class, 'taxInvoicePdf']);
     Route::get('/current-status', [QuickOrderController::class, 'legacyCurrentStatus']);             // perfoma / view order
     Route::post('/legacy/send-to-erp', [QuickOrderController::class, 'legacySendOrderToErp']);
     // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF

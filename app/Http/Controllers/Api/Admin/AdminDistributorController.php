@@ -26,12 +26,14 @@ class AdminDistributorController extends Controller
             'status'       => true,
             'depots'       => $ctx->erp
                 ? DB::select(
-                    "SELECT m.name AS value, CONCAT_WS(' - ', m.name, MIN(d.name)) AS label
+                    "SELECT m.name AS value, CONCAT_WS(' - ', m.name, MIN(dep.name)) AS label
                        FROM _div_code_master m
-                       LEFT JOIN (dealer_person_login l
-                                  JOIN _role r ON r.role_id = l.role_id AND r.rolename IN ('DEPO', 'Depo')
-                                  JOIN dealer d ON d.id = l.dealer_id AND d.company_id = ? AND d.dealer_status = 1)
-                              ON l.div_code_main = m.name
+                       LEFT JOIN (SELECT l.div_code_main AS div_code, MIN(d.name) AS name
+                                    FROM dealer_person_login l
+                                    JOIN dealer d ON d.id = l.dealer_id AND d.company_id = ? AND d.dealer_status = 1
+                                   WHERE l.div_code_main <> ''
+                                     AND (l.role_id = 37 OR l.role_id IN (SELECT role_id FROM _role WHERE rolename IN ('DEPO', 'Depo')))
+                                   GROUP BY l.div_code_main) dep ON dep.div_code = m.name
                       WHERE m.status = 1 AND m.name <> ''
                       GROUP BY m.name
                       ORDER BY m.name",

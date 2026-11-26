@@ -1153,6 +1153,56 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
 
     public function taxInvoice(Request $request)
     {
+        $data = $this->taxInvoiceData($request);
+        return $data instanceof \Illuminate\Http\JsonResponse ? $data : response()->json(['status' => true, 'data' => $data]);
+    }
+
+    public function taxInvoicePdf(Request $request)
+    {
+        $data = $this->taxInvoiceData($request);
+        if ($data instanceof \Illuminate\Http\JsonResponse) return $data;
+
+        $items = collect($data['items']);
+        $totals = [];
+        foreach (['value', 'trade_disc', 'scheme_disc', 'special_disc', 'cash_disc', 'addl_trade_disc', 'taxable', 'cgst', 'sgst', 'igst'] as $k) {
+            $totals[$k] = round($items->sum($k), 2);
+        }
+        $gst = $items->groupBy(fn ($i) => $i['gst_percent'] . '|' . $i['hsn_code'])->map(fn ($g) => [
+            'gst' => $g->first()['gst_percent'],
+            'hsn' => $g->first()['hsn_code'],
+            'taxable' => round($g->sum('taxable'), 2),
+            'cgst' => round($g->sum('cgst'), 2),
+            'sgst' => round($g->sum('sgst'), 2),
+            'igst' => round($g->sum('igst'), 2),
+        ])->values();
+        $grand = (int) round($totals['taxable'] + $totals['cgst'] + $totals['sgst'] + $totals['igst']);
+
+        $name = preg_replace('/[^A-Za-z0-9_-]+/', '-', $data['invoice_no']) . '.pdf';
+        return PDF::loadView('pdf.erpTaxInvoice', ['inv' => $data, 'totals' => $totals, 'gst' => $gst, 'grand' => $grand, 'words' => self::inWords($grand) . ' Only'])
+            ->setPaper('a4', 'landscape')
+            ->download($name);
+    }
+
+    public static function inWords(int $n): string
+    {
+        $ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+        $tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+        $two = fn (int $x) => $x < 20 ? $ones[$x] : trim($tens[intdiv($x, 10)] . ' ' . $ones[$x % 10]);
+        $n = abs($n);
+        if ($n === 0) return 'Zero';
+        $parts = [];
+        foreach ([[10000000, 'Crore'], [100000, 'Lakh'], [1000, 'Thousand'], [100, 'Hundred']] as [$size, $label]) {
+            if ($n >= $size) {
+                $parts[] = ($size === 10000000 ? self::inWords(intdiv($n, $size)) : $two(intdiv($n, $size))) . ' ' . $label;
+                $n %= $size;
+            }
+        }
+        if ($n) $parts[] = $two($n);
+        return implode(' ', $parts);
+    }
+
+    private function taxInvoiceData(Request $request)
+    {
         $ctx = $this->context($request);
         if (!$this->isLegacy($ctx)) {
             return response()->json(['status' => false, 'message' => 'Tax invoice is not available for your company.'], 404);
@@ -1212,7 +1262,7 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
         $parts = explode('Y-', (string) $head->VRNO, 2);
         $party = DB::table('ACC_MAST')->where('ACC_CODE', $head->ACC_CODE)->first(['ACC_CODE', 'ACC_NAME', 'STNO', 'ADD1', 'ADD2', 'CITY_CODE', 'DISTRICT_CODE', 'STATE_CODE']);
 
-        return response()->json(['status' => true, 'data' => [
+        return [
             'invoice_no' => count($parts) === 2 ? sprintf('%s-%02dY-%s', $parts[0], $fyEnd % 100, $parts[1]) : $head->VRNO,
             'vrno' => $head->VRNO,
             'invoice_date' => $head->VRDATE,
@@ -1222,8 +1272,8 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
             'marka_no' => $head->IRFIELD4,
             'cartons' => $head->IRFIELD3,
             'party' => $party,
-            'items' => $items,
-        ]]);
+            'items' => $items->all(),
+        ];
     }
 
     public function invoiceDetails(Request $request)
