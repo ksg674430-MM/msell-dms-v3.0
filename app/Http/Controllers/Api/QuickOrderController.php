@@ -1128,6 +1128,7 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
         ->orderBy('h.VRNO', 'ASC')
         ->select([
             DB::raw('h.VRNO          as invoice_no_p'),
+            DB::raw('h.DIV_CODE      as div_code'),
             DB::raw('h.VRDATE_FILTER as sale_date'),
             DB::raw('h.DRAMT         as dramt'),
             DB::raw('NULL            as order_ids'),
@@ -1149,6 +1150,81 @@ private function legacyCommonDiscount(int $dealerId, string $productId, float $t
         ],
     ]);
 }
+
+    public function taxInvoice(Request $request)
+    {
+        $ctx = $this->context($request);
+        if (!$this->isLegacy($ctx)) {
+            return response()->json(['status' => false, 'message' => 'Tax invoice is not available for your company.'], 404);
+        }
+        $vrno = trim((string) $request->query('vrno', ''));
+        $div = trim((string) $request->query('div_code', ''));
+        if ($vrno === '' || $div === '') {
+            return response()->json(['status' => false, 'message' => 'Invoice number and division are required.'], 422);
+        }
+
+        $head = DB::table('ITEMTRAN_HEAD')
+            ->where('VRNO', $vrno)->where('DIV_CODE', $div)->where('ACC_CODE', (string) $ctx['dealer_code'])
+            ->first(['VRNO', 'DIV_CODE', 'ACC_CODE', 'VRDATE', 'VRDATE_FILTER', 'LRNO', 'LRDATE', 'ORDER_VRNO', 'DO_VRNO', 'IRFIELD3', 'IRFIELD4']);
+        if (!$head) {
+            return response()->json(['status' => false, 'message' => 'Invoice not found.'], 404);
+        }
+
+        $items = DB::table('ITEMTRAN_BODY as b')
+            ->leftJoin('ITEM_MAST as m', 'm.ITEM_CODE', '=', 'b.ITEM_CODE')
+            ->where('b.VRNO', $vrno)->where('b.DIV_CODE', $div)
+            ->orderBy('b.ITEM_CODE')->orderBy('b.id')
+            ->get(['b.ITEM_CODE', 'm.ITEM_NAME', 'b.BATCHNO', 'b.MFG_DATE', 'm.SIZE_UM', 'm.NGPSIZE', 'm.HSN_CODE', 'b.MRP', 'b.RATE', 'b.QTYISSUED', 'b.QTYFREE',
+                   'b.AFIELD2', 'b.AFIELD3', 'b.AFIELD4', 'b.AFIELD5', 'b.AFIELD6', 'b.VALISSUED', 'b.TI_RATE', 'b.GST_PERCENTAGE', 'b.CGST_PERCENTAGE', 'b.SGST_PERCENTAGE',
+                   'b.CGST_AMOUNT', 'b.SGST_AMOUNT', 'b.IGST_AMOUNT'])
+            ->map(function ($r) {
+                $sold = (float) $r->QTYISSUED - (float) $r->QTYFREE;
+                return [
+                    'item_code' => (string) $r->ITEM_CODE,
+                    'item_name' => trim(explode(',', (string) $r->ITEM_NAME)[0]),
+                    'batch_no' => (string) $r->BATCHNO,
+                    'mfg_date' => (string) $r->MFG_DATE,
+                    'size' => trim($r->NGPSIZE . ' ' . $r->SIZE_UM),
+                    'hsn_code' => (string) $r->HSN_CODE,
+                    'mrp' => (float) $r->MRP,
+                    'rate' => (float) $r->RATE,
+                    'sold' => $sold,
+                    'free' => (float) $r->QTYFREE,
+                    'value' => round($sold * (float) $r->RATE, 2),
+                    'trade_disc' => (float) $r->AFIELD2,
+                    'trade_rate' => (float) $r->TI_RATE,
+                    'scheme_disc' => (float) $r->AFIELD3,
+                    'special_disc' => (float) $r->AFIELD4,
+                    'cash_disc' => (float) $r->AFIELD5,
+                    'addl_trade_disc' => (float) $r->AFIELD6,
+                    'taxable' => (float) $r->VALISSUED,
+                    'gst_percent' => (float) $r->GST_PERCENTAGE,
+                    'cgst_percent' => (float) $r->CGST_PERCENTAGE,
+                    'sgst_percent' => (float) $r->SGST_PERCENTAGE,
+                    'cgst' => (float) $r->CGST_AMOUNT,
+                    'sgst' => (float) $r->SGST_AMOUNT,
+                    'igst' => (float) $r->IGST_AMOUNT,
+                ];
+            });
+
+        $date = $head->VRDATE_FILTER ? strtotime($head->VRDATE_FILTER) : time();
+        $fyEnd = (int) date('y', $date) + ((int) date('n', $date) >= 4 ? 1 : 0);
+        $parts = explode('Y-', (string) $head->VRNO, 2);
+        $party = DB::table('ACC_MAST')->where('ACC_CODE', $head->ACC_CODE)->first(['ACC_CODE', 'ACC_NAME', 'STNO', 'ADD1', 'ADD2', 'CITY_CODE', 'DISTRICT_CODE', 'STATE_CODE']);
+
+        return response()->json(['status' => true, 'data' => [
+            'invoice_no' => count($parts) === 2 ? sprintf('%s-%02dY-%s', $parts[0], $fyEnd % 100, $parts[1]) : $head->VRNO,
+            'vrno' => $head->VRNO,
+            'invoice_date' => $head->VRDATE,
+            'gr_no' => $head->LRNO,
+            'gr_date' => $head->LRDATE,
+            'order_no' => trim($head->ORDER_VRNO . '-' . $head->DO_VRNO, '-'),
+            'marka_no' => $head->IRFIELD4,
+            'cartons' => $head->IRFIELD3,
+            'party' => $party,
+            'items' => $items,
+        ]]);
+    }
 
     public function invoiceDetails(Request $request)
     {
@@ -2196,23 +2272,14 @@ private function itemProdCode(string $itemCode): array
         }
 
         // 6. Ledger Details & Banners
-        $image_dyn = DB::table('image_mast')
-            ->where('status', 1)
-            ->where('img_locn', 'Dashboard')
-            ->where('company_id', $ctx['company_id'])   
-            ->orderBy('id', 'DESC')
-            ->get();
-
-        // ✅ FIX: Yahan ab local URL generate hoga production URL ki jagah
-        $banners = $image_dyn->map(function ($img) {
-            $filename = ltrim($img->img, '/');
-            $encoded  = str_replace(' ', '%20', $filename);
-            
-            return [
-                'url'   => url("/baidyanath_images/{$encoded}"), 
+        $banners = collect(@scandir(public_path('baidyanath_images')) ?: [])
+            ->filter(fn ($f) => in_array(strtolower(pathinfo($f, PATHINFO_EXTENSION)), ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4'], true))
+            ->sort(SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->map(fn ($filename) => [
+                'url'   => url('/baidyanath_images/' . rawurlencode($filename)),
                 'video' => strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'mp4',
-            ];
-        });
+            ]);
 
         $entries = DB::table('dealer_ledger_busy_details')->where('dealer_id', $dealer_id)->orderBy('trans_date')->orderBy('id')->get(['trans_date', 'vocuher_number', 'vocuher_type', 'narration', 'amount', 'op_bal']);
         $opening = round((float) $entries->whereNull('trans_date')->sum('op_bal'), 2);

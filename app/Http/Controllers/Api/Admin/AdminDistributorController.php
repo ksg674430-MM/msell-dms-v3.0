@@ -25,9 +25,20 @@ class AdminDistributorController extends Controller
         return response()->json([
             'status'       => true,
             'depots'       => $ctx->erp
-                ? DB::select("SELECT DISTINCT name AS value, name AS label FROM _div_code_master WHERE status = 1 AND name <> '' ORDER BY name")
+                ? DB::select(
+                    "SELECT m.name AS value, CONCAT_WS(' - ', m.name, MIN(d.name)) AS label
+                       FROM _div_code_master m
+                       LEFT JOIN (dealer_person_login l
+                                  JOIN _role r ON r.role_id = l.role_id AND r.rolename IN ('DEPO', 'Depo')
+                                  JOIN dealer d ON d.id = l.dealer_id AND d.company_id = ? AND d.dealer_status = 1)
+                              ON l.div_code_main = m.name
+                      WHERE m.status = 1 AND m.name <> ''
+                      GROUP BY m.name
+                      ORDER BY m.name",
+                    [$ctx->company_id]
+                )
                 : DB::select(
-                    "SELECT l.div_code_main AS value, l.div_code_main AS label
+                    "SELECT l.div_code_main AS value, CONCAT(l.div_code_main, ' - ', MIN(d.name)) AS label
                        FROM dealer d
                        JOIN dealer_person_login l ON l.dealer_id = d.id
                        JOIN _role r ON r.role_id = l.role_id

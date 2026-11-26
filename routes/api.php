@@ -331,6 +331,7 @@ Route::get ('/sale-wise-invoice/outstanding', [SaleWiseInvoiceController::class,
     Route::get ('/company-payments/banks', [CompanyPaymentController::class, 'banks']);
     Route::post('/company-payments',       [CompanyPaymentController::class, 'store']);
     Route::get ('/admin/dashboard',                     [AdminDashboardController::class, 'index']);
+    Route::get ('/admin/dashboard/details',             [AdminDashboardController::class, 'details']);
     Route::get ('/admin/logs',                          [AdminLogViewerController::class, 'index']);
     Route::get ('/admin/logs/download',                 [AdminLogViewerController::class, 'download']);
     Route::get ('/admin/distributors/options',          [AdminDistributorController::class, 'options']);
@@ -602,6 +603,7 @@ Route::middleware('auth:sanctum')->prefix('quick-orders')->group(function () {
     Route::post  ('/cart-data',       [QuickOrderController::class, 'cartDataForModal']); // cart modal
     Route::delete('/cart-item',       [QuickOrderController::class, 'deleteCartItem']);   // delete row from cart
     Route::get   ('/invoice-details', [QuickOrderController::class, 'invoiceDetails']);
+    Route::get   ('/tax-invoice',     [QuickOrderController::class, 'taxInvoice']);
     Route::get('/current-status', [QuickOrderController::class, 'legacyCurrentStatus']);             // perfoma / view order
     Route::post('/legacy/send-to-erp', [QuickOrderController::class, 'legacySendOrderToErp']);
     // Route::get   ('/{id}/pdf',        [QuickOrderController::class, 'downloadPdf']);      // perfoma PDF
