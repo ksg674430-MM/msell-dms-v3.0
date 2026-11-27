@@ -36,10 +36,12 @@ class AdminProductMasterController extends Controller
         return response()->json([
             'status' => true,
             'rows'   => DB::select(
-                "SELECT id, name, itemcode, hsn_code, gst_percent AS tax
-                   FROM catalog_product
-                  WHERE company_id = ? AND status = 1
-                  ORDER BY created_at DESC, id DESC",
+                "SELECT cp.id, cp.name, cp.itemcode, cp.hsn_code, cp.gst_percent AS tax, COALESCE(pc.PROD_CATG_NAME, im.PROD_CATG, '') AS category
+                   FROM catalog_product cp
+                   LEFT JOIN ITEM_MAST im ON im.ITEM_CODE = cp.itemcode
+                   LEFT JOIN PROD_CATG_MAST pc ON pc.PROD_CATG = im.PROD_CATG
+                  WHERE cp.company_id = ? AND cp.status = 1
+                  ORDER BY cp.created_at DESC, cp.id DESC",
                 [$ctx->company_id]
             ),
         ]);
@@ -66,7 +68,14 @@ class AdminProductMasterController extends Controller
             'updated_at'  => now(),
             'updated_by'  => $ctx->dp_id,
         ]);
-        $row = DB::selectOne("SELECT id, name, itemcode, hsn_code, gst_percent AS tax FROM catalog_product WHERE id = ? AND company_id = ? AND status = 1", [$id, $ctx->company_id]);
+        $row = DB::selectOne(
+            "SELECT cp.id, cp.name, cp.itemcode, cp.hsn_code, cp.gst_percent AS tax, COALESCE(pc.PROD_CATG_NAME, im.PROD_CATG, '') AS category
+               FROM catalog_product cp
+               LEFT JOIN ITEM_MAST im ON im.ITEM_CODE = cp.itemcode
+               LEFT JOIN PROD_CATG_MAST pc ON pc.PROD_CATG = im.PROD_CATG
+              WHERE cp.id = ? AND cp.company_id = ? AND cp.status = 1",
+            [$id, $ctx->company_id]
+        );
         if (!$row) return response()->json(['status' => false, 'message' => 'Item not found.'], 404);
 
         return response()->json(['status' => true, 'message' => $updated ? 'Item updated.' : 'No changes to save.', 'row' => $row]);
